@@ -18,7 +18,7 @@ CodexForge is an early stage open source project. It currently focuses on local 
 - Frontend: React + Vite
 - Backend: Python FastAPI
 - Database: SQLite
-- Default workspace root: `C:\CodexProjects`
+- Canonical workspace root: `Z:\CodexProjects`
 
 ## Safety Model
 
@@ -29,49 +29,50 @@ CodexForge is an early stage open source project. It currently focuses on local 
 - Project access is limited to the configured workspace root.
 - Folder creation sanitizes project names and prevents path traversal.
 
-## Windows Setup
+## Windows / Icefields Setup
 
 Open two PowerShell terminals from this repository.
+
+CodexForge is configured for projects under `Z:\CodexProjects`.
 
 ### Backend
 
 ```powershell
 cd backend
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install fastapi uvicorn
-python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+.\.venv\Scripts\python.exe -m pip install -r requirements.lock.txt
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-The API will run at `http://127.0.0.1:8000`.
+If `requirements.lock.txt` is not present, install from `requirements.txt` instead. The API runs at `http://127.0.0.1:8000`.
 
 ### Frontend
 
 ```powershell
 cd frontend
-npm install
-npm run dev
+npm.cmd install --ignore-scripts
+npm.cmd run dev
 ```
 
-The app will run at the Vite URL shown in the terminal, usually `http://127.0.0.1:5173`.
+The app runs at `http://127.0.0.1:5173`.
 
 ## Notes
 
 - CodexForge stores its SQLite database at `backend/data/codexforge.db`.
-- The default workspace root is `C:\CodexProjects`. If it does not exist, the dashboard shows a clear message and does not create it until you create a project.
+- The canonical workspace root is `Z:\CodexProjects`. If it does not exist, the dashboard shows a clear message and does not create it until you create a project.
 - Creating a project will create the configured workspace root folder if needed.
 - The scanner highlights files and patterns for review; it does not claim that every finding is malicious.
 - The AGENTS.md generator previews Markdown before writing. Existing AGENTS.md files require explicit overwrite confirmation.
 
 ## Manual Test Notes
 
-Use a small throwaway project folder under `C:\CodexProjects` for these checks.
+Use a small throwaway project folder under `Z:\CodexProjects` for these checks.
 
 1. Create a project:
    - Start the backend and frontend.
    - Enter a project name, description, and project type.
    - Select Create.
-   - Confirm a sanitized folder appears under `C:\CodexProjects` and the dashboard lists it by absolute path.
+   - Confirm a sanitized folder appears under `Z:\CodexProjects` and the dashboard lists it by absolute path.
 
 2. Preview AGENTS.md:
    - Select the test project.
@@ -82,7 +83,7 @@ Use a small throwaway project folder under `C:\CodexProjects` for these checks.
 3. Write AGENTS.md:
    - After previewing, select Write AGENTS.md.
    - Confirm the success message appears.
-   - Confirm `C:\CodexProjects\<ProjectName>\AGENTS.md` exists and contains the previewed sections.
+   - Confirm `Z:\CodexProjects\<ProjectName>\AGENTS.md` exists and contains the previewed sections.
 
 4. Confirm overwrite behavior:
    - With `AGENTS.md` already present, edit a field and preview again.
