@@ -327,6 +327,7 @@ function ScanReport({ result }) {
       {result ? (
         <>
           <ScanSummary report={report} risk={result.overall_risk} />
+          <RiskExplanation report={report} risk={result.overall_risk} />
           <div className="scan-detail-toggles">
             <PathDetails title="Reviewed files" items={report.reviewedFiles} emptyText="No reviewed files recorded for this scan." />
             <PathDetails title="Ignored files" items={report.ignoredFiles} emptyText="No files ignored by .codexforgeignore." />
@@ -345,6 +346,21 @@ function ScanReport({ result }) {
         </div>
       ) : null}
       {result ? <p className="review-note">Review high severity items first, then lifecycle scripts and files that launch processes or fetch remote content.</p> : null}
+    </section>
+  );
+}
+
+function RiskExplanation({ report, risk }) {
+  const reasons = buildRiskReasons(report, risk || "none");
+
+  return (
+    <section className="risk-explanation">
+      <h3>Why this risk?</h3>
+      <ul>
+        {reasons.map((reason) => (
+          <li key={reason}>{reason}</li>
+        ))}
+      </ul>
     </section>
   );
 }
@@ -592,6 +608,7 @@ function buildScanReport(result) {
   const executableFindings = findings.filter((finding) => finding.type === "executable-or-script-file");
   const lifecycleFindings = findings.filter((finding) => finding.type === "package-lifecycle-script" || lifecyclePaths.has(finding.path));
   const lockfileFindings = findings.filter((finding) => finding.type === "lockfile" || lockfilePaths.has(finding.path));
+  const findingTypeCounts = summarizeFindingTypes(findings);
   const metadataFindings = findings.filter((finding) => {
     if (finding.type === "secret-looking-file" || finding.type === "executable-or-script-file") return false;
     if (finding.type === "package-lifecycle-script" || lifecyclePaths.has(finding.path)) return false;
@@ -610,6 +627,7 @@ function buildScanReport(result) {
     lifecycleScripts,
     lifecycleFindings,
     lockfileFindings,
+    findingTypeCounts,
     secretFindings,
     executableFindings,
     metadataFindings,
@@ -620,6 +638,45 @@ function buildScanReport(result) {
 
 function uniquePaths(paths) {
   return Array.from(new Set(paths.filter(Boolean)));
+}
+
+function buildRiskReasons(report, risk) {
+  if (risk === "high" || risk === "medium") {
+    const contributors = formatTopFindingTypes(report.findingTypeCounts);
+    if (contributors) return [`Main contributors: ${contributors}.`];
+    if (report.manifests.length > 0 && report.lockfiles.length === 0) return ["Manifest files were found without matching lockfiles."];
+    return ["Risk is based on scanner metadata for this project."];
+  }
+
+  if (risk === "low") {
+    const reasons = [];
+    if (report.lifecycleScripts.length === 0) reasons.push("No package lifecycle scripts found.");
+    if (report.secretFindings.length === 0) reasons.push("No secret-looking files found.");
+    if (report.executableFindings.length === 0) reasons.push("No executable files found.");
+    if (report.manifests.length > 0 || report.lockfiles.length > 0) reasons.push("Manifests and lockfiles were reviewed.");
+    if (report.ignoredFiles.length > 0) reasons.push("Ignored files are neutral and not counted as suspicious by default.");
+    return reasons.length > 0 ? reasons : ["Only low-risk review prompts were found."];
+  }
+
+  if (report.ignoredFiles.length > 0) return ["No scanner findings contributed to risk. Ignored files are neutral by default."];
+  return ["No scanner findings contributed to risk."];
+}
+
+function summarizeFindingTypes(findings) {
+  return findings.reduce((summary, finding) => {
+    const type = finding.type || "unknown";
+    summary[type] = (summary[type] || 0) + 1;
+    return summary;
+  }, {});
+}
+
+function formatTopFindingTypes(summary) {
+  const entries = Object.entries(summary || {})
+    .filter(([, count]) => count > 0)
+    .sort(([, leftCount], [, rightCount]) => rightCount - leftCount)
+    .slice(0, 3);
+
+  return entries.map(([type, count]) => `${type}: ${count}`).join(", ");
 }
 
 function formatDate(value) {

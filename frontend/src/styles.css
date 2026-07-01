@@ -282,6 +282,32 @@ pre {
   font-weight: 700;
 }
 
+.risk-explanation {
+  border: 1px solid #d6dee1;
+  border-radius: 8px;
+  background: #f8fafb;
+  margin: -4px 0 14px;
+  padding: 12px;
+}
+
+.risk-explanation h3 {
+  margin-top: 0;
+}
+
+.risk-explanation ul {
+  color: #415158;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.risk-explanation li {
+  margin-bottom: 4px;
+}
+
+.risk-explanation li:last-child {
+  margin-bottom: 0;
+}
+
 .scan-detail-toggles {
   display: grid;
   gap: 8px;
