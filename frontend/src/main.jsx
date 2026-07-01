@@ -362,7 +362,7 @@ function ScanSummary({ report, risk }) {
       </div>
       <div>
         <span className="summary-label">Reviewed files</span>
-        <strong>{report.reviewedFiles.length}</strong>
+        <strong>{report.reviewedFileCount}</strong>
       </div>
       <div>
         <span className="summary-label">Ignored</span>
@@ -539,13 +539,25 @@ function History({ scans }) {
     <section className="panel">
       <h2>Scan History</h2>
       <div className="history-list">
-        {scans.map((scan) => (
+        {scans.map((scan, index) => {
+          const previousScan = scans[index + 1];
+          const riskChanged = previousScan && previousScan.overall_risk !== scan.overall_risk;
+          return (
           <div className="history-row" key={scan.id}>
-            <span>{formatDate(scan.scan_date)}</span>
+            <div>
+              <strong>{formatDate(scan.scan_date)}</strong>
+              <span>{formatFindingSummary(scan.findingSummary)}</span>
+            </div>
             <span className={`risk risk-${scan.overall_risk}`}>{scan.overall_risk}</span>
-            <span>{scan.findings.length} findings</span>
+            <div className="history-counts">
+              <span>{scan.findingCount ?? scan.findings.length} findings</span>
+              <span>{scan.reviewedFileCount ?? 0} reviewed</span>
+              <span>{scan.ignoredFileCount ?? 0} ignored</span>
+            </div>
+            {riskChanged ? <span className="risk-change">Changed from {previousScan.overall_risk}</span> : null}
           </div>
-        ))}
+          );
+        })}
         {scans.length === 0 ? <p className="muted">No scans saved yet.</p> : null}
       </div>
     </section>
@@ -587,10 +599,11 @@ function buildScanReport(result) {
     return true;
   });
 
-  const reviewedFiles = uniquePaths([...findings.map((finding) => finding.path), ...manifests, ...lockfiles, ...secretFiles]);
+  const reviewedFiles = result?.reviewedFiles || uniquePaths([...findings.map((finding) => finding.path), ...manifests, ...lockfiles, ...secretFiles]);
 
   return {
-    totalFindings: findings.length,
+    totalFindings: result?.findingCount ?? findings.length,
+    reviewedFileCount: result?.reviewedFileCount ?? reviewedFiles.length,
     reviewedFiles,
     manifests,
     lockfiles,
@@ -612,6 +625,14 @@ function uniquePaths(paths) {
 function formatDate(value) {
   if (!value) return "Never";
   return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+}
+
+function formatFindingSummary(summary) {
+  if (!summary || Object.keys(summary).length === 0) return "No finding types recorded";
+  return Object.entries(summary)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([type, count]) => `${type}: ${count}`)
+    .join(", ");
 }
 
 createRoot(document.getElementById("root")).render(<App />);

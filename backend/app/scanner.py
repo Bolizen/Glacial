@@ -67,6 +67,7 @@ def scan_project(project_path: Path) -> dict[str, Any]:
     lifecycle_scripts: list[dict[str, str]] = []
     secret_files: list[str] = []
     ignored_files: list[str] = []
+    reviewed_files: list[str] = []
     ignore_patterns = _load_ignore_patterns(project_path)
 
     for current_root, dirs, files in os.walk(project_path):
@@ -84,6 +85,7 @@ def scan_project(project_path: Path) -> dict[str, Any]:
                 ignored_files.append(relative_path)
                 continue
 
+            reviewed_files.append(relative_path)
             lower_name = filename.lower()
             suffix = file_path.suffix.lower()
             is_secret_file = _is_secret_file(lower_name, suffix)
@@ -135,6 +137,8 @@ def scan_project(project_path: Path) -> dict[str, Any]:
         "lifecycleScripts": sorted(lifecycle_scripts, key=lambda script: (script["path"], script["script"])),
         "secretFiles": sorted(secret_files),
         "ignoredFiles": sorted(ignored_files),
+        "reviewedFiles": sorted(reviewed_files),
+        "reviewedFileCount": len(reviewed_files),
         "zone": _infer_zone(project_path),
     }
 

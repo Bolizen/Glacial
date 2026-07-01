@@ -160,10 +160,32 @@ def run_scan(payload: ProjectPathRequest) -> dict[str, object]:
     project = _ensure_project(payload.project_path)
     result = scan_project(project)
     now = _now()
+    finding_summary = _finding_summary(result["findings"])
     with get_connection() as connection:
         cursor = connection.execute(
-            "INSERT INTO scans (project_path, scan_date, overall_risk, findings_json) VALUES (?, ?, ?, ?)",
-            (str(project), now, result["overall_risk"], json.dumps(result["findings"])),
+            """
+            INSERT INTO scans (
+                project_path,
+                scan_date,
+                overall_risk,
+                findings_json,
+                finding_count,
+                reviewed_file_count,
+                ignored_file_count,
+                finding_summary_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(project),
+                now,
+                result["overall_risk"],
+                json.dumps(result["findings"]),
+                len(result["findings"]),
+                result["reviewedFileCount"],
+                len(result["ignoredFiles"]),
+                json.dumps(finding_summary),
+            ),
         )
     return {
         "id": cursor.lastrowid,
@@ -171,11 +193,16 @@ def run_scan(payload: ProjectPathRequest) -> dict[str, object]:
         "scan_date": now,
         "overall_risk": result["overall_risk"],
         "findings": result["findings"],
+        "findingCount": len(result["findings"]),
+        "findingSummary": finding_summary,
         "manifests": result["manifests"],
         "lockfiles": result["lockfiles"],
         "lifecycleScripts": result["lifecycleScripts"],
         "secretFiles": result["secretFiles"],
         "ignoredFiles": result["ignoredFiles"],
+        "ignoredFileCount": len(result["ignoredFiles"]),
+        "reviewedFiles": result["reviewedFiles"],
+        "reviewedFileCount": result["reviewedFileCount"],
         "zone": result["zone"],
     }
 
@@ -256,3 +283,11 @@ def _agents_path(project: Path) -> Path:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _finding_summary(findings: list[dict[str, str]]) -> dict[str, int]:
+    summary: dict[str, int] = {}
+    for finding in findings:
+        finding_type = finding.get("type") or "unknown"
+        summary[finding_type] = summary.get(finding_type, 0) + 1
+    return summary

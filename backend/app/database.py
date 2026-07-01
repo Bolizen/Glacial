@@ -61,6 +61,7 @@ def init_db() -> None:
             "UPDATE settings SET value = ? WHERE key = ? AND value = ?",
             (DEFAULT_WORKSPACE_ROOT, WORKSPACE_ROOT_SETTING, LEGACY_DEFAULT_PROJECT_ROOT),
         )
+        _ensure_scan_history_columns(connection)
 
 
 def get_setting(key: str) -> str | None:
@@ -104,12 +105,20 @@ def note_counts() -> dict[str, int]:
 
 
 def row_to_scan(row: sqlite3.Row) -> dict[str, Any]:
+    findings = [_normalize_finding(finding) for finding in json.loads(row["findings_json"])]
+    finding_count = _row_value(row, "finding_count", len(findings))
+    if finding_count == 0 and findings:
+        finding_count = len(findings)
     return {
         "id": row["id"],
         "project_path": row["project_path"],
         "scan_date": row["scan_date"],
         "overall_risk": row["overall_risk"],
-        "findings": [_normalize_finding(finding) for finding in json.loads(row["findings_json"])],
+        "findings": findings,
+        "findingCount": finding_count,
+        "reviewedFileCount": _row_value(row, "reviewed_file_count", 0),
+        "ignoredFileCount": _row_value(row, "ignored_file_count", 0),
+        "findingSummary": _load_finding_summary(row, findings),
     }
 
 
@@ -120,3 +129,43 @@ def _normalize_finding(finding: dict[str, Any]) -> dict[str, Any]:
         "severity": finding.get("severity") or "low",
         "explanation": finding.get("explanation") or "Review this finding manually.",
     }
+
+
+def _ensure_scan_history_columns(connection: sqlite3.Connection) -> None:
+    columns = {row["name"] for row in connection.execute("PRAGMA table_info(scans)").fetchall()}
+    additions = {
+        "finding_count": "INTEGER NOT NULL DEFAULT 0",
+        "reviewed_file_count": "INTEGER NOT NULL DEFAULT 0",
+        "ignored_file_count": "INTEGER NOT NULL DEFAULT 0",
+        "finding_summary_json": "TEXT NOT NULL DEFAULT '{}'",
+    }
+    for name, definition in additions.items():
+        if name not in columns:
+            connection.execute(f"ALTER TABLE scans ADD COLUMN {name} {definition}")
+
+
+def _row_value(row: sqlite3.Row, key: str, default: Any) -> Any:
+    return row[key] if key in row.keys() else default
+
+
+def _load_finding_summary(row: sqlite3.Row, findings: list[dict[str, str]]) -> dict[str, int]:
+    if "finding_summary_json" not in row.keys():
+        return _summarize_findings(findings)
+
+    try:
+        summary = json.loads(row["finding_summary_json"])
+    except (TypeError, json.JSONDecodeError):
+        return _summarize_findings(findings)
+
+    if not isinstance(summary, dict):
+        return _summarize_findings(findings)
+    normalized = {str(key): int(value) for key, value in summary.items() if isinstance(value, int)}
+    return normalized or _summarize_findings(findings)
+
+
+def _summarize_findings(findings: list[dict[str, str]]) -> dict[str, int]:
+    summary: dict[str, int] = {}
+    for finding in findings:
+        finding_type = finding.get("type") or "unknown"
+        summary[finding_type] = summary.get(finding_type, 0) + 1
+    return summary

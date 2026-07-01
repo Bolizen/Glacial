@@ -472,11 +472,40 @@ pre {
 
 .history-row {
   display: grid;
-  grid-template-columns: 1fr auto auto;
-  align-items: center;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: start;
   gap: 12px;
   border-top: 1px solid #e3e9eb;
   padding-top: 10px;
+}
+
+.history-row > div:first-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.history-row > div:first-child span,
+.history-counts,
+.risk-change {
+  color: #627279;
+  font-size: 0.86rem;
+}
+
+.history-row > div:first-child span {
+  overflow-wrap: anywhere;
+}
+
+.history-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  justify-content: end;
+}
+
+.risk-change {
+  grid-column: 1 / -1;
+  justify-self: start;
 }
 
 .changelog-list {
