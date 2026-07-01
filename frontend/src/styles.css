@@ -454,6 +454,19 @@ pre {
   grid-column: 1 / -1;
 }
 
+.compact-finding p {
+  color: #415158;
+  margin-bottom: 0;
+}
+
+.finding-category {
+  color: #627279;
+  font-size: 0.82rem;
+  font-weight: 700;
+  grid-column: 1 / -1;
+  text-transform: uppercase;
+}
+
 .finding code {
   display: block;
   color: #415158;

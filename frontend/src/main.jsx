@@ -338,7 +338,7 @@ function ScanReport({ result, scans }) {
       {result && report.totalFindings === 0 ? <p className="good">No scanner findings. Still review generated code before running it.</p> : null}
       {result ? (
         <div className="scan-section-grid">
-          <PathSection title="Manifests" items={report.manifests} emptyText="No manifests found." />
+          <PathSection title="Manifests" items={report.manifests} emptyText="No manifests found." reviewKind="manifest" />
           <FindingPathSection title="Lockfiles" items={report.lockfiles} findings={report.lockfileFindings} emptyText="No lockfiles found." />
           <LifecycleSection items={report.lifecycleScripts} findings={report.lifecycleFindings} />
           <FindingSection title="Secret Findings" findings={report.secretFindings} emptyText="No secret-looking files found." />
@@ -414,11 +414,13 @@ function PathDetails({ title, items, emptyText }) {
   );
 }
 
-function PathSection({ title, items, emptyText }) {
+function PathSection({ title, items, emptyText, reviewKind }) {
   return (
     <article className="scan-card">
       <h3>{title}</h3>
-      {items.length > 0 ? (
+      {items.length > 0 && reviewKind ? (
+        items.map((item) => <FindingItem finding={metadataFinding(reviewKind, item)} key={`${reviewKind}-${item}`} />)
+      ) : items.length > 0 ? (
         <ul className="path-list">
           {items.map((item) => (
             <li key={item}><code>{item}</code></li>
@@ -493,14 +495,18 @@ function MetadataSection({ zone, findings }) {
 }
 
 function FindingItem({ finding }) {
+  const detail = normalizeFinding(finding);
+
   return (
     <div className="finding compact-finding">
       <div>
-        <strong>{finding.type}</strong>
-        <span className={`risk risk-${finding.severity || "low"}`}>{finding.severity || "low"}</span>
-        <code>{finding.path}</code>
+        <strong>{detail.title}</strong>
+        <span className={`risk risk-${detail.severity}`}>{detail.severity}</span>
+        <span className="finding-category">{detail.category}</span>
+        <code>{detail.path}</code>
       </div>
-      <p>{finding.explanation}</p>
+      <p><strong>Why:</strong> {detail.why}</p>
+      <p><strong>Action:</strong> {detail.action}</p>
     </div>
   );
 }
@@ -672,6 +678,79 @@ function buildScanReport(result) {
 
 function uniquePaths(paths) {
   return Array.from(new Set(paths.filter(Boolean)));
+}
+
+function metadataFinding(type, path) {
+  return {
+    type,
+    severity: "low",
+    path,
+  };
+}
+
+function normalizeFinding(finding = {}) {
+  const type = finding.type || "unknown";
+  const severity = finding.severity || "low";
+  const path = finding.path || "Unknown path";
+  const fallback = {
+    category: humanizeFindingType(type),
+    severity,
+    path,
+    title: humanizeFindingType(type),
+    why: finding.explanation || "This item may require attention during review.",
+    action: "Review this item before running, sharing, or committing the project.",
+  };
+
+  const details = {
+    manifest: {
+      category: "manifest",
+      title: "Dependency manifest found",
+      why: "Dependency manifests declare packages, scripts, or tooling that can affect install and build behavior.",
+      action: "Review declared dependencies and scripts before running package commands.",
+    },
+    lockfile: {
+      category: "lockfile",
+      title: "Dependency lockfile found",
+      why: "Lockfiles pin resolved dependency versions and can show dependency changes.",
+      action: "Review dependency changes before installing.",
+    },
+    "package-lifecycle-script": {
+      category: "lifecycle script",
+      title: "Package lifecycle script found",
+      why: "Package lifecycle scripts can run during install or build commands.",
+      action: "Review the script before running package commands.",
+    },
+    "secret-looking-file": {
+      category: "secret-looking file",
+      title: "Secret-looking file name found",
+      why: "The file name suggests it may contain sensitive material.",
+      action: "Confirm it does not contain secrets before sharing or committing.",
+    },
+    "executable-or-script-file": {
+      category: "executable file",
+      title: "Executable or script file found",
+      why: "Executable files and scripts can run commands on this machine.",
+      action: "Review before running.",
+    },
+    "suspicious-text-pattern": {
+      category: "zone/metadata",
+      title: "Text pattern may require review",
+      why: "Scanner metadata or text patterns may indicate commands that fetch content, launch processes, or decode data.",
+      action: "Review the source and context before trusting or running it.",
+    },
+    "package-json-read-error": {
+      category: "manifest",
+      title: "package.json could not be parsed",
+      why: "The manifest could not be read as valid JSON, so dependency and script review may be incomplete.",
+      action: "Open and review package.json manually before installing dependencies.",
+    },
+  }[type];
+
+  return details ? { ...fallback, ...details } : fallback;
+}
+
+function humanizeFindingType(type) {
+  return String(type || "unknown").replaceAll("-", " ");
 }
 
 function buildRiskReasons(report, risk) {
