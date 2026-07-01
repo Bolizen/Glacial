@@ -2,6 +2,15 @@ from __future__ import annotations
 
 CHANGELOG_ENTRIES = [
     {
+        "version": "0.08",
+        "title": "Scan history metadata",
+        "changes": [
+            "Stored recent scan history locally with timestamp, risk, finding count, reviewed count, ignored count, and finding-type summary.",
+            "Added compact risk-change markers when a scan risk differs from the previous scan.",
+            "Kept scan history metadata-only; older rows may show zero or unavailable metadata for fields added later.",
+        ],
+    },
+    {
         "version": "0.07",
         "title": "Grouped scanner dashboard",
         "changes": [

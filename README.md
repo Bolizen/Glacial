@@ -62,6 +62,8 @@ The app runs at `http://127.0.0.1:5173`.
 - The canonical workspace root is `Z:\CodexProjects`. If it does not exist, the dashboard shows a clear message and does not create it until you create a project.
 - Creating a project will create the configured workspace root folder if needed.
 - The scanner dashboard groups scan results by overall risk, manifests, lockfiles, lifecycle scripts, secret findings, executable files, zone/metadata findings, reviewed files, and ignored files.
+- Recent scans are stored locally in SQLite as compact metadata: timestamp, overall risk, finding count, reviewed file count, ignored file count, finding-type summary, and risk-change marker.
+- Older scan rows may show unavailable or zero metadata for fields added after those scans were created. Scan history does not store full file contents.
 - Findings are review prompts, not proof of compromise, and the scanner is not a malware detector.
 - `.codexforgeignore` can suppress known-safe local or self-referential scanner noise. Ignored files are treated neutrally, not as suspicious by default.
 - The AGENTS.md generator previews Markdown before writing. Existing AGENTS.md files require explicit overwrite confirmation.
