@@ -351,6 +351,11 @@ function ScanReport({ result, scans, open, onOpenChange }) {
       {result ? (
         <>
           <ScanSummary report={report} risk={result.overall_risk} />
+          <div className="scan-actions">
+            <button type="button" className="secondary-button" onClick={() => exportLatestScan(result, report, scans)}>
+              Export scan-report.md
+            </button>
+          </div>
           <RiskExplanation report={report} risk={result.overall_risk} />
           <ScanComparison scans={scans} />
           <div className="scan-detail-toggles">
@@ -713,14 +718,15 @@ async function api(path, options = {}) {
 
 function buildScanReport(result) {
   const findings = result?.findings || [];
-  const lifecycleScripts = result?.lifecycleScripts || [];
-  const secretFiles = result?.secretFiles || [];
-  const ignoredFiles = result?.ignoredFiles || [];
-  const manifests = result?.manifests || [];
+  const lifecycleScripts = scanArray(result, "lifecycleScripts");
+  const secretFiles = scanArray(result, "secretFiles");
+  const ignoredFiles = scanArray(result, "ignoredFiles");
+  const manifests = scanArray(result, "manifests");
   const lockfilePathsFromFindings = findings
     .filter((finding) => finding.type === "lockfile")
     .map((finding) => finding.path);
-  const lockfiles = result?.lockfiles?.length ? result.lockfiles : uniquePaths(lockfilePathsFromFindings);
+  const storedLockfiles = scanArray(result, "lockfiles");
+  const lockfiles = storedLockfiles.length ? storedLockfiles : uniquePaths(lockfilePathsFromFindings);
   const secretPaths = new Set(secretFiles);
   const lifecyclePaths = new Set(lifecycleScripts.map((script) => script.path));
   const lockfilePaths = new Set(lockfiles);
@@ -737,11 +743,17 @@ function buildScanReport(result) {
     return true;
   });
 
-  const reviewedFiles = result?.reviewedFiles || uniquePaths([...findings.map((finding) => finding.path), ...manifests, ...lockfiles, ...secretFiles]);
+  const reviewedFileCount = result?.reviewedFileCount ?? scanArray(result, "reviewedFiles").length;
+  const storedReviewedFiles = scanArray(result, "reviewedFiles");
+  const reviewedFiles = storedReviewedFiles.length
+    ? storedReviewedFiles
+    : reviewedFileCount > 0
+      ? []
+      : uniquePaths([...findings.map((finding) => finding.path), ...manifests, ...lockfiles, ...secretFiles]);
 
   return {
     totalFindings: result?.findingCount ?? findings.length,
-    reviewedFileCount: result?.reviewedFileCount ?? reviewedFiles.length,
+    reviewedFileCount,
     ignoredFileCount: result?.ignoredFileCount ?? ignoredFiles.length,
     reviewedFiles,
     manifests,
@@ -750,12 +762,18 @@ function buildScanReport(result) {
     lifecycleFindings,
     lockfileFindings,
     findingTypeCounts,
+    secretFiles,
     secretFindings,
     executableFindings,
     metadataFindings,
     ignoredFiles,
     zone: result?.zone || "Unknown",
   };
+}
+
+function scanArray(result, field) {
+  const value = result?.[field];
+  return Array.isArray(value) ? value : [];
 }
 
 function uniquePaths(paths) {
@@ -930,6 +948,95 @@ function formatFindingTypeDelta(latestSummary = {}, previousSummary = {}) {
     .map(([type, delta]) => `${type}: ${delta > 0 ? "+" : ""}${delta}`);
 
   return changes.length > 0 ? changes.join(", ") : "No finding-type changes";
+}
+
+function exportLatestScan(result, report, scans) {
+  const content = buildScanReportMarkdown(result, report, buildScanComparison(scans));
+  const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "scan-report.md";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function buildScanReportMarkdown(result, report, comparison) {
+  return [
+    "# Scan Report",
+    "",
+    "## Summary",
+    `Project: ${markdownInlineCode(result.project_path || "Unknown")}`,
+    `Scan date: ${markdownText(formatDate(result.scan_date))}`,
+    `Findings: ${report.totalFindings}`,
+    `Reviewed files: ${report.reviewedFileCount}`,
+    `Ignored files: ${report.ignoredFileCount}`,
+    "",
+    "## Risk score",
+    `${formatRiskLabel(result.overall_risk)}`,
+    "",
+    "## Manifests",
+    formatMarkdownList(report.manifests, "No manifests found."),
+    "",
+    "## Lockfiles",
+    formatMarkdownList(report.lockfiles, "No lockfiles found."),
+    "",
+    "## Lifecycle scripts",
+    formatLifecycleScripts(report.lifecycleScripts),
+    "",
+    "## Secrets",
+    formatMarkdownList(report.secretFiles, "No secret-looking files found."),
+    "",
+    "## Ignored files",
+    formatPathMetadataList(report.ignoredFiles, report.ignoredFileCount, "No files ignored by .codexforgeignore."),
+    "",
+    "## Reviewed files",
+    formatPathMetadataList(report.reviewedFiles, report.reviewedFileCount, "No reviewed files recorded for this scan."),
+    "",
+    "## Zone",
+    markdownText(report.zone || "Unknown"),
+    "",
+    "## Comparison with previous scan",
+    formatMarkdownComparison(comparison),
+    "",
+  ].join("\n");
+}
+
+function formatMarkdownList(items, emptyText) {
+  return items.length ? items.map((item) => `- ${markdownInlineCode(item)}`).join("\n") : emptyText;
+}
+
+function formatLifecycleScripts(items) {
+  if (!items.length) return "No package lifecycle scripts found.";
+  return items
+    .map((item) => `- ${markdownInlineCode(item.path || "Unknown path")}: ${markdownText(item.script || "unknown script")}`)
+    .join("\n");
+}
+
+function formatPathMetadataList(items, recordedCount, emptyText) {
+  if (items.length) return formatMarkdownList(items, emptyText);
+  return recordedCount > 0 ? `${recordedCount} paths recorded; path list unavailable for this older scan.` : emptyText;
+}
+
+function formatMarkdownComparison(comparison) {
+  if (!comparison) return "No previous scan to compare yet.";
+  return [
+    `- Risk: ${markdownText(comparison.riskChange)}`,
+    `- Findings: ${markdownText(comparison.findingDelta)}`,
+    `- Reviewed files: ${markdownText(comparison.reviewedDelta)}`,
+    `- Ignored files: ${markdownText(comparison.ignoredDelta)}`,
+    `- Finding types: ${markdownText(comparison.typeSummary)}`,
+  ].join("\n");
+}
+
+function markdownInlineCode(value) {
+  return `\`${markdownText(value).replaceAll("`", "'")}\``;
+}
+
+function markdownText(value) {
+  return String(value ?? "Unknown").replaceAll(/\s+/g, " ").trim() || "Unknown";
 }
 
 function formatDate(value) {

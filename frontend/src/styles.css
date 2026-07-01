@@ -368,6 +368,12 @@ pre {
   font-weight: 700;
 }
 
+.scan-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin: -4px 0 14px;
+}
+
 .risk-explanation {
   border: 1px solid #d6dee1;
   border-radius: 8px;
@@ -515,11 +521,6 @@ pre {
   border-top: 1px solid #e3e9eb;
   margin-top: 12px;
   padding: 12px 0 0;
-}
-
-.scan-card-body {
-  border-top: 1px solid #e3e9eb;
-  padding: 0 14px 14px;
 }
 
 .scan-card-empty {
