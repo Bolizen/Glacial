@@ -12,6 +12,36 @@ const EMPTY_AGENT_FORM = {
 };
 const MAJOR_SECTIONS = ["changelog", "scanReport", "agents", "notes", "history"];
 const OPEN_MAJOR_SECTIONS = Object.fromEntries(MAJOR_SECTIONS.map((section) => [section, true]));
+const SCAN_GUIDANCE = {
+  manifests: {
+    why: "Manifest files define dependencies, scripts, and package metadata for the project.",
+    check: "Review dependency sources, scripts, and unexpected package changes before trusting the project.",
+  },
+  lockfiles: {
+    why: "Lockfiles pin exact dependency versions and can reveal supply-chain drift.",
+    check: "Look for unexpected version changes, new transitive dependencies, or lockfile churn.",
+  },
+  lifecycleScripts: {
+    why: "Lifecycle scripts can execute automatically during install or build steps.",
+    check: "Inspect scripts before running install commands or generated project tooling.",
+  },
+  secretFiles: {
+    why: "Secret-looking files may contain credentials, tokens, or local environment values.",
+    check: "Confirm they are not committed or exposed, and rotate anything accidentally shared.",
+  },
+  ignoredFiles: {
+    why: "Ignored files can hide local configuration, build output, or sensitive files from Git.",
+    check: "Confirm ignored paths are intentional and not masking important project state.",
+  },
+  reviewedFiles: {
+    why: "Reviewed files help separate known project files from files that still need attention.",
+    check: "Re-review them after major dependency, script, or configuration changes.",
+  },
+  zone: {
+    why: "Zone classification helps separate normal project areas from files needing closer inspection.",
+    check: "Pay attention to files outside expected source, config, dependency, or documentation areas.",
+  },
+};
 
 function App() {
   const [projectRoot, setProjectRoot] = useState("");
@@ -359,18 +389,18 @@ function ScanReport({ result, scans, open, onOpenChange }) {
           <RiskExplanation report={report} risk={result.overall_risk} />
           <ScanComparison scans={scans} />
           <div className="scan-detail-toggles">
-            <PathDetails title="Reviewed files" items={report.reviewedFiles} recordedCount={report.reviewedFileCount} emptyText="No reviewed files recorded for this scan." />
-            <PathDetails title="Ignored files" items={report.ignoredFiles} recordedCount={report.ignoredFileCount} emptyText="No files ignored by .codexforgeignore." />
+            <PathDetails title="Reviewed files" items={report.reviewedFiles} recordedCount={report.reviewedFileCount} emptyText="No reviewed files recorded for this scan." guidance={SCAN_GUIDANCE.reviewedFiles} />
+            <PathDetails title="Ignored files" items={report.ignoredFiles} recordedCount={report.ignoredFileCount} emptyText="No files ignored by .codexforgeignore." guidance={SCAN_GUIDANCE.ignoredFiles} />
           </div>
         </>
       ) : null}
       {result && report.totalFindings === 0 ? <p className="good">No scanner findings. Still review generated code before running it.</p> : null}
       {result ? (
         <div className="scan-section-grid">
-          <PathSection title="Manifests" items={report.manifests} emptyText="No manifests found." reviewKind="manifest" />
-          <FindingPathSection title="Lockfiles" items={report.lockfiles} findings={report.lockfileFindings} emptyText="No lockfiles found." />
+          <PathSection title="Manifests" items={report.manifests} emptyText="No manifests found." reviewKind="manifest" guidance={SCAN_GUIDANCE.manifests} />
+          <FindingPathSection title="Lockfiles" items={report.lockfiles} findings={report.lockfileFindings} emptyText="No lockfiles found." guidance={SCAN_GUIDANCE.lockfiles} />
           <LifecycleSection items={report.lifecycleScripts} findings={report.lifecycleFindings} />
-          <FindingSection title="Secret Findings" findings={report.secretFindings} emptyText="No secret-looking files found." />
+          <FindingSection title="Secret Findings" findings={report.secretFindings} emptyText="No secret-looking files found." guidance={SCAN_GUIDANCE.secretFiles} />
           <FindingSection title="Executable Files" findings={report.executableFindings} emptyText="No executable files found." />
           <MetadataSection zone={report.zone} findings={report.metadataFindings} />
         </div>
@@ -419,11 +449,12 @@ function ScanSummary({ report, risk }) {
   );
 }
 
-function PathDetails({ title, items, recordedCount, emptyText }) {
+function PathDetails({ title, items, recordedCount, emptyText, guidance }) {
   if (items.length === 0) {
     return (
       <div className="scan-detail-empty">
         <strong>{title}</strong>
+        <GuidanceBlock guidance={guidance} />
         <span>{recordedCount > 0 ? `${recordedCount} paths recorded; path list unavailable for this older scan.` : emptyText}</span>
       </div>
     );
@@ -435,6 +466,7 @@ function PathDetails({ title, items, recordedCount, emptyText }) {
         <strong>{title}</strong>
         <span>{items.length} paths</span>
       </summary>
+      <GuidanceBlock guidance={guidance} />
       <ul className="path-list">
         {items.map((item) => (
           <li key={item}><code>{item}</code></li>
@@ -444,11 +476,11 @@ function PathDetails({ title, items, recordedCount, emptyText }) {
   );
 }
 
-function PathSection({ title, items, emptyText, reviewKind }) {
+function PathSection({ title, items, emptyText, reviewKind, guidance }) {
   const findings = reviewKind ? items.map((item) => metadataFinding(reviewKind, item)) : [];
 
   return (
-    <ScanSection title={title} count={items.length} findings={findings} emptyText={emptyText}>
+    <ScanSection title={title} count={items.length} findings={findings} emptyText={emptyText} guidance={guidance}>
       {reviewKind ? (
         findings.map((finding, index) => <FindingItem finding={finding} key={findingKey(finding, index)} />)
       ) : (
@@ -462,11 +494,11 @@ function PathSection({ title, items, emptyText, reviewKind }) {
   );
 }
 
-function FindingPathSection({ title, items, findings, emptyText }) {
+function FindingPathSection({ title, items, findings, emptyText, guidance }) {
   const count = uniquePaths([...items, ...findings.map((finding) => finding.path)]).length;
 
   return (
-    <ScanSection title={title} count={count} findings={findings} emptyText={emptyText}>
+    <ScanSection title={title} count={count} findings={findings} emptyText={emptyText} guidance={guidance}>
       {items.length > 0 ? (
         <ul className="path-list">
           {items.map((item) => (
@@ -481,7 +513,7 @@ function FindingPathSection({ title, items, findings, emptyText }) {
 
 function LifecycleSection({ items, findings }) {
   return (
-    <ScanSection title="Lifecycle Scripts" count={items.length} findings={findings} emptyText="No package lifecycle scripts found.">
+    <ScanSection title="Lifecycle Scripts" count={items.length} findings={findings} emptyText="No package lifecycle scripts found." guidance={SCAN_GUIDANCE.lifecycleScripts}>
       {items.length > 0 ? (
         <ul className="path-list">
           {items.map((script) => (
@@ -497,9 +529,9 @@ function LifecycleSection({ items, findings }) {
   );
 }
 
-function FindingSection({ title, findings, emptyText }) {
+function FindingSection({ title, findings, emptyText, guidance }) {
   return (
-    <ScanSection title={title} count={findings.length} findings={findings} emptyText={emptyText}>
+    <ScanSection title={title} count={findings.length} findings={findings} emptyText={emptyText} guidance={guidance}>
       {findings.map((finding, index) => <FindingItem finding={finding} key={findingKey(finding, index)} />)}
     </ScanSection>
   );
@@ -507,7 +539,7 @@ function FindingSection({ title, findings, emptyText }) {
 
 function MetadataSection({ zone, findings }) {
   return (
-    <ScanSection title="Zone/Metadata Findings" count={findings.length} findings={findings} emptyText="No additional metadata findings.">
+    <ScanSection title="Zone/Metadata Findings" count={findings.length} findings={findings} emptyText="No additional metadata findings." guidance={SCAN_GUIDANCE.zone}>
       <div className="metadata-row">
         <span>Zone</span>
         <strong>{zone || "Unknown"}</strong>
@@ -517,7 +549,7 @@ function MetadataSection({ zone, findings }) {
   );
 }
 
-function ScanSection({ title, count, findings, emptyText, children }) {
+function ScanSection({ title, count, findings, emptyText, guidance, children }) {
   const hasContent = count > 0 || findings.length > 0;
   const highestSeverity = highestFindingSeverity(findings);
   const summary = hasContent ? `${count} ${count === 1 ? "item" : "items"}` : emptyText;
@@ -526,6 +558,7 @@ function ScanSection({ title, count, findings, emptyText, children }) {
     return (
       <article className="scan-card scan-card-empty">
         <ScanSectionHeader title={title} count={count} emptyText={emptyText} severity={highestSeverity} />
+        <GuidanceBlock guidance={guidance} />
       </article>
     );
   }
@@ -533,6 +566,7 @@ function ScanSection({ title, count, findings, emptyText, children }) {
   return (
     <article className="scan-card">
       <ScanSectionHeader title={title} count={count} summary={summary} severity={highestSeverity} />
+      <GuidanceBlock guidance={guidance} />
       <div className="scan-card-body">{children}</div>
     </article>
   );
@@ -546,6 +580,17 @@ function ScanSectionHeader({ title, count, summary, emptyText, severity }) {
         <small>{summary || emptyText || `${count} ${count === 1 ? "item" : "items"}`}</small>
       </div>
       {severity ? <span className={`risk risk-${severity}`}>{severity}</span> : null}
+    </div>
+  );
+}
+
+function GuidanceBlock({ guidance }) {
+  if (!guidance) return null;
+
+  return (
+    <div className="guidance-block">
+      <p><strong>Why this matters:</strong> {guidance.why}</p>
+      <p><strong>What to check:</strong> {guidance.check}</p>
     </div>
   );
 }
@@ -978,24 +1023,38 @@ function buildScanReportMarkdown(result, report, comparison) {
     `${formatRiskLabel(result.overall_risk)}`,
     "",
     "## Manifests",
+    formatMarkdownGuidance(SCAN_GUIDANCE.manifests),
+    "",
     formatMarkdownList(report.manifests, "No manifests found."),
     "",
     "## Lockfiles",
+    formatMarkdownGuidance(SCAN_GUIDANCE.lockfiles),
+    "",
     formatMarkdownList(report.lockfiles, "No lockfiles found."),
     "",
     "## Lifecycle scripts",
+    formatMarkdownGuidance(SCAN_GUIDANCE.lifecycleScripts),
+    "",
     formatLifecycleScripts(report.lifecycleScripts),
     "",
     "## Secrets",
+    formatMarkdownGuidance(SCAN_GUIDANCE.secretFiles),
+    "",
     formatMarkdownList(report.secretFiles, "No secret-looking files found."),
     "",
     "## Ignored files",
+    formatMarkdownGuidance(SCAN_GUIDANCE.ignoredFiles),
+    "",
     formatPathMetadataList(report.ignoredFiles, report.ignoredFileCount, "No files ignored by .codexforgeignore."),
     "",
     "## Reviewed files",
+    formatMarkdownGuidance(SCAN_GUIDANCE.reviewedFiles),
+    "",
     formatPathMetadataList(report.reviewedFiles, report.reviewedFileCount, "No reviewed files recorded for this scan."),
     "",
     "## Zone",
+    formatMarkdownGuidance(SCAN_GUIDANCE.zone),
+    "",
     markdownText(report.zone || "Unknown"),
     "",
     "## Comparison with previous scan",
@@ -1006,6 +1065,14 @@ function buildScanReportMarkdown(result, report, comparison) {
 
 function formatMarkdownList(items, emptyText) {
   return items.length ? items.map((item) => `- ${markdownInlineCode(item)}`).join("\n") : emptyText;
+}
+
+function formatMarkdownGuidance(guidance) {
+  if (!guidance) return "";
+  return [
+    `Why this matters: ${markdownText(guidance.why)}`,
+    `What to check: ${markdownText(guidance.check)}`,
+  ].join("\n");
 }
 
 function formatLifecycleScripts(items) {
