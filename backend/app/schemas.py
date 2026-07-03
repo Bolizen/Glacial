@@ -28,3 +28,14 @@ class AgentPreviewRequest(ProjectPathRequest):
 
 class NoteCreate(ProjectPathRequest):
     body: str = Field(min_length=1, max_length=4000)
+
+
+class TrustProfileRequest(ProjectPathRequest):
+    trustedPackageManagers: list[str] = Field(default_factory=list)
+    expectedManifestFiles: list[str] = Field(default_factory=list)
+    expectedLockfiles: list[str] = Field(default_factory=list)
+    allowedLifecycleScripts: list[str] = Field(default_factory=list)
+    reviewedPaths: list[str] = Field(default_factory=list)
+    ignoredPaths: list[str] = Field(default_factory=list)
+    riskTolerance: str = Field(default="normal", max_length=20)
+    notes: str = Field(default="", max_length=4000)

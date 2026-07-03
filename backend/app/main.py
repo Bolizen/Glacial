@@ -21,10 +21,20 @@ from .database import (
 )
 from .safety import configured_root, ensure_inside_root, ensure_project_directory, sanitize_folder_name
 from .scanner import scan_project
-from .schemas import AgentPreviewRequest, NoteCreate, ProjectCreate, ProjectPathRequest, ProjectRootUpdate
+from .schemas import AgentPreviewRequest, NoteCreate, ProjectCreate, ProjectPathRequest, ProjectRootUpdate, TrustProfileRequest
 
 
 app = FastAPI(title="CodexForge API")
+
+TRUST_PROFILE_FIELDS = (
+    "trustedPackageManagers",
+    "expectedManifestFiles",
+    "expectedLockfiles",
+    "allowedLifecycleScripts",
+    "reviewedPaths",
+    "ignoredPaths",
+)
+RISK_TOLERANCES = {"cautious", "normal", "permissive"}
 
 app.add_middleware(
     CORSMiddleware,
@@ -232,6 +242,42 @@ def list_notes(project_path: str = Query(min_length=1, max_length=1000)) -> dict
     return {"notes": [dict(row) for row in rows]}
 
 
+@app.get("/api/trust-profile")
+def get_trust_profile(project_path: str = Query(min_length=1, max_length=1000)) -> dict[str, object]:
+    project = _ensure_project(project_path)
+    with get_connection() as connection:
+        row = connection.execute(
+            "SELECT profile_json, updated_at FROM project_trust_profiles WHERE project_path = ?",
+            (str(project),),
+        ).fetchone()
+
+    profile = _empty_trust_profile(str(project))
+    if not row:
+        return profile
+
+    try:
+        stored = json.loads(row["profile_json"])
+    except (TypeError, json.JSONDecodeError):
+        stored = {}
+    profile.update(_normalize_trust_profile(stored, str(project)))
+    profile["updated_at"] = row["updated_at"]
+    return profile
+
+
+@app.put("/api/trust-profile")
+def update_trust_profile(payload: TrustProfileRequest) -> dict[str, object]:
+    project = _ensure_project(payload.project_path)
+    profile = _normalize_trust_profile(_model_data(payload), str(project))
+    now = _now()
+    with get_connection() as connection:
+        connection.execute(
+            "INSERT INTO project_trust_profiles (project_path, profile_json, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(project_path) DO UPDATE SET profile_json = excluded.profile_json, updated_at = excluded.updated_at",
+            (str(project), json.dumps(_profile_for_storage(profile), sort_keys=True), now),
+        )
+    return {**profile, "updated_at": now}
+
+
 @app.post("/api/notes")
 def add_note(payload: NoteCreate) -> dict[str, object]:
     project = _ensure_project(payload.project_path)
@@ -294,6 +340,55 @@ def _finding_summary(findings: list[dict[str, str]]) -> dict[str, int]:
         finding_type = finding.get("type") or "unknown"
         summary[finding_type] = summary.get(finding_type, 0) + 1
     return summary
+
+
+def _empty_trust_profile(project_path: str) -> dict[str, object]:
+    return {
+        "project_path": project_path,
+        "trustedPackageManagers": [],
+        "expectedManifestFiles": [],
+        "expectedLockfiles": [],
+        "allowedLifecycleScripts": [],
+        "reviewedPaths": [],
+        "ignoredPaths": [],
+        "riskTolerance": "normal",
+        "notes": "",
+        "updated_at": None,
+    }
+
+
+def _normalize_trust_profile(data: dict[str, object], project_path: str) -> dict[str, object]:
+    profile = _empty_trust_profile(project_path)
+    for field in TRUST_PROFILE_FIELDS:
+        profile[field] = _normalize_string_list(data.get(field))
+    risk_tolerance = str(data.get("riskTolerance") or "normal").strip().lower()
+    profile["riskTolerance"] = risk_tolerance if risk_tolerance in RISK_TOLERANCES else "normal"
+    profile["notes"] = str(data.get("notes") or "").strip()[:4000]
+    return profile
+
+
+def _model_data(payload: TrustProfileRequest) -> dict[str, object]:
+    if hasattr(payload, "model_dump"):
+        return payload.model_dump()
+    return payload.dict()
+
+
+def _normalize_string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        text = str(item).strip()
+        if not text or text in seen:
+            continue
+        normalized.append(text)
+        seen.add(text)
+    return normalized
+
+
+def _profile_for_storage(profile: dict[str, object]) -> dict[str, object]:
+    return {key: profile[key] for key in (*TRUST_PROFILE_FIELDS, "riskTolerance", "notes")}
 
 
 def _scan_metadata(result: dict[str, object]) -> dict[str, object]:

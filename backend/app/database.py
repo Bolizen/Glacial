@@ -50,6 +50,12 @@ def init_db() -> None:
                 body TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS project_trust_profiles (
+                project_path TEXT PRIMARY KEY,
+                profile_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
             """
         )
         connection.execute(
