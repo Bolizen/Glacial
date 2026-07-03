@@ -56,6 +56,7 @@ function App() {
   const [agentsExists, setAgentsExists] = useState(false);
   const [scanResult, setScanResult] = useState(null);
   const [scanHistory, setScanHistory] = useState([]);
+  const [selectedScanId, setSelectedScanId] = useState(null);
   const [notes, setNotes] = useState([]);
   const [noteBody, setNoteBody] = useState("");
   const [changelog, setChangelog] = useState([]);
@@ -65,6 +66,12 @@ function App() {
     () => projects.find((project) => project.path === selectedPath) || null,
     [projects, selectedPath],
   );
+  const selectedHistoryScan = useMemo(
+    () => scanHistory.find((scan) => scan.id === selectedScanId) || null,
+    [scanHistory, selectedScanId],
+  );
+  const displayedScan = selectedHistoryScan || scanResult || scanHistory[0] || null;
+  const scanViewMode = selectedHistoryScan ? "history" : "latest";
   const allMajorSectionsOpen = MAJOR_SECTIONS.every((section) => majorSectionsOpen[section]);
 
   useEffect(() => {
@@ -79,6 +86,7 @@ function App() {
       checkAgentsExists(selectedPath);
       setAgentPreview("");
       setScanResult(null);
+      setSelectedScanId(null);
     }
   }, [selectedPath]);
 
@@ -96,6 +104,7 @@ function App() {
       if (!stillSelected && data.projects.length === 0) {
         setSelectedPath("");
         setScanResult(null);
+        setSelectedScanId(null);
         setScanHistory([]);
         setNotes([]);
         setAgentsExists(false);
@@ -194,6 +203,7 @@ function App() {
     try {
       const data = await api("/api/scans", { method: "POST", body: { project_path: selectedPath } });
       setScanResult(data);
+      setSelectedScanId(null);
       setMessage("Scan complete. Review the findings below.");
       await loadScanHistory(selectedPath);
       await refreshProjects();
@@ -305,10 +315,10 @@ function App() {
           {selectedProject ? (
             <>
               <ProjectHeader project={selectedProject} onScan={runScan} />
-              <ScanReport result={scanResult || scanHistory[0]} scans={scanHistory} open={majorSectionsOpen.scanReport} onOpenChange={(open) => setMajorSectionOpen("scanReport", open)} />
+              <ScanReport result={displayedScan} scans={scanHistory} viewMode={scanViewMode} open={majorSectionsOpen.scanReport} onOpenChange={(open) => setMajorSectionOpen("scanReport", open)} />
               <AgentGenerator form={agentForm} updateField={updateAgentField} preview={agentPreview} exists={agentsExists} onPreview={previewAgents} onWrite={writeAgents} open={majorSectionsOpen.agents} onOpenChange={(open) => setMajorSectionOpen("agents", open)} />
               <Notes notes={notes} noteBody={noteBody} setNoteBody={setNoteBody} onAdd={addNote} open={majorSectionsOpen.notes} onOpenChange={(open) => setMajorSectionOpen("notes", open)} />
-              <History scans={scanHistory} open={majorSectionsOpen.history} onOpenChange={(open) => setMajorSectionOpen("history", open)} />
+              <History scans={scanHistory} selectedScanId={selectedScanId} onSelectScan={setSelectedScanId} open={majorSectionsOpen.history} onOpenChange={(open) => setMajorSectionOpen("history", open)} />
             </>
           ) : (
             <div className="panel empty-state">
@@ -363,8 +373,33 @@ function ProjectHeader({ project, onScan }) {
   );
 }
 
-function ScanReport({ result, scans, open, onOpenChange }) {
+function ScanReport({ result, scans, viewMode, open, onOpenChange }) {
+  const [copyStatus, setCopyStatus] = useState("");
   const report = useMemo(() => buildScanReport(result), [result]);
+  const comparison = useMemo(() => buildScanComparisonFor(result, scans), [result, scans]);
+  const reportMarkdown = useMemo(
+    () => (result ? buildScanReportMarkdown(result, report, comparison) : ""),
+    [result, report, comparison],
+  );
+
+  useEffect(() => {
+    setCopyStatus("");
+  }, [result?.id]);
+
+  async function copyReportMarkdown() {
+    if (!reportMarkdown) return;
+    if (!navigator.clipboard?.writeText) {
+      setCopyStatus("Clipboard unavailable. Use Export instead.");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(reportMarkdown);
+      setCopyStatus("Report Markdown copied.");
+    } catch {
+      setCopyStatus("Could not copy report Markdown.");
+    }
+  }
 
   return (
     <details className="panel section-toggle" open={open} onToggle={(event) => onOpenChange(event.currentTarget.open)}>
@@ -381,13 +416,20 @@ function ScanReport({ result, scans, open, onOpenChange }) {
       {result ? (
         <>
           <ScanSummary report={report} risk={result.overall_risk} />
+          <div className="scan-view-label">
+            {viewMode === "history" ? `Viewing history scan from ${formatDate(result.scan_date)}` : `Viewing latest scan from ${formatDate(result.scan_date)}`}
+          </div>
           <div className="scan-actions">
-            <button type="button" className="secondary-button" onClick={() => exportLatestScan(result, report, scans)}>
+            <button type="button" className="secondary-button" onClick={() => exportLatestScan(reportMarkdown)}>
               Export scan-report.md
             </button>
+            <button type="button" className="secondary-button" onClick={copyReportMarkdown}>
+              Copy report Markdown
+            </button>
           </div>
+          {copyStatus ? <p className="copy-status">{copyStatus}</p> : null}
           <RiskExplanation report={report} risk={result.overall_risk} />
-          <ScanComparison scans={scans} />
+          <ScanComparison comparison={comparison} />
           <div className="scan-detail-toggles">
             <PathDetails title="Reviewed files" items={report.reviewedFiles} recordedCount={report.reviewedFileCount} emptyText="No reviewed files recorded for this scan." guidance={SCAN_GUIDANCE.reviewedFiles} />
             <PathDetails title="Ignored files" items={report.ignoredFiles} recordedCount={report.ignoredFileCount} emptyText="No files ignored by .codexforgeignore." guidance={SCAN_GUIDANCE.ignoredFiles} />
@@ -626,9 +668,7 @@ function findingKey(finding, index) {
   ].join("|");
 }
 
-function ScanComparison({ scans }) {
-  const comparison = useMemo(() => buildScanComparison(scans), [scans]);
-
+function ScanComparison({ comparison }) {
   return (
     <section className="scan-comparison">
       <h2>Changed Since Previous Scan</h2>
@@ -713,7 +753,7 @@ function Notes({ notes, noteBody, setNoteBody, onAdd, open, onOpenChange }) {
   );
 }
 
-function History({ scans, open, onOpenChange }) {
+function History({ scans, selectedScanId, onSelectScan, open, onOpenChange }) {
   return (
     <details className="panel section-toggle" open={open} onToggle={(event) => onOpenChange(event.currentTarget.open)}>
       <summary className="section-summary">
@@ -725,8 +765,9 @@ function History({ scans, open, onOpenChange }) {
         {scans.map((scan, index) => {
           const previousScan = scans[index + 1];
           const riskChanged = previousScan && previousScan.overall_risk !== scan.overall_risk;
+          const selected = selectedScanId === scan.id;
           return (
-          <div className="history-row" key={scan.id}>
+          <div className={`history-row ${selected ? "selected-history-row" : ""}`} key={scan.id}>
             <div>
               <strong>{formatDate(scan.scan_date)}</strong>
               <span>{formatFindingSummary(scan.findingSummary)}</span>
@@ -737,6 +778,9 @@ function History({ scans, open, onOpenChange }) {
               <span>{scan.reviewedFileCount ?? 0} reviewed</span>
               <span>{scan.ignoredFileCount ?? 0} ignored</span>
             </div>
+            <button type="button" className="history-view-button" onClick={() => onSelectScan(selected ? null : scan.id)}>
+              {selected ? "Viewing" : "View"}
+            </button>
             {riskChanged ? <span className="risk-change">Changed from {previousScan.overall_risk}</span> : null}
           </div>
           );
@@ -946,11 +990,14 @@ function formatTopFindingTypes(summary) {
   return entries.map(([type, count]) => `${type}: ${count}`).join(", ");
 }
 
-function buildScanComparison(scans) {
-  if (!scans || scans.length < 2) return null;
+function buildScanComparisonFor(scan, scans) {
+  if (!scan || !scans || scans.length < 2) return null;
 
-  const latest = scans[0];
-  const previous = scans[1];
+  const scanIndex = scans.findIndex((entry) => entry.id === scan.id);
+  if (scanIndex < 0 || scanIndex + 1 >= scans.length) return null;
+
+  const latest = scans[scanIndex];
+  const previous = scans[scanIndex + 1];
   return {
     riskChange:
       latest.overall_risk === previous.overall_risk
@@ -995,8 +1042,7 @@ function formatFindingTypeDelta(latestSummary = {}, previousSummary = {}) {
   return changes.length > 0 ? changes.join(", ") : "No finding-type changes";
 }
 
-function exportLatestScan(result, report, scans) {
-  const content = buildScanReportMarkdown(result, report, buildScanComparison(scans));
+function exportLatestScan(content) {
   const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");

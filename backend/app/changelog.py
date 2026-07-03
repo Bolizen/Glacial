@@ -2,6 +2,15 @@ from __future__ import annotations
 
 CHANGELOG_ENTRIES = [
     {
+        "version": "0.11",
+        "title": "Scanner report polish",
+        "changes": [
+            "Added Markdown scan report export and Copy Markdown report actions.",
+            "Added concise scanner card guidance for review context.",
+            "Cleaned public-facing setup and workspace-root documentation.",
+        ],
+    },
+    {
         "version": "0.10",
         "title": "Latest scan comparison",
         "changes": [

@@ -307,6 +307,7 @@ pre {
 
 .risk {
   align-self: start;
+  border: 1px solid transparent;
   border-radius: 999px;
   color: #172126;
   display: inline-flex;
@@ -326,19 +327,33 @@ pre {
 }
 
 .risk-none {
+  border-color: #c4d0d4;
   background: #dfe7e9;
+  color: #415158;
 }
 
 .risk-low {
-  background: #d4ead2;
+  background: #dff2dd;
+  border-color: #a9d4a6;
+  color: #1f5f32;
 }
 
 .risk-medium {
-  background: #ffe1a8;
+  background: #ffe8bd;
+  border-color: #e2ae55;
+  color: #734a00;
 }
 
 .risk-high {
-  background: #ffc4b8;
+  background: #ffd0c8;
+  border-color: #df8878;
+  color: #842c1e;
+}
+
+.risk-unknown {
+  background: #dfe7e9;
+  border-color: #c4d0d4;
+  color: #415158;
 }
 
 .scan-summary {
@@ -370,8 +385,21 @@ pre {
 
 .scan-actions {
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   justify-content: flex-end;
   margin: -4px 0 14px;
+}
+
+.scan-view-label,
+.copy-status {
+  color: #627279;
+  font-size: 0.86rem;
+  margin: -4px 0 10px;
+}
+
+.copy-status {
+  text-align: right;
 }
 
 .risk-explanation {
@@ -708,11 +736,17 @@ pre {
 
 .history-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
   align-items: start;
   gap: 12px;
   border-top: 1px solid #e3e9eb;
   padding-top: 10px;
+}
+
+.selected-history-row {
+  background: #f7f9fa;
+  border-radius: 6px;
+  padding: 10px;
 }
 
 .history-row > div:first-child {
@@ -737,6 +771,19 @@ pre {
   flex-wrap: wrap;
   gap: 6px 10px;
   justify-content: end;
+}
+
+.history-view-button {
+  background: #f7f9fa;
+  border: 1px solid #bac8cd;
+  color: #185a72;
+  min-height: 32px;
+  padding: 0 10px;
+}
+
+.history-view-button:hover,
+.history-view-button:focus-visible {
+  background: #eef4f6;
 }
 
 .risk-change {
