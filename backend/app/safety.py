@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import stat
 from pathlib import Path
 
 from fastapi import HTTPException
@@ -90,3 +91,15 @@ def is_reparse_point_or_symlink(path: Path) -> bool:
         return bool(attributes & 0x400)
     except OSError:
         return False
+
+
+def has_multiple_hardlinks(path: Path) -> bool:
+    try:
+        file_status = path.stat(follow_symlinks=False)
+    except FileNotFoundError:
+        return False
+
+    return (
+        stat.S_ISREG(file_status.st_mode)
+        and file_status.st_nlink > 1
+    )

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -116,6 +117,24 @@ class AgentsWriteTests(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 403)
         self.assertEqual(
             agents_path.read_text(encoding="utf-8"),
+            "do not change",
+        )
+
+    def test_hardlinked_target_is_rejected_without_changing_other_name(self) -> None:
+        outside_path = self.workspace_root / "outside-agents.md"
+        outside_path.write_text("do not change", encoding="utf-8")
+        agents_path = self.project_path / "AGENTS.md"
+        try:
+            os.link(outside_path, agents_path)
+        except OSError as exc:
+            self.skipTest(f"Hardlinks are unavailable: {exc}")
+
+        with self.assertRaises(HTTPException) as raised:
+            self.write_agents(overwrite=True)
+
+        self.assertEqual(raised.exception.status_code, 409)
+        self.assertEqual(
+            outside_path.read_text(encoding="utf-8"),
             "do not change",
         )
 

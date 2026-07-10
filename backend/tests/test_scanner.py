@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -72,6 +73,34 @@ class ScannerLinkedPathTests(unittest.TestCase):
         result = scan_project(self.project_path)
 
         self.assert_link_finding(result, "linked.txt")
+        self.assertNotIn("linked.txt", result["reviewedFiles"])
+        self.assertNotIn("linked.txt", result["ignoredFiles"])
+        self.assertFalse(
+            any(
+                finding["type"] == "suspicious-text-pattern"
+                and finding["path"] == "linked.txt"
+                for finding in result["findings"]
+            )
+        )
+
+    def test_hardlinked_file_is_not_read_or_reviewed(self) -> None:
+        external_file = self.base_path / "external-hardlink.txt"
+        external_file.write_text("eval(untrusted_input)", encoding="utf-8")
+        linked_file = self.project_path / "linked.txt"
+        try:
+            os.link(external_file, linked_file)
+        except OSError as exc:
+            self.skipTest(f"Hardlinks are unavailable: {exc}")
+
+        result = scan_project(self.project_path)
+
+        self.assertTrue(
+            any(
+                finding["type"] == "hardlink"
+                and finding["path"] == "linked.txt"
+                for finding in result["findings"]
+            )
+        )
         self.assertNotIn("linked.txt", result["reviewedFiles"])
         self.assertNotIn("linked.txt", result["ignoredFiles"])
         self.assertFalse(
@@ -173,6 +202,33 @@ class ScannerLinkedPathTests(unittest.TestCase):
                 for finding in result["findings"]
             )
         )
+
+    def test_hardlinked_ignore_file_is_reported_and_not_used(self) -> None:
+        external_ignore = self.base_path / "external-ignore"
+        external_ignore.write_text("payload.txt\n", encoding="utf-8")
+        try:
+            os.link(
+                external_ignore,
+                self.project_path / ".codexforgeignore",
+            )
+        except OSError as exc:
+            self.skipTest(f"Hardlinks are unavailable: {exc}")
+        (self.project_path / "payload.txt").write_text(
+            "eval(untrusted_input)",
+            encoding="utf-8",
+        )
+
+        result = scan_project(self.project_path)
+
+        self.assertTrue(
+            any(
+                finding["type"] == "hardlink"
+                and finding["path"] == ".codexforgeignore"
+                for finding in result["findings"]
+            )
+        )
+        self.assertNotIn("payload.txt", result["ignoredFiles"])
+        self.assertIn("payload.txt", result["reviewedFiles"])
 
 
 if __name__ == "__main__":

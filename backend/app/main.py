@@ -19,7 +19,7 @@ from .database import (
     row_to_scan,
     set_setting,
 )
-from .safety import configured_root, ensure_inside_root, ensure_project_directory, sanitize_folder_name
+from .safety import configured_root, ensure_inside_root, ensure_project_directory, has_multiple_hardlinks, sanitize_folder_name
 from .scanner import scan_project
 from .schemas import AgentPreviewRequest, NoteCreate, ProjectCreate, ProjectPathRequest, ProjectRegister, ProjectRootUpdate, TrustProfileRequest
 
@@ -356,6 +356,15 @@ def _agents_path(project: Path) -> Path:
         raise HTTPException(status_code=403, detail="AGENTS.md target is outside the selected project folder.") from exc
     if validated_path != agents_path:
         raise HTTPException(status_code=403, detail="AGENTS.md target was redirected.")
+    try:
+        hardlinked = has_multiple_hardlinks(agents_path)
+    except OSError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="AGENTS.md target could not be safely inspected.",
+        ) from exc
+    if hardlinked:
+        raise HTTPException(status_code=409, detail="AGENTS.md target has multiple hard links.")
     if agents_path.exists() and not agents_path.is_file():
         raise HTTPException(status_code=409, detail="AGENTS.md target exists but is not a regular file.")
     return agents_path

@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from .safety import is_reparse_point_or_symlink
+from .safety import has_multiple_hardlinks, is_reparse_point_or_symlink
 
 
 RISK_ORDER = {"none": 0, "low": 1, "medium": 2, "high": 3}
@@ -99,6 +99,13 @@ def scan_project(project_path: Path) -> dict[str, Any]:
             if is_reparse_point_or_symlink(file_path):
                 if relative_path not in reported_linked_paths:
                     findings.append(_linked_path_finding(relative_path))
+                    reported_linked_paths.add(relative_path)
+                continue
+
+            unsafe_finding = _unsafe_file_finding(file_path, relative_path)
+            if unsafe_finding:
+                if relative_path not in reported_linked_paths:
+                    findings.append(unsafe_finding)
                     reported_linked_paths.add(relative_path)
                 continue
 
@@ -220,6 +227,10 @@ def _load_ignore_patterns(
     if is_reparse_point_or_symlink(ignore_path):
         return set(), _linked_path_finding(IGNORE_FILE_NAME)
 
+    unsafe_finding = _unsafe_file_finding(ignore_path, IGNORE_FILE_NAME)
+    if unsafe_finding:
+        return set(), unsafe_finding
+
     try:
         lines = ignore_path.read_text(encoding="utf-8").splitlines()
     except OSError:
@@ -255,6 +266,28 @@ def _linked_path_finding(path: str) -> dict[str, str]:
         "Linked filesystem entry was not scanned because it may lead outside the selected project.",
     )
 
+
+def _unsafe_file_finding(
+    file_path: Path,
+    relative_path: str,
+) -> dict[str, str] | None:
+    try:
+        if has_multiple_hardlinks(file_path):
+            return _finding(
+                relative_path,
+                "hardlink",
+                "high",
+                "Hardlinked file was not scanned because another path may reference the same content.",
+            )
+    except OSError:
+        return _finding(
+            relative_path,
+            "filesystem-entry-inspection-error",
+            "high",
+            "Filesystem entry was not scanned because its link status could not be inspected safely.",
+        )
+
+    return None
 
 def _overall_risk(
     findings: list[dict[str, str]],
