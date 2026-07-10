@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { isAbortError, requestIsCurrent } from "./projectRequests.js";
 import "./styles.css";
 
 const API_BASE = "http://127.0.0.1:8000";
@@ -84,6 +85,7 @@ function App() {
   const [projects, setProjects] = useState([]);
   const [selectedPath, setSelectedPath] = useState("");
   const [loading, setLoading] = useState(true);
+  const [projectDetailsLoading, setProjectDetailsLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [createForm, setCreateForm] = useState({ project_name: "", existing_path: "", description: "", project_type: "" });
   const [agentForm, setAgentForm] = useState(EMPTY_AGENT_FORM);
@@ -101,6 +103,8 @@ function App() {
   const [copyStatus, setCopyStatus] = useState("");
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [selectedSection, setSelectedSection] = useState("workspace");
+  const selectedPathRef = useRef("");
+  const projectGenerationRef = useRef(0);
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.path === selectedPath) || null,
@@ -127,23 +131,63 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (selectedPath) {
-      setTrustProfile({ ...EMPTY_TRUST_PROFILE, project_path: selectedPath });
-      setTrustProfileMessage("");
-      loadNotes(selectedPath);
-      loadScanHistory(selectedPath);
-      loadTrustProfile(selectedPath);
-      checkAgentsExists(selectedPath);
-      setAgentPreview("");
-      setScanResult(null);
-      setSelectedScanId(null);
-      setCopyStatus("");
+    if (!selectedPath) {
+      setProjectDetailsLoading(false);
+      return undefined;
     }
+
+    const generation = projectGenerationRef.current;
+    const controller = new AbortController();
+    Promise.allSettled([
+      loadNotes(selectedPath, generation, controller.signal),
+      loadScanHistory(selectedPath, generation, controller.signal),
+      loadTrustProfile(selectedPath, generation, controller.signal),
+      checkAgentsExists(selectedPath, generation, controller.signal),
+    ]).then(() => {
+      if (!controller.signal.aborted && projectRequestIsCurrent(selectedPath, generation)) {
+        setProjectDetailsLoading(false);
+      }
+    });
+    return () => controller.abort();
   }, [selectedPath]);
 
   useEffect(() => {
     setCopyStatus("");
   }, [displayedScan?.id]);
+
+  function resetProjectState(path) {
+    setMessage("");
+    setProjectDetailsLoading(Boolean(path));
+    setAgentForm(EMPTY_AGENT_FORM);
+    setAgentPreview("");
+    setAgentsExists(false);
+    setScanResult(null);
+    setScanHistory([]);
+    setSelectedScanId(null);
+    setTrustProfile({ ...EMPTY_TRUST_PROFILE, project_path: path });
+    setTrustProfileMessage("");
+    setNotes([]);
+    setNoteBody("");
+    setCopyStatus("");
+  }
+
+  function selectProject(path) {
+    const nextPath = path || "";
+    if (selectedPathRef.current === nextPath) return;
+    selectedPathRef.current = nextPath;
+    projectGenerationRef.current += 1;
+    resetProjectState(nextPath);
+    setSelectedPath(nextPath);
+  }
+
+  function projectRequestIsCurrent(path, generation) {
+    return requestIsCurrent(
+      selectedPathRef.current,
+      projectGenerationRef.current,
+      path,
+      generation,
+    );
+  }
 
   async function refreshProjects() {
     setLoading(true);
@@ -152,20 +196,13 @@ function App() {
       setProjectRoot(data.project_root);
       setProjectRootMessage(data.message || "");
       setProjects(data.projects);
-      const stillSelected = data.projects.some((project) => project.path === selectedPath);
-      if ((!selectedPath || !stillSelected) && data.projects.length > 0) {
-        setSelectedPath(data.projects[0].path);
+      const currentPath = selectedPathRef.current;
+      const stillSelected = data.projects.some((project) => project.path === currentPath);
+      if ((!currentPath || !stillSelected) && data.projects.length > 0) {
+        selectProject(data.projects[0].path);
       }
       if (!stillSelected && data.projects.length === 0) {
-        setSelectedPath("");
-        setScanResult(null);
-        setSelectedScanId(null);
-        setScanHistory([]);
-        setTrustProfile(EMPTY_TRUST_PROFILE);
-        setTrustProfileMessage("");
-        setNotes([]);
-        setAgentsExists(false);
-        setAgentPreview("");
+        selectProject("");
       }
     } catch (error) {
       setMessage(error.message);
@@ -189,7 +226,7 @@ function App() {
       setCreateForm({ project_name: "", existing_path: "", description: "", project_type: "" });
       setCreateProjectOpen(false);
       await refreshProjects();
-      setSelectedPath(created.path);
+      selectProject(created.path);
     } catch (error) {
       setMessage(error.message);
     }
@@ -210,7 +247,7 @@ function App() {
       setCreateForm({ project_name: "", existing_path: "", description: "", project_type: "" });
       setCreateProjectOpen(false);
       await refreshProjects();
-      setSelectedPath(registered.path);
+      selectProject(registered.path);
     } catch (error) {
       setMessage(error.message);
     }
@@ -227,16 +264,21 @@ function App() {
 
   async function previewAgents(event) {
     event.preventDefault();
-    if (!selectedPath) return;
+    const projectPath = selectedPathRef.current;
+    const generation = projectGenerationRef.current;
+    if (!projectPath) return;
     try {
       const data = await api("/api/agents/preview", {
         method: "POST",
-        body: { project_path: selectedPath, ...agentForm },
+        body: { project_path: projectPath, ...agentForm },
       });
+      if (!projectRequestIsCurrent(projectPath, generation)) return;
       setAgentPreview(data.content);
       setMessage("AGENTS.md preview generated.");
     } catch (error) {
-      setMessage(error.message);
+      if (!isAbortError(error) && projectRequestIsCurrent(projectPath, generation)) {
+        setMessage(error.message);
+      }
     }
   }
 
@@ -246,21 +288,26 @@ function App() {
   }
 
   async function writeAgents() {
-    if (!selectedPath) return;
+    const projectPath = selectedPathRef.current;
+    const generation = projectGenerationRef.current;
+    if (!projectPath) return;
     try {
       const overwrite = agentsExists
         ? window.confirm("AGENTS.md already exists for this project. Overwrite it with the previewed content?")
         : false;
 
       if (agentsExists && !overwrite) {
-        setMessage("Write canceled. Existing AGENTS.md was not changed.");
+        if (projectRequestIsCurrent(projectPath, generation)) {
+          setMessage("Write canceled. Existing AGENTS.md was not changed.");
+        }
         return;
       }
 
       const data = await api("/api/agents/write", {
         method: "POST",
-        body: { project_path: selectedPath, ...agentForm, overwrite },
+        body: { project_path: projectPath, ...agentForm, overwrite },
       });
+      if (!projectRequestIsCurrent(projectPath, generation)) return;
       if (data.confirmation_required) {
         setAgentsExists(true);
         setMessage(data.message);
@@ -270,91 +317,120 @@ function App() {
       setAgentsExists(true);
       setMessage(data.message || `Wrote ${data.path}`);
     } catch (error) {
-      setMessage(error.message);
+      if (!isAbortError(error) && projectRequestIsCurrent(projectPath, generation)) {
+        setMessage(error.message);
+      }
     }
   }
 
-  async function checkAgentsExists(path) {
+  async function checkAgentsExists(path, generation, signal) {
     try {
-      const data = await api(`/api/agents/exists?project_path=${encodeURIComponent(path)}`);
+      const data = await api(`/api/agents/exists?project_path=${encodeURIComponent(path)}`, { signal });
+      if (!projectRequestIsCurrent(path, generation)) return;
       setAgentsExists(Boolean(data.exists));
     } catch (error) {
-      setAgentsExists(false);
-      setMessage(error.message);
+      if (!isAbortError(error) && projectRequestIsCurrent(path, generation)) {
+        setAgentsExists(false);
+        setMessage(error.message);
+      }
     }
   }
 
   async function runScan() {
-    if (!selectedPath) return;
+    const projectPath = selectedPathRef.current;
+    const generation = projectGenerationRef.current;
+    if (!projectPath) return;
     try {
-      const data = await api("/api/scans", { method: "POST", body: { project_path: selectedPath } });
+      const data = await api("/api/scans", { method: "POST", body: { project_path: projectPath } });
+      if (!projectRequestIsCurrent(projectPath, generation)) return;
       setScanResult(data);
       setSelectedScanId(null);
       setMessage("Scan complete. Review the findings below.");
-      await loadScanHistory(selectedPath);
+      await loadScanHistory(projectPath, generation);
+      if (!projectRequestIsCurrent(projectPath, generation)) return;
       await refreshProjects();
-      setSelectedPath(selectedPath);
     } catch (error) {
-      setMessage(error.message);
+      if (!isAbortError(error) && projectRequestIsCurrent(projectPath, generation)) {
+        setMessage(error.message);
+      }
     }
   }
 
-  async function loadScanHistory(path) {
+  async function loadScanHistory(path, generation, signal) {
     try {
-      const data = await api(`/api/scans/history?project_path=${encodeURIComponent(path)}`);
+      const data = await api(`/api/scans/history?project_path=${encodeURIComponent(path)}`, { signal });
+      if (!projectRequestIsCurrent(path, generation)) return;
       setScanHistory(data.scans);
     } catch (error) {
-      setScanHistory([]);
-      setMessage(error.message);
+      if (!isAbortError(error) && projectRequestIsCurrent(path, generation)) {
+        setScanHistory([]);
+        setMessage(error.message);
+      }
     }
   }
 
-  async function loadNotes(path) {
+  async function loadNotes(path, generation, signal) {
     try {
-      const data = await api(`/api/notes?project_path=${encodeURIComponent(path)}`);
+      const data = await api(`/api/notes?project_path=${encodeURIComponent(path)}`, { signal });
+      if (!projectRequestIsCurrent(path, generation)) return;
       setNotes(data.notes);
     } catch (error) {
-      setNotes([]);
-      setMessage(error.message);
+      if (!isAbortError(error) && projectRequestIsCurrent(path, generation)) {
+        setNotes([]);
+        setMessage(error.message);
+      }
     }
   }
 
-  async function loadTrustProfile(path) {
+  async function loadTrustProfile(path, generation, signal) {
     try {
-      const data = await api(`/api/trust-profile?project_path=${encodeURIComponent(path)}`);
+      const data = await api(`/api/trust-profile?project_path=${encodeURIComponent(path)}`, { signal });
+      if (!projectRequestIsCurrent(path, generation)) return;
       setTrustProfile({ ...EMPTY_TRUST_PROFILE, ...data });
       setTrustProfileMessage("");
     } catch (error) {
-      setTrustProfile(EMPTY_TRUST_PROFILE);
-      setTrustProfileMessage(error.message);
+      if (!isAbortError(error) && projectRequestIsCurrent(path, generation)) {
+        setTrustProfile({ ...EMPTY_TRUST_PROFILE, project_path: path });
+        setTrustProfileMessage(error.message);
+      }
     }
   }
 
   async function saveTrustProfile(profile) {
-    if (!selectedPath) return;
+    const projectPath = selectedPathRef.current;
+    const generation = projectGenerationRef.current;
+    if (!projectPath) return;
     try {
       const data = await api("/api/trust-profile", {
         method: "PUT",
-        body: { ...profile, project_path: selectedPath },
+        body: { ...profile, project_path: projectPath },
       });
+      if (!projectRequestIsCurrent(projectPath, generation)) return;
       setTrustProfile({ ...EMPTY_TRUST_PROFILE, ...data });
       setTrustProfileMessage("Trust profile saved.");
     } catch (error) {
-      setTrustProfileMessage(error.message);
+      if (!isAbortError(error) && projectRequestIsCurrent(projectPath, generation)) {
+        setTrustProfileMessage(error.message);
+      }
     }
   }
 
   async function addNote(event) {
     event.preventDefault();
-    if (!selectedPath || !noteBody.trim()) return;
+    const projectPath = selectedPathRef.current;
+    const generation = projectGenerationRef.current;
+    if (!projectPath || !noteBody.trim()) return;
     try {
-      await api("/api/notes", { method: "POST", body: { project_path: selectedPath, body: noteBody } });
-      setNoteBody("");
-      await loadNotes(selectedPath);
+      await api("/api/notes", { method: "POST", body: { project_path: projectPath, body: noteBody } });
+      if (projectRequestIsCurrent(projectPath, generation)) {
+        setNoteBody("");
+        await loadNotes(projectPath, generation);
+      }
       await refreshProjects();
-      setSelectedPath(selectedPath);
     } catch (error) {
-      setMessage(error.message);
+      if (!isAbortError(error) && projectRequestIsCurrent(projectPath, generation)) {
+        setMessage(error.message);
+      }
     }
   }
 
@@ -421,7 +497,7 @@ function App() {
               <button
                 key={project.path}
                 className={`project-item ${project.path === selectedPath ? "selected" : ""}`}
-                onClick={() => setSelectedPath(project.path)}
+                onClick={() => selectProject(project.path)}
               >
                 <span className="project-name">{project.name}</span>
                 <span className={`risk risk-${project.last_risk_level}`}>{project.last_risk_level}</span>
@@ -463,6 +539,7 @@ function App() {
         </header>
 
         {message && <div className="notice">{message}</div>}
+        {projectDetailsLoading && selectedProject ? <div className="notice subtle-notice">Loading project details...</div> : null}
         {copyStatus && <div className="notice subtle-notice">{copyStatus}</div>}
         {projectRootMessage && <div className="notice">{projectRootMessage}</div>}
         <div className="workspace-root-line" title={selectedProject?.path || projectRoot}>
@@ -470,12 +547,12 @@ function App() {
         </div>
 
         <section className="content">
-          {selectedSection === "workspace" && selectedProject ? (
+          {selectedSection === "workspace" && selectedProject && !projectDetailsLoading ? (
             <>
               <SummaryCards projects={projects} report={displayedReport} result={displayedScan} comparison={displayedComparison} />
               <section className="dashboard-grid">
                 <OverallRiskPanel report={displayedReport} result={displayedScan} trustProfile={trustProfile} />
-                <FindingsOverview report={displayedReport} />
+                <FindingsOverview report={displayedReport} result={displayedScan} />
                 <ProjectExpectationsSummary profile={trustProfile} onEdit={() => setSelectedSection("trustProfiles")} />
                 <RecentActivity changelog={changelog} scans={scanHistory} />
               </section>
@@ -483,14 +560,14 @@ function App() {
           ) : null}
 
           {selectedSection === "projects" ? (
-            <ProjectsSection projects={projects} selectedPath={selectedPath} onSelectProject={setSelectedPath} onNewProject={() => setCreateProjectOpen(true)} loading={loading} />
+            <ProjectsSection projects={projects} selectedPath={selectedPath} onSelectProject={selectProject} onNewProject={() => setCreateProjectOpen(true)} loading={loading} />
           ) : null}
 
-          {selectedSection === "trustProfiles" && selectedProject ? (
+          {selectedSection === "trustProfiles" && selectedProject && !projectDetailsLoading ? (
             <TrustProfilePanel profile={trustProfile} message={trustProfileMessage} onSave={saveTrustProfile} />
           ) : null}
 
-          {selectedSection === "reports" && selectedProject ? (
+          {selectedSection === "reports" && selectedProject && !projectDetailsLoading ? (
             <>
               <ScanReport
                 result={displayedScan}
@@ -515,7 +592,7 @@ function App() {
           {selectedSection === "settings" ? (
             <>
               <SettingsSection projectRoot={projectRoot} selectedProject={selectedProject} />
-              {selectedProject ? (
+              {selectedProject && !projectDetailsLoading ? (
                 <>
                   <AgentGenerator form={agentForm} updateField={updateAgentField} preview={agentPreview} exists={agentsExists} onPreview={previewAgents} onWrite={writeAgents} open={majorSectionsOpen.agents} onOpenChange={(open) => setMajorSectionOpen("agents", open)} />
                   <Notes notes={notes} noteBody={noteBody} setNoteBody={setNoteBody} onAdd={addNote} open={majorSectionsOpen.notes} onOpenChange={(open) => setMajorSectionOpen("notes", open)} />
@@ -546,14 +623,15 @@ function App() {
 }
 
 function SummaryCards({ projects, report, result, comparison }) {
+  const hasScan = Boolean(result);
   const highestSeverity = highestFindingSeverity(result?.findings || []) || "none";
   const cards = [
-    { label: "Risk Level", value: formatRiskLabel(result?.overall_risk), detail: "Current scan", icon: "◇", risk: result?.overall_risk || "none" },
+    { label: "Risk Level", value: hasScan ? formatRiskLabel(result.overall_risk) : "NOT SCANNED", detail: hasScan ? "Current scan" : "Run the first scan", icon: "◇", risk: result?.overall_risk || "none" },
     { label: "Projects", value: projects.length, detail: "In this workspace", icon: "▣" },
-    { label: "Findings", value: report.totalFindings, detail: report.totalFindings ? "Review prompts found" : "No issues detected", icon: "⌕" },
-    { label: "Highest Severity", value: formatRiskLabel(highestSeverity), detail: highestSeverity === "none" ? "No issues detected" : "Highest finding level", icon: "△", risk: highestSeverity },
+    { label: "Findings", value: hasScan ? report.totalFindings : "N/A", detail: hasScan ? (report.totalFindings ? "Review prompts found" : "No findings detected") : "Project has not been scanned", icon: "⌕" },
+    { label: "Highest Severity", value: hasScan ? formatRiskLabel(highestSeverity) : "N/A", detail: hasScan ? (highestSeverity === "none" ? "No findings detected" : "Highest finding level") : "Project has not been scanned", icon: "△", risk: hasScan ? highestSeverity : "none" },
     { label: "Last Scan", value: formatDate(result?.scan_date), detail: result ? "Completed successfully" : "Never scanned", icon: "◷" },
-    { label: "Changed Since Last Scan", value: comparison?.riskChange || "No previous scan", detail: comparison?.findingDelta || "Baseline not established", icon: "▤" },
+    { label: "Changed Since Last Scan", value: hasScan ? (comparison?.riskChange || "No previous scan") : "NOT SCANNED", detail: hasScan ? (comparison?.findingDelta || "Baseline not established") : "Run the first scan", icon: "▤" },
   ];
 
   return (
@@ -703,6 +781,20 @@ function SettingsSection({ projectRoot, selectedProject }) {
 }
 
 function OverallRiskPanel({ report, result, trustProfile }) {
+  if (!result) {
+    return (
+      <section className="panel overview-panel overall-risk-panel">
+        <div className="panel-heading">
+          <div>
+            <h2>Overall Risk</h2>
+            <p className="muted">No scan has been run for this project yet.</p>
+          </div>
+        </div>
+        <p className="muted">Run the first scan to calculate risk and review project findings.</p>
+      </section>
+    );
+  }
+
   const risk = result?.overall_risk || "none";
   const reasons = buildRiskReasons(report, risk);
   const metrics = [
@@ -747,7 +839,21 @@ function OverallRiskPanel({ report, result, trustProfile }) {
   );
 }
 
-function FindingsOverview({ report }) {
+function FindingsOverview({ report, result }) {
+  if (!result) {
+    return (
+      <section className="panel overview-panel findings-overview">
+        <div className="panel-heading">
+          <div>
+            <h2>Scan Report / Findings Overview</h2>
+            <p className="muted">No scan results are available for this project yet.</p>
+          </div>
+        </div>
+        <p className="muted">Run the first scan to review manifests, lockfiles, scripts, and other findings.</p>
+      </section>
+    );
+  }
+
   const rows = scanCategoryRows(report);
   return (
     <section className="panel overview-panel findings-overview">
@@ -1324,6 +1430,7 @@ function History({ scans, selectedScanId, onSelectScan, open, onOpenChange }) {
 async function api(path, options = {}) {
   const response = await fetch(`${API_BASE}${path}`, {
     method: options.method || "GET",
+    signal: options.signal,
     headers: options.body ? { "Content-Type": "application/json" } : undefined,
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
