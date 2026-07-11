@@ -85,7 +85,7 @@ const SCAN_GUIDANCE = {
   },
 };
 
-function App() {
+export function App() {
   const [projectRoot, setProjectRoot] = useState("");
   const [projectRootMessage, setProjectRootMessage] = useState("");
   const [projects, setProjects] = useState([]);
@@ -433,8 +433,6 @@ function App() {
           reloadSelectedProjectAfterStaleMutation(projectPath, generation);
         }
       } else if (projectRequestIsCurrent(projectPath, generation)) {
-        setScanResult(null);
-        setSelectedScanId(null);
         await loadScanHistory(projectPath, generation);
         if (!projectRequestIsCurrent(projectPath, generation)) {
           reloadSelectedProjectAfterStaleMutation(projectPath, generation);
@@ -2086,4 +2084,6 @@ function formatFindingSummary(summary) {
     .join(", ");
 }
 
-createRoot(document.getElementById("root")).render(<App />);
+if (!import.meta.env.SSR) {
+  createRoot(document.getElementById("root")).render(<App />);
+}
