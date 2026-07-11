@@ -2,8 +2,10 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   isAbortError,
-  projectListRequestIsCurrent,
+  projectListResponsePolicy,
   requestIsCurrent,
+  scopedRequestIsCurrent,
+  shouldReloadSelectedProjectAfterMutation,
 } from "./projectRequests.js";
 import "./styles.css";
 
@@ -107,9 +109,18 @@ function App() {
   const [copyStatus, setCopyStatus] = useState("");
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [selectedSection, setSelectedSection] = useState("workspace");
+  const [projectDetailsRevision, setProjectDetailsRevision] = useState(0);
   const selectedPathRef = useRef("");
   const projectGenerationRef = useRef(0);
   const projectsRequestRef = useRef({ id: 0, controller: null });
+  const projectRequestsByScopeRef = useRef({
+    notes: 0,
+    scanHistory: 0,
+    trustProfile: 0,
+    agentsExists: 0,
+    scanMutation: 0,
+    noteMutation: 0,
+  });
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.path === selectedPath) || null,
@@ -154,7 +165,7 @@ function App() {
       }
     });
     return () => controller.abort();
-  }, [selectedPath]);
+  }, [selectedPath, projectDetailsRevision]);
 
   useEffect(() => {
     setCopyStatus("");
@@ -194,6 +205,37 @@ function App() {
     );
   }
 
+  function beginScopedProjectRequest(scope) {
+    const requestId = projectRequestsByScopeRef.current[scope] + 1;
+    projectRequestsByScopeRef.current[scope] = requestId;
+    return requestId;
+  }
+
+  function scopedProjectRequestIsCurrent(scope, requestId, path, generation) {
+    return scopedRequestIsCurrent(
+      projectRequestsByScopeRef.current[scope],
+      requestId,
+      selectedPathRef.current,
+      projectGenerationRef.current,
+      path,
+      generation,
+    );
+  }
+
+  function reloadSelectedProjectAfterStaleMutation(path, generation) {
+    const shouldReload = shouldReloadSelectedProjectAfterMutation(
+      selectedPathRef.current,
+      projectGenerationRef.current,
+      path,
+      generation,
+    );
+    if (!shouldReload) return;
+
+    projectGenerationRef.current += 1;
+    setProjectDetailsLoading(true);
+    setProjectDetailsRevision((revision) => revision + 1);
+  }
+
   async function refreshProjects(
     requestPath = null,
     requestGeneration = null,
@@ -203,8 +245,8 @@ function App() {
     const controller = new AbortController();
     projectsRequestRef.current = { id: requestId, controller };
 
-    const responseIsCurrent = () =>
-      projectListRequestIsCurrent(
+    const responsePolicy = () =>
+      projectListResponsePolicy(
         projectsRequestRef.current.id,
         requestId,
         selectedPathRef.current,
@@ -218,11 +260,14 @@ function App() {
       const data = await api("/api/projects", {
         signal: controller.signal,
       });
-      if (!responseIsCurrent()) return;
+      const policy = responsePolicy();
+      if (!policy.applyData) return;
 
       setProjectRoot(data.project_root);
       setProjectRootMessage(data.message || "");
       setProjects(data.projects);
+      if (!policy.applySelection) return;
+
       const currentPath = selectedPathRef.current;
       const stillSelected = data.projects.some((project) => project.path === currentPath);
       if ((!currentPath || !stillSelected) && data.projects.length > 0) {
@@ -232,7 +277,7 @@ function App() {
         selectProject("");
       }
     } catch (error) {
-      if (!isAbortError(error) && responseIsCurrent()) {
+      if (!isAbortError(error) && responsePolicy().applySelection) {
         setMessage(error.message);
       }
     } finally {
@@ -338,7 +383,11 @@ function App() {
         method: "POST",
         body: { project_path: projectPath, ...agentForm, overwrite },
       });
-      if (!projectRequestIsCurrent(projectPath, generation)) return;
+      if (!projectRequestIsCurrent(projectPath, generation)) {
+        reloadSelectedProjectAfterStaleMutation(projectPath, generation);
+        return;
+      }
+      beginScopedProjectRequest("agentsExists");
       if (data.confirmation_required) {
         setAgentsExists(true);
         setMessage(data.message);
@@ -355,12 +404,13 @@ function App() {
   }
 
   async function checkAgentsExists(path, generation, signal) {
+    const requestId = beginScopedProjectRequest("agentsExists");
     try {
       const data = await api(`/api/agents/exists?project_path=${encodeURIComponent(path)}`, { signal });
-      if (!projectRequestIsCurrent(path, generation)) return;
+      if (!scopedProjectRequestIsCurrent("agentsExists", requestId, path, generation)) return;
       setAgentsExists(Boolean(data.exists));
     } catch (error) {
-      if (!isAbortError(error) && projectRequestIsCurrent(path, generation)) {
+      if (!isAbortError(error) && scopedProjectRequestIsCurrent("agentsExists", requestId, path, generation)) {
         setAgentsExists(false);
         setMessage(error.message);
       }
@@ -371,29 +421,43 @@ function App() {
     const projectPath = selectedPathRef.current;
     const generation = projectGenerationRef.current;
     if (!projectPath) return;
+    const requestId = beginScopedProjectRequest("scanMutation");
     try {
       const data = await api("/api/scans", { method: "POST", body: { project_path: projectPath } });
-      if (!projectRequestIsCurrent(projectPath, generation)) return;
-      setScanResult(data);
-      setSelectedScanId(null);
-      setMessage("Scan complete. Review the findings below.");
-      await loadScanHistory(projectPath, generation);
-      if (!projectRequestIsCurrent(projectPath, generation)) return;
+      if (scopedProjectRequestIsCurrent("scanMutation", requestId, projectPath, generation)) {
+        setScanResult(data);
+        setSelectedScanId(null);
+        setMessage("Scan complete. Review the findings below.");
+        await loadScanHistory(projectPath, generation);
+        if (!projectRequestIsCurrent(projectPath, generation)) {
+          reloadSelectedProjectAfterStaleMutation(projectPath, generation);
+        }
+      } else if (projectRequestIsCurrent(projectPath, generation)) {
+        setScanResult(null);
+        setSelectedScanId(null);
+        await loadScanHistory(projectPath, generation);
+        if (!projectRequestIsCurrent(projectPath, generation)) {
+          reloadSelectedProjectAfterStaleMutation(projectPath, generation);
+        }
+      } else {
+        reloadSelectedProjectAfterStaleMutation(projectPath, generation);
+      }
       await refreshProjects(projectPath, generation);
     } catch (error) {
-      if (!isAbortError(error) && projectRequestIsCurrent(projectPath, generation)) {
+      if (!isAbortError(error) && scopedProjectRequestIsCurrent("scanMutation", requestId, projectPath, generation)) {
         setMessage(error.message);
       }
     }
   }
 
   async function loadScanHistory(path, generation, signal) {
+    const requestId = beginScopedProjectRequest("scanHistory");
     try {
       const data = await api(`/api/scans/history?project_path=${encodeURIComponent(path)}`, { signal });
-      if (!projectRequestIsCurrent(path, generation)) return;
+      if (!scopedProjectRequestIsCurrent("scanHistory", requestId, path, generation)) return;
       setScanHistory(data.scans);
     } catch (error) {
-      if (!isAbortError(error) && projectRequestIsCurrent(path, generation)) {
+      if (!isAbortError(error) && scopedProjectRequestIsCurrent("scanHistory", requestId, path, generation)) {
         setScanHistory([]);
         setMessage(error.message);
       }
@@ -401,12 +465,13 @@ function App() {
   }
 
   async function loadNotes(path, generation, signal) {
+    const requestId = beginScopedProjectRequest("notes");
     try {
       const data = await api(`/api/notes?project_path=${encodeURIComponent(path)}`, { signal });
-      if (!projectRequestIsCurrent(path, generation)) return;
+      if (!scopedProjectRequestIsCurrent("notes", requestId, path, generation)) return;
       setNotes(data.notes);
     } catch (error) {
-      if (!isAbortError(error) && projectRequestIsCurrent(path, generation)) {
+      if (!isAbortError(error) && scopedProjectRequestIsCurrent("notes", requestId, path, generation)) {
         setNotes([]);
         setMessage(error.message);
       }
@@ -414,13 +479,14 @@ function App() {
   }
 
   async function loadTrustProfile(path, generation, signal) {
+    const requestId = beginScopedProjectRequest("trustProfile");
     try {
       const data = await api(`/api/trust-profile?project_path=${encodeURIComponent(path)}`, { signal });
-      if (!projectRequestIsCurrent(path, generation)) return;
+      if (!scopedProjectRequestIsCurrent("trustProfile", requestId, path, generation)) return;
       setTrustProfile({ ...EMPTY_TRUST_PROFILE, ...data });
       setTrustProfileMessage("");
     } catch (error) {
-      if (!isAbortError(error) && projectRequestIsCurrent(path, generation)) {
+      if (!isAbortError(error) && scopedProjectRequestIsCurrent("trustProfile", requestId, path, generation)) {
         setTrustProfile({ ...EMPTY_TRUST_PROFILE, project_path: path });
         setTrustProfileMessage(error.message);
       }
@@ -436,7 +502,11 @@ function App() {
         method: "PUT",
         body: { ...profile, project_path: projectPath },
       });
-      if (!projectRequestIsCurrent(projectPath, generation)) return;
+      if (!projectRequestIsCurrent(projectPath, generation)) {
+        reloadSelectedProjectAfterStaleMutation(projectPath, generation);
+        return;
+      }
+      beginScopedProjectRequest("trustProfile");
       setTrustProfile({ ...EMPTY_TRUST_PROFILE, ...data });
       setTrustProfileMessage("Trust profile saved.");
     } catch (error) {
@@ -451,17 +521,24 @@ function App() {
     const projectPath = selectedPathRef.current;
     const generation = projectGenerationRef.current;
     if (!projectPath || !noteBody.trim()) return;
+    const requestId = beginScopedProjectRequest("noteMutation");
     try {
       await api("/api/notes", { method: "POST", body: { project_path: projectPath, body: noteBody } });
-      if (!projectRequestIsCurrent(projectPath, generation)) return;
-
-      setNoteBody("");
-      await loadNotes(projectPath, generation);
-      if (!projectRequestIsCurrent(projectPath, generation)) return;
+      if (projectRequestIsCurrent(projectPath, generation)) {
+        if (scopedProjectRequestIsCurrent("noteMutation", requestId, projectPath, generation)) {
+          setNoteBody("");
+        }
+        await loadNotes(projectPath, generation);
+        if (!projectRequestIsCurrent(projectPath, generation)) {
+          reloadSelectedProjectAfterStaleMutation(projectPath, generation);
+        }
+      } else {
+        reloadSelectedProjectAfterStaleMutation(projectPath, generation);
+      }
 
       await refreshProjects(projectPath, generation);
     } catch (error) {
-      if (!isAbortError(error) && projectRequestIsCurrent(projectPath, generation)) {
+      if (!isAbortError(error) && scopedProjectRequestIsCurrent("noteMutation", requestId, projectPath, generation)) {
         setMessage(error.message);
       }
     }

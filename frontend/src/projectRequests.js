@@ -2,7 +2,7 @@ export function requestIsCurrent(currentPath, currentGeneration, requestPath, re
   return currentPath === requestPath && currentGeneration === requestGeneration;
 }
 
-export function projectListRequestIsCurrent(
+export function scopedRequestIsCurrent(
   latestRequestId,
   requestId,
   currentPath,
@@ -10,18 +10,42 @@ export function projectListRequestIsCurrent(
   requestPath,
   requestGeneration,
 ) {
-  if (latestRequestId !== requestId) {
-    return false;
-  }
-  if (requestPath === null) {
-    return true;
-  }
-  return requestIsCurrent(
+  return latestRequestId === requestId && requestIsCurrent(
     currentPath,
     currentGeneration,
     requestPath,
     requestGeneration,
   );
+}
+
+export function shouldReloadSelectedProjectAfterMutation(
+  currentPath,
+  currentGeneration,
+  requestPath,
+  requestGeneration,
+) {
+  return currentPath === requestPath && currentGeneration !== requestGeneration;
+}
+
+export function projectListResponsePolicy(
+  latestRequestId,
+  requestId,
+  currentPath,
+  currentGeneration,
+  requestPath,
+  requestGeneration,
+) {
+  const applyData = latestRequestId === requestId;
+  const applySelection = applyData && (
+    requestPath === null
+    || requestIsCurrent(
+      currentPath,
+      currentGeneration,
+      requestPath,
+      requestGeneration,
+    )
+  );
+  return { applyData, applySelection };
 }
 
 export function isAbortError(error) {
