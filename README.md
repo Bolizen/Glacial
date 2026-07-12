@@ -82,6 +82,7 @@ The app runs at `http://127.0.0.1:5173`.
 - The "Why this risk?" explanation uses existing scan metadata and findings: LOW risk can call out reassuring signals such as no lifecycle scripts, no secret-looking files, no executables, and reviewed manifests or lockfiles; MEDIUM/HIGH risk summarizes contributing finding types.
 - Recent scans are stored locally in SQLite as compact metadata: timestamp, overall risk, finding count, reviewed file count, ignored file count, finding-type summary, and risk-change marker.
 - The "Changed since previous scan" section compares the newest scan with the immediately previous scan for the same project, showing risk change, count deltas, and finding-type summary changes. If there is no previous scan, it shows a friendly empty state.
+- Copied and downloaded Markdown reports include every scanner finding with its severity, type, path, explanation, recommended action, and available metadata.
 - Older scan rows may show unavailable or zero metadata for fields added after those scans were created. Scan history does not store full file contents.
 - Findings are review prompts, not proof of compromise, and the scanner is not a malware detector.
 - `.codexforgeignore` can suppress known-safe local or self-referential scanner noise. Ignored files are treated neutrally, not as suspicious by default.

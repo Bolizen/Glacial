@@ -7,6 +7,7 @@ import {
   scopedRequestIsCurrent,
   shouldReloadSelectedProjectAfterMutation,
 } from "./projectRequests.js";
+import { buildScanReportMarkdown, normalizeFinding, SCAN_GUIDANCE } from "./reportMarkdown.js";
 import "./styles.css";
 
 const API_BASE = "http://127.0.0.1:8000";
@@ -54,37 +55,6 @@ const TRUST_PROFILE_INPUTS = [
   { field: "reviewedPaths", label: "Reviewed paths", rows: 2, placeholder: "src/, package.json" },
   { field: "ignoredPaths", label: "Ignored paths", rows: 2, placeholder: "dist/, local.env" },
 ];
-const SCAN_GUIDANCE = {
-  manifests: {
-    why: "Manifest files define dependencies, scripts, and package metadata for the project.",
-    check: "Review dependency sources, scripts, and unexpected package changes before trusting the project.",
-  },
-  lockfiles: {
-    why: "Lockfiles pin exact dependency versions and can reveal supply-chain drift.",
-    check: "Look for unexpected version changes, new transitive dependencies, or lockfile churn.",
-  },
-  lifecycleScripts: {
-    why: "Lifecycle scripts can execute automatically during install or build steps.",
-    check: "Inspect scripts before running install commands or generated project tooling.",
-  },
-  secretFiles: {
-    why: "Secret-looking files may contain credentials, tokens, or local environment values.",
-    check: "Confirm they are not committed or exposed, and rotate anything accidentally shared.",
-  },
-  ignoredFiles: {
-    why: "Ignored files can hide local configuration, build output, or sensitive files from Git.",
-    check: "Confirm ignored paths are intentional and not masking important project state.",
-  },
-  reviewedFiles: {
-    why: "Reviewed files help separate known project files from files that still need attention.",
-    check: "Re-review them after major dependency, script, or configuration changes.",
-  },
-  zone: {
-    why: "Zone classification helps separate normal project areas from files needing closer inspection.",
-    check: "Pay attention to files outside expected source, config, dependency, or documentation areas.",
-  },
-};
-
 export function App() {
   const [projectRoot, setProjectRoot] = useState("");
   const [projectRootMessage, setProjectRootMessage] = useState("");
@@ -1766,71 +1736,6 @@ function metadataFinding(type, path) {
   };
 }
 
-function normalizeFinding(finding = {}) {
-  const type = finding.type || "unknown";
-  const severity = finding.severity || "low";
-  const path = finding.path || "Unknown path";
-  const fallback = {
-    category: humanizeFindingType(type),
-    severity,
-    path,
-    title: humanizeFindingType(type),
-    why: finding.explanation || "This item may require attention during review.",
-    action: "Review this item before running, sharing, or committing the project.",
-  };
-
-  const details = {
-    manifest: {
-      category: "manifest",
-      title: "Dependency manifest found",
-      why: "Dependency manifests declare packages, scripts, or tooling that can affect install and build behavior.",
-      action: "Review declared dependencies and scripts before running package commands.",
-    },
-    lockfile: {
-      category: "lockfile",
-      title: "Dependency lockfile found",
-      why: "Lockfiles pin resolved dependency versions and can show dependency changes.",
-      action: "Review dependency changes before installing.",
-    },
-    "package-lifecycle-script": {
-      category: "lifecycle script",
-      title: "Package lifecycle script found",
-      why: "Package lifecycle scripts can run during install or build commands.",
-      action: "Review the script before running package commands.",
-    },
-    "secret-looking-file": {
-      category: "secret-looking file",
-      title: "Secret-looking file name found",
-      why: "The file name suggests it may contain sensitive material.",
-      action: "Confirm it does not contain secrets before sharing or committing.",
-    },
-    "executable-or-script-file": {
-      category: "executable file",
-      title: "Executable or script file found",
-      why: "Executable files and scripts can run commands on this machine.",
-      action: "Review before running.",
-    },
-    "suspicious-text-pattern": {
-      category: "zone/metadata",
-      title: "Text pattern may require review",
-      why: "Scanner metadata or text patterns may indicate commands that fetch content, launch processes, or decode data.",
-      action: "Review the source and context before trusting or running it.",
-    },
-    "package-json-read-error": {
-      category: "manifest",
-      title: "package.json could not be parsed",
-      why: "The manifest could not be read as valid JSON, so dependency and script review may be incomplete.",
-      action: "Open and review package.json manually before installing dependencies.",
-    },
-  }[type];
-
-  return details ? { ...fallback, ...details } : fallback;
-}
-
-function humanizeFindingType(type) {
-  return String(type || "unknown").replaceAll("-", " ");
-}
-
 function highestFindingSeverity(findings) {
   const order = { high: 3, medium: 2, low: 1, none: 0 };
   const highest = findings.reduce((highest, finding) => {
@@ -1941,134 +1846,6 @@ function exportScanReport(content) {
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
-}
-
-function buildScanReportMarkdown(result, report, comparison, trustContext) {
-  return [
-    "# Scan Report",
-    "",
-    "## Summary",
-    `Project: ${markdownInlineCode(result.project_path || "Unknown")}`,
-    `Scan date: ${markdownText(formatDate(result.scan_date))}`,
-    `Findings: ${report.totalFindings}`,
-    `Reviewed files: ${report.reviewedFileCount}`,
-    `Ignored files: ${report.ignoredFileCount}`,
-    "",
-    "## Risk score",
-    `${formatRiskLabel(result.overall_risk)}`,
-    "",
-    "## Manifests",
-    formatMarkdownGuidance(SCAN_GUIDANCE.manifests),
-    "",
-    formatMarkdownList(report.manifests, "No manifests found."),
-    "",
-    "## Lockfiles",
-    formatMarkdownGuidance(SCAN_GUIDANCE.lockfiles),
-    "",
-    formatMarkdownList(report.lockfiles, "No lockfiles found."),
-    "",
-    "## Lifecycle scripts",
-    formatMarkdownGuidance(SCAN_GUIDANCE.lifecycleScripts),
-    "",
-    formatLifecycleScripts(report.lifecycleScripts),
-    "",
-    "## Secrets",
-    formatMarkdownGuidance(SCAN_GUIDANCE.secretFiles),
-    "",
-    formatMarkdownList(report.secretFiles, "No secret-looking files found."),
-    "",
-    "## Ignored files",
-    formatMarkdownGuidance(SCAN_GUIDANCE.ignoredFiles),
-    "",
-    formatPathMetadataList(report.ignoredFiles, report.ignoredFileCount, "No files ignored by .codexforgeignore."),
-    "",
-    "## Reviewed files",
-    formatMarkdownGuidance(SCAN_GUIDANCE.reviewedFiles),
-    "",
-    formatPathMetadataList(report.reviewedFiles, report.reviewedFileCount, "No reviewed files recorded for this scan."),
-    "",
-    "## Zone",
-    formatMarkdownGuidance(SCAN_GUIDANCE.zone),
-    "",
-    markdownText(report.zone || "Unknown"),
-    "",
-    "## Trust Profile Context",
-    formatMarkdownTrustContext(trustContext),
-    "",
-    "## Comparison with previous scan",
-    formatMarkdownComparison(comparison),
-    "",
-  ].join("\n");
-}
-
-function formatMarkdownList(items, emptyText) {
-  return items.length ? items.map((item) => `- ${markdownInlineCode(item)}`).join("\n") : emptyText;
-}
-
-function formatMarkdownGuidance(guidance) {
-  if (!guidance) return "";
-  return [
-    `Why this matters: ${markdownText(guidance.why)}`,
-    `What to check: ${markdownText(guidance.check)}`,
-  ].join("\n");
-}
-
-function formatLifecycleScripts(items) {
-  if (!items.length) return "No package lifecycle scripts found.";
-  return items
-    .map((item) => `- ${markdownInlineCode(item.path || "Unknown path")}: ${markdownText(item.script || "unknown script")}`)
-    .join("\n");
-}
-
-function formatPathMetadataList(items, recordedCount, emptyText) {
-  if (items.length) return formatMarkdownList(items, emptyText);
-  return recordedCount > 0 ? `${recordedCount} paths recorded; path list unavailable for this older scan.` : emptyText;
-}
-
-function formatMarkdownComparison(comparison) {
-  if (!comparison) return "No previous scan to compare yet.";
-  return [
-    `- Risk: ${markdownText(comparison.riskChange)}`,
-    `- Findings: ${markdownText(comparison.findingDelta)}`,
-    `- Reviewed files: ${markdownText(comparison.reviewedDelta)}`,
-    `- Ignored files: ${markdownText(comparison.ignoredDelta)}`,
-    `- Finding types: ${markdownText(comparison.typeSummary)}`,
-  ].join("\n");
-}
-
-function formatMarkdownTrustContext(context) {
-  if (!context?.configured) {
-    return "No trust profile configured. Trust profile context is optional and does not hide scanner findings.";
-  }
-
-  const lines = [];
-  if (context.packageManagers?.length) {
-    lines.push(`- Package managers: ${context.packageManagers.map(markdownText).join(", ")}`);
-  }
-  lines.push(`- Risk tolerance: ${markdownText(context.riskTolerance)}`);
-  appendTrustContextLines(lines, "Manifests", context.manifests);
-  appendTrustContextLines(lines, "Lockfiles", context.lockfiles);
-  appendTrustContextLines(lines, "Lifecycle scripts", context.lifecycleScripts);
-  appendTrustContextLines(lines, "Reviewed paths", context.reviewedPaths);
-  appendTrustContextLines(lines, "Ignored paths", context.ignoredPaths);
-  if (context.notes) lines.push(`- Notes: ${markdownText(context.notes)}`);
-  return lines.join("\n");
-}
-
-function appendTrustContextLines(lines, title, items) {
-  if (!items?.length) return;
-  lines.push(`- ${title}:`);
-  items.forEach((item) => {
-    lines.push(`  - ${markdownText(item.status)}: ${markdownInlineCode(item.path)}`);
-  });
-}
-
-function markdownInlineCode(value) {
-  return `\`${markdownText(value).replaceAll("`", "'")}\``;
-}
-
-function markdownText(value) {
-  return String(value ?? "Unknown").replaceAll(/\s+/g, " ").trim() || "Unknown";
 }
 
 function formatDate(value) {
