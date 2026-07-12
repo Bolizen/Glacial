@@ -7,7 +7,7 @@ import {
   scopedRequestIsCurrent,
   shouldReloadSelectedProjectAfterMutation,
 } from "./projectRequests.js";
-import { buildScanReportMarkdown, normalizeFinding, SCAN_GUIDANCE } from "./reportMarkdown.js";
+import { buildScanReportMarkdown, normalizeFinding, normalizeScanCompleteness, SCAN_GUIDANCE } from "./reportMarkdown.js";
 import "./styles.css";
 
 const API_BASE = "http://127.0.0.1:8000";
@@ -579,6 +579,7 @@ export function App() {
               >
                 <span className="project-name">{project.name}</span>
                 <span className={`risk risk-${project.last_risk_level}`}>{project.last_risk_level}</span>
+                <span className="project-meta">{projectCoverageLabel(project)}</span>
                 <span className="project-path">{project.path}</span>
                 <span className="project-meta">{project.notes_count} notes</span>
                 <span className="project-meta scan-time">{formatDate(project.last_scan_time)}</span>
@@ -702,14 +703,16 @@ export function App() {
 
 function SummaryCards({ projects, report, result, comparison }) {
   const hasScan = Boolean(result);
+  const completeness = report.completeness;
   const highestSeverity = highestFindingSeverity(result?.findings || []) || "none";
   const cards = [
     { label: "Risk Level", value: hasScan ? formatRiskLabel(result.overall_risk) : "NOT SCANNED", detail: hasScan ? "Current scan" : "Run the first scan", icon: "◇", risk: result?.overall_risk || "none" },
     { label: "Projects", value: projects.length, detail: "In this workspace", icon: "▣" },
     { label: "Findings", value: hasScan ? report.totalFindings : "N/A", detail: hasScan ? (report.totalFindings ? "Review prompts found" : "No findings detected") : "Project has not been scanned", icon: "⌕" },
     { label: "Highest Severity", value: hasScan ? formatRiskLabel(highestSeverity) : "N/A", detail: hasScan ? (highestSeverity === "none" ? "No findings detected" : "Highest finding level") : "Project has not been scanned", icon: "△", risk: hasScan ? highestSeverity : "none" },
-    { label: "Last Scan", value: formatDate(result?.scan_date), detail: result ? "Completed successfully" : "Never scanned", icon: "◷" },
+    { label: "Last Scan", value: formatDate(result?.scan_date), detail: result ? coverageLabel(completeness) : "Never scanned", icon: "◷" },
     { label: "Changed Since Last Scan", value: hasScan ? (comparison?.riskChange || "No previous scan") : "NOT SCANNED", detail: hasScan ? (comparison?.findingDelta || "Baseline not established") : "Run the first scan", icon: "▤" },
+    { label: "Scan Coverage", value: hasScan ? coverageLabel(completeness) : "NOT SCANNED", detail: hasScan ? coverageDetail(completeness) : "Run the first scan", icon: "?", risk: hasScan && !completeness.complete ? "medium" : "none" },
   ];
 
   return (
@@ -783,7 +786,10 @@ function ProjectsSection({ projects, selectedPath, onSelectProject, onNewProject
               <strong>{project.name}</strong>
               <span>{project.path}</span>
             </div>
-            <span className={`risk risk-${project.last_risk_level}`}>{project.last_risk_level}</span>
+            <span className="project-risk-cell">
+              <span className={`risk risk-${project.last_risk_level}`}>{project.last_risk_level}</span>
+              <small>{projectCoverageLabel(project)}</small>
+            </span>
             <span>{project.notes_count}</span>
             <span>{formatDate(project.last_scan_time)}</span>
             <button type="button" className="history-view-button" onClick={() => onSelectProject(project.path)}>
@@ -955,7 +961,7 @@ function FindingsOverview({ report, result }) {
           </div>
         ))}
       </div>
-      {report.totalFindings === 0 ? <p className="good overview-good">No findings detected in the latest scan. Review generated code before running it.</p> : null}
+      {report.totalFindings === 0 && report.completeness.known && report.completeness.complete ? <p className="good overview-good">Complete scan with no findings detected. Review generated code before running it.</p> : null}
     </section>
   );
 }
@@ -1096,6 +1102,7 @@ function ScanReport({ result, report, comparison, trustContext, viewMode, open, 
       {result ? (
         <>
           <ScanSummary report={report} risk={result.overall_risk} />
+          <ScanCompletenessSummary completeness={report.completeness} />
           <div className="scan-view-label">
             {viewMode === "history" ? `Viewing history scan from ${formatDate(result.scan_date)}` : `Viewing latest scan from ${formatDate(result.scan_date)}`}
           </div>
@@ -1108,7 +1115,7 @@ function ScanReport({ result, report, comparison, trustContext, viewMode, open, 
           </div>
         </>
       ) : null}
-      {result && report.totalFindings === 0 ? <p className="good">No scanner findings. Still review generated code before running it.</p> : null}
+      {result && report.totalFindings === 0 && report.completeness.known && report.completeness.complete ? <p className="good">Complete scan with no scanner findings. Still review generated code before running it.</p> : null}
       {result ? (
         <div className="scan-section-grid">
           <PathSection title="Manifests" items={report.manifests} emptyText="No manifests found." reviewKind="manifest" guidance={SCAN_GUIDANCE.manifests} />
@@ -1160,6 +1167,23 @@ function ScanSummary({ report, risk }) {
         <strong>{report.ignoredFileCount}</strong>
       </div>
     </div>
+  );
+}
+
+function ScanCompletenessSummary({ completeness }) {
+  return (
+    <section className="scan-completeness">
+      <h3>{coverageLabel(completeness)}</h3>
+      {!completeness.known ? <p>Completeness metadata is unavailable for this older scan. Do not assume full coverage.</p> : (
+        <div className="scan-completeness-counts">
+          <span>Traversal failures: {completeness.traversalFailureCount}</span>
+          <span>File inspection failures: {completeness.fileInspectionFailureCount}</span>
+          <span>Oversized files: {completeness.oversizedFileCount}</span>
+          <span>Unsafe paths skipped: {completeness.unsafePathCount}</span>
+          <span>Total issues: {completeness.issueCount}</span>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -1479,6 +1503,7 @@ function History({ scans, selectedScanId, onSelectScan, open, onOpenChange }) {
           const previousScan = scans[index + 1];
           const riskChanged = previousScan && previousScan.overall_risk !== scan.overall_risk;
           const selected = selectedScanId === scan.id;
+          const completeness = normalizeScanCompleteness(scan);
           return (
           <div className={`history-row ${selected ? "selected-history-row" : ""}`} key={scan.id}>
             <div>
@@ -1490,6 +1515,7 @@ function History({ scans, selectedScanId, onSelectScan, open, onOpenChange }) {
               <span>{scan.findingCount ?? scan.findings.length} findings</span>
               <span>{scan.reviewedFileCount ?? 0} reviewed</span>
               <span>{scan.ignoredFileCount ?? 0} ignored</span>
+              <span>{coverageLabel(completeness)}</span>
             </div>
             <button type="button" className="history-view-button" onClick={() => onSelectScan(selected ? null : scan.id)}>
               {selected ? "Viewing" : "View"}
@@ -1614,6 +1640,7 @@ function buildScanReport(result) {
     metadataFindings,
     ignoredFiles,
     zone: result?.zone || "Unknown",
+    completeness: normalizeScanCompleteness(result),
   };
 }
 
@@ -1782,6 +1809,23 @@ function formatTopFindingTypes(summary) {
     .slice(0, 3);
 
   return entries.map(([type, count]) => `${type}: ${count}`).join(", ");
+}
+
+function coverageLabel(completeness) {
+  if (!completeness.known) return "Coverage unknown";
+  return completeness.complete ? "Complete scan" : "Incomplete scan";
+}
+
+function coverageDetail(completeness) {
+  if (!completeness.known) return "Older scan lacks coverage metadata";
+  return completeness.complete
+    ? "No inspection gaps recorded"
+    : `${completeness.issueCount} inspection ${completeness.issueCount === 1 ? "issue" : "issues"}`;
+}
+
+function projectCoverageLabel(project) {
+  if (!project?.last_scan_time) return "Not scanned";
+  return coverageLabel(normalizeScanCompleteness({ scanCompleteness: project.last_scan_completeness }));
 }
 
 function buildScanComparisonFor(scan, scans) {

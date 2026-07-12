@@ -201,7 +201,54 @@ test("loading and errors stay scoped to the selected project during aborts", asy
   assert.match(selectedProjectText(), /Project B/);
 });
 
-async function renderApp() {
+test("incomplete scan coverage is visible in summary, report, and history", async () => {
+  const completeness = {
+    complete: false,
+    traversalFailureCount: 1,
+    fileInspectionFailureCount: 2,
+    oversizedFileCount: 1,
+    unsafePathCount: 0,
+  };
+  await renderApp([{
+    ...PROJECT_A,
+    last_risk_level: "medium",
+    last_scan_time: "2026-07-11T12:00:00Z",
+    last_scan_completeness: withCompleteness({}, completeness).scanCompleteness,
+  }, PROJECT_B]);
+  const incomplete = withCompleteness(scan(7, "medium", "2026-07-11T12:00:00Z"), completeness);
+  await resolveDetails(await takeDetailRequests(PROJECT_A_PATH), { scans: [incomplete] });
+
+  assert.match(document.body.textContent, /Incomplete scan/);
+  await click(document.querySelector('a[href="#projects"]'));
+  assert.match(document.querySelector(".projects-table-row").textContent, /Incomplete scan/);
+  await openReports();
+  assert.match(document.body.textContent, /Traversal failures: 1/);
+  assert.match(document.body.textContent, /File inspection failures: 2/);
+  assert.match(document.body.textContent, /Oversized files: 1/);
+  assert.match(document.querySelector(".history-row").textContent, /Incomplete scan/);
+});
+
+test("complete clean and older scans use distinct coverage states", async () => {
+  await renderApp();
+  const clean = withCompleteness(scan(8, "none", "2026-07-11T12:01:00Z"), {
+    complete: true,
+    traversalFailureCount: 0,
+    fileInspectionFailureCount: 0,
+    oversizedFileCount: 0,
+    unsafePathCount: 0,
+  });
+  await resolveDetails(await takeDetailRequests(PROJECT_A_PATH), { scans: [clean] });
+  assert.match(document.body.textContent, /Complete scan with no findings detected/);
+
+  await selectProject("Project B");
+  await resolveDetails(await takeDetailRequests(PROJECT_B_PATH), {
+    scans: [{ ...scan(9, "none", "2026-07-11T12:02:00Z"), project_path: PROJECT_B_PATH }],
+  });
+  assert.match(document.body.textContent, /Coverage unknown/);
+  assert.doesNotMatch(document.body.textContent, /Complete scan with no findings detected/);
+});
+
+async function renderApp(projects = [PROJECT_A, PROJECT_B]) {
   await act(async () => {
     root.render(React.createElement(App));
   });
@@ -211,7 +258,7 @@ async function renderApp() {
     projectsRequest.respond({
       project_root: "C:/workspace",
       message: "",
-      projects: [PROJECT_A, PROJECT_B],
+      projects,
     });
     changelogRequest.respond({ entries: [] });
     await flushMicrotasks();
@@ -503,6 +550,23 @@ function scan(id, risk, date) {
     ignoredFiles: [],
     reviewedFiles: [],
     zone: "Source",
+  };
+}
+
+function withCompleteness(value, completeness) {
+  const counts = {
+    traversalFailureCount: completeness.traversalFailureCount || 0,
+    fileInspectionFailureCount: completeness.fileInspectionFailureCount || 0,
+    oversizedFileCount: completeness.oversizedFileCount || 0,
+    unsafePathCount: completeness.unsafePathCount || 0,
+  };
+  return {
+    ...value,
+    scanCompleteness: {
+      complete: completeness.complete,
+      ...counts,
+      issueCount: Object.values(counts).reduce((total, count) => total + count, 0),
+    },
   };
 }
 

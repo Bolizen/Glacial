@@ -90,6 +90,34 @@ const FINDING_STANDARD_FIELDS = new Set([
 
 const SEVERITY_ORDER = { high: 0, medium: 1, low: 2, none: 3 };
 
+export function normalizeScanCompleteness(result) {
+  const value = result?.scanCompleteness;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {
+      known: false,
+      complete: false,
+      traversalFailureCount: 0,
+      fileInspectionFailureCount: 0,
+      oversizedFileCount: 0,
+      unsafePathCount: 0,
+      issueCount: 0,
+    };
+  }
+  const counts = {
+    traversalFailureCount: nonNegativeCount(value.traversalFailureCount),
+    fileInspectionFailureCount: nonNegativeCount(value.fileInspectionFailureCount),
+    oversizedFileCount: nonNegativeCount(value.oversizedFileCount),
+    unsafePathCount: nonNegativeCount(value.unsafePathCount),
+  };
+  const issueCount = Object.values(counts).reduce((total, count) => total + count, 0);
+  return {
+    known: true,
+    complete: value.complete === true && issueCount === 0,
+    ...counts,
+    issueCount,
+  };
+}
+
 export function normalizeFinding(finding = {}) {
   const type = presentText(finding.type) || presentText(finding.finding_type) || "unknown";
   const severity = presentText(finding.severity) || "low";
@@ -111,6 +139,7 @@ export function normalizeFinding(finding = {}) {
 
 export function buildScanReportMarkdown(result, report, comparison, trustContext) {
   const findings = Array.isArray(result?.findings) ? [...result.findings].sort(compareFindings) : [];
+  const completeness = normalizeScanCompleteness(result);
   const summaryLines = ["## Summary"];
   appendOptionalLine(summaryLines, "Project", inlineCode(result?.project_path));
   appendOptionalLine(summaryLines, "Scan date", formatReportDate(result?.scan_date));
@@ -125,6 +154,9 @@ export function buildScanReportMarkdown(result, report, comparison, trustContext
     "",
     "## Risk score",
     escapeMarkdownText(formatRiskLabel(result?.overall_risk)),
+    "",
+    "## Scan completeness",
+    formatScanCompleteness(completeness),
     "",
     "## Findings",
     formatFindings(findings),
@@ -170,6 +202,20 @@ export function buildScanReportMarkdown(result, report, comparison, trustContext
     "## Comparison with previous scan",
     formatMarkdownComparison(comparison),
     "",
+  ].join("\n");
+}
+
+function formatScanCompleteness(completeness) {
+  if (!completeness.known) {
+    return "Status: Coverage unknown. This older scan does not contain completeness metadata.";
+  }
+  return [
+    `Status: ${completeness.complete ? "Complete" : "Incomplete"}`,
+    `- Directory traversal failures: ${completeness.traversalFailureCount}`,
+    `- File inspection/read failures: ${completeness.fileInspectionFailureCount}`,
+    `- Oversized files skipped: ${completeness.oversizedFileCount}`,
+    `- Unsafe linked or hardlinked paths skipped: ${completeness.unsafePathCount}`,
+    `- Total inspection issues: ${completeness.issueCount}`,
   ].join("\n");
 }
 
@@ -392,6 +438,11 @@ function formatMetadataLabel(key) {
 
 function numberOrZero(value) {
   return Number.isFinite(Number(value)) ? Number(value) : 0;
+}
+
+function nonNegativeCount(value) {
+  const count = Number(value);
+  return Number.isInteger(count) && count >= 0 ? count : 0;
 }
 
 function formatRiskLabel(risk) {

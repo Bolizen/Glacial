@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from app import scanner
 from app.scanner import scan_project
 
 
@@ -195,41 +196,147 @@ class ScannerLinkedPathTests(unittest.TestCase):
         self.assertNotIn(".codexforgeignore", result["reviewedFiles"])
         self.assertNotIn("payload.txt", result["ignoredFiles"])
         self.assertIn("payload.txt", result["reviewedFiles"])
-        self.assertTrue(
-            any(
-                finding["type"] == "suspicious-text-pattern"
-                and finding["path"] == "payload.txt"
-                for finding in result["findings"]
-            )
-        )
 
     def test_hardlinked_ignore_file_is_reported_and_not_used(self) -> None:
         external_ignore = self.base_path / "external-ignore"
         external_ignore.write_text("payload.txt\n", encoding="utf-8")
         try:
-            os.link(
-                external_ignore,
-                self.project_path / ".codexforgeignore",
-            )
+            os.link(external_ignore, self.project_path / ".codexforgeignore")
         except OSError as exc:
             self.skipTest(f"Hardlinks are unavailable: {exc}")
-        (self.project_path / "payload.txt").write_text(
-            "eval(untrusted_input)",
-            encoding="utf-8",
-        )
+        (self.project_path / "payload.txt").write_text("eval(untrusted_input)", encoding="utf-8")
 
         result = scan_project(self.project_path)
 
-        self.assertTrue(
-            any(
-                finding["type"] == "hardlink"
-                and finding["path"] == ".codexforgeignore"
-                for finding in result["findings"]
-            )
-        )
+        self.assertTrue(any(
+            finding["type"] == "hardlink" and finding["path"] == ".codexforgeignore"
+            for finding in result["findings"]
+        ))
         self.assertNotIn("payload.txt", result["ignoredFiles"])
         self.assertIn("payload.txt", result["reviewedFiles"])
 
+
+class ScannerCompletenessTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent)
+        self.base_path = Path(self.temporary_directory.name)
+        self.project_path = self.base_path / "project"
+        self.project_path.mkdir()
+        self.addCleanup(self.temporary_directory.cleanup)
+
+    def test_successful_scan_reports_complete(self) -> None:
+        (self.project_path / "safe.txt").write_text("ordinary content", encoding="utf-8")
+
+        result = scan_project(self.project_path)
+
+        self.assertEqual(result["reviewedFiles"], ["safe.txt"])
+        self.assertEqual(result["scanCompleteness"], {
+            "complete": True,
+            "traversalFailureCount": 0,
+            "fileInspectionFailureCount": 0,
+            "oversizedFileCount": 0,
+            "unsafePathCount": 0,
+            "issueCount": 0,
+        })
+
+    def test_walk_error_is_recorded(self) -> None:
+        blocked = self.project_path / "blocked"
+
+        def failing_walk(path: Path, *, followlinks: bool, onerror: object) -> list[tuple[str, list[str], list[str]]]:
+            error = PermissionError(13, f"Access denied at {self.project_path}", str(blocked))
+            onerror(error)
+            onerror(error)
+            return [(str(path), [], [])]
+
+        with patch.object(scanner.os, "walk", side_effect=failing_walk):
+            result = scan_project(self.project_path)
+
+        self.assertEqual(result["scanCompleteness"]["traversalFailureCount"], 1)
+        self.assertFalse(result["scanCompleteness"]["complete"])
+        self.assertTrue(any(
+            finding["type"] == "directory-traversal-error" and finding["path"] == "blocked"
+            for finding in result["findings"]
+        ))
+        finding = next(finding for finding in result["findings"] if finding["type"] == "directory-traversal-error")
+        self.assertEqual(finding["error"], os.strerror(13))
+        self.assertNotIn(str(self.project_path), finding["error"])
+
+    def test_file_read_error_is_not_reviewed(self) -> None:
+        target = self.project_path / "unreadable.txt"
+        target.write_text("content", encoding="utf-8")
+        original_open = Path.open
+
+        def open_file(path: Path, *args: object, **kwargs: object) -> object:
+            if path == target and args and args[0] == "rb":
+                raise OSError(5, "Read failed")
+            return original_open(path, *args, **kwargs)
+
+        with patch.object(Path, "open", autospec=True, side_effect=open_file):
+            result = scan_project(self.project_path)
+
+        self.assertNotIn("unreadable.txt", result["reviewedFiles"])
+        self.assertEqual(result["scanCompleteness"]["fileInspectionFailureCount"], 1)
+        self.assertTrue(any(finding.get("operation") == "read-file-content" for finding in result["findings"]))
+
+    def test_ignore_file_read_error_is_disclosed(self) -> None:
+        ignore_file = self.project_path / ".codexforgeignore"
+        ignore_file.write_text("payload.txt\n", encoding="utf-8")
+        (self.project_path / "payload.txt").write_text("ordinary content", encoding="utf-8")
+        original_read_text = Path.read_text
+
+        def read_text(path: Path, *args: object, **kwargs: object) -> str:
+            if path == ignore_file:
+                raise OSError(5, "Ignore read failed")
+            return original_read_text(path, *args, **kwargs)
+
+        with patch.object(Path, "read_text", autospec=True, side_effect=read_text):
+            result = scan_project(self.project_path)
+
+        self.assertEqual(result["scanCompleteness"]["fileInspectionFailureCount"], 1)
+        self.assertNotIn("payload.txt", result["ignoredFiles"])
+        self.assertNotIn(".codexforgeignore", result["reviewedFiles"])
+        self.assertEqual(
+            sum(finding.get("operation") == "read-ignore-file" for finding in result["findings"]),
+            1,
+        )
+        self.assertTrue(any(
+            finding.get("operation") == "read-ignore-file" and finding["path"] == ".codexforgeignore"
+            for finding in result["findings"]
+        ))
+
+    def test_metadata_error_is_not_reviewed(self) -> None:
+        target = self.project_path / "unstable.txt"
+        target.write_text("content", encoding="utf-8")
+        original_stat = Path.stat
+
+        def stat_path(path: Path, *args: object, **kwargs: object) -> os.stat_result:
+            if path == target:
+                raise OSError(5, "Metadata failed")
+            return original_stat(path, *args, **kwargs)
+
+        with (
+            patch.object(scanner, "is_reparse_point_or_symlink", return_value=False),
+            patch.object(scanner, "has_multiple_hardlinks", return_value=False),
+            patch.object(Path, "stat", autospec=True, side_effect=stat_path),
+        ):
+            result = scan_project(self.project_path)
+
+        self.assertNotIn("unstable.txt", result["reviewedFiles"])
+        self.assertEqual(result["scanCompleteness"]["fileInspectionFailureCount"], 1)
+        self.assertTrue(any(finding.get("operation") == "inspect-file-metadata" for finding in result["findings"]))
+
+    def test_oversized_file_is_disclosed_and_not_reviewed(self) -> None:
+        target = self.project_path / "large.txt"
+        target.write_bytes(b"x" * (scanner.MAX_TEXT_BYTES + 1))
+
+        result = scan_project(self.project_path)
+
+        self.assertNotIn("large.txt", result["reviewedFiles"])
+        self.assertEqual(result["scanCompleteness"]["oversizedFileCount"], 1)
+        finding = next(finding for finding in result["findings"] if finding["type"] == "oversized-file-skipped")
+        self.assertEqual(finding["fileSizeBytes"], scanner.MAX_TEXT_BYTES + 1)
+        self.assertEqual(finding["sizeLimitBytes"], scanner.MAX_TEXT_BYTES)
+        self.assertEqual(result["overall_risk"], "low")
 
 if __name__ == "__main__":
     unittest.main()

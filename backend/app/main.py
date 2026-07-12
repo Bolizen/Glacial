@@ -18,6 +18,7 @@ from .database import (
     latest_scan_map,
     note_counts,
     row_to_scan,
+    scan_completeness_for_row,
     set_setting,
 )
 from .safety import configured_root, ensure_inside_root, ensure_project_directory, has_multiple_hardlinks, sanitize_folder_name
@@ -103,6 +104,7 @@ def list_projects() -> dict[str, object]:
                     "project_type": row["project_type"],
                     "last_scan_time": scan["scan_date"] if scan else None,
                     "last_risk_level": scan["overall_risk"] if scan else "none",
+                    "last_scan_completeness": scan_completeness_for_row(scan) if scan else None,
                     "notes_count": counts.get(path, 0),
                 }
             )
@@ -253,6 +255,7 @@ def run_scan(payload: ProjectPathRequest) -> dict[str, object]:
         "reviewedFiles": result["reviewedFiles"],
         "reviewedFileCount": result["reviewedFileCount"],
         "zone": result["zone"],
+        "scanCompleteness": result["scanCompleteness"],
     }
 
 
@@ -449,4 +452,5 @@ def _scan_metadata(result: dict[str, object]) -> dict[str, object]:
         "ignoredFiles": result.get("ignoredFiles", []),
         "reviewedFiles": result.get("reviewedFiles", []),
         "zone": result.get("zone", "Unknown"),
+        "scanCompleteness": result.get("scanCompleteness"),
     }

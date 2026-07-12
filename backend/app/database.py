@@ -128,16 +128,23 @@ def row_to_scan(row: sqlite3.Row) -> dict[str, Any]:
         "ignoredFiles": _metadata_list(metadata, "ignoredFiles"),
         "reviewedFiles": _metadata_list(metadata, "reviewedFiles"),
         "zone": str(metadata.get("zone") or "Unknown"),
+        "scanCompleteness": _scan_completeness(metadata),
     }
 
 
+def scan_completeness_for_row(row: sqlite3.Row) -> dict[str, Any] | None:
+    return _scan_completeness(_load_scan_metadata(row))
+
+
 def _normalize_finding(finding: dict[str, Any]) -> dict[str, Any]:
-    return {
+    normalized = dict(finding)
+    normalized.update({
         "path": finding.get("path") or finding.get("file_path") or "",
         "type": finding.get("type") or finding.get("finding_type") or "unknown",
         "severity": finding.get("severity") or "low",
         "explanation": finding.get("explanation") or "Review this finding manually.",
-    }
+    })
+    return normalized
 
 
 def _ensure_scan_history_columns(connection: sqlite3.Connection) -> None:
@@ -188,6 +195,30 @@ def _load_scan_metadata(row: sqlite3.Row) -> dict[str, Any]:
 def _metadata_list(metadata: dict[str, Any], key: str) -> list[Any]:
     value = metadata.get(key)
     return value if isinstance(value, list) else []
+
+
+def _scan_completeness(metadata: dict[str, Any]) -> dict[str, Any] | None:
+    value = metadata.get("scanCompleteness")
+    if not isinstance(value, dict):
+        return None
+    count_fields = (
+        "traversalFailureCount",
+        "fileInspectionFailureCount",
+        "oversizedFileCount",
+        "unsafePathCount",
+    )
+    counts = {
+        field: max(0, int(value.get(field, 0)))
+        if isinstance(value.get(field, 0), int)
+        else 0
+        for field in count_fields
+    }
+    issue_count = sum(counts.values())
+    return {
+        "complete": value.get("complete") is True and issue_count == 0,
+        **counts,
+        "issueCount": issue_count,
+    }
 
 
 def _summarize_findings(findings: list[dict[str, str]]) -> dict[str, int]:

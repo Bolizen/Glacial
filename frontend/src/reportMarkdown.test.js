@@ -169,6 +169,43 @@ test("legacy summary sections preserve input order and omit malformed empty rows
   assert.doesNotMatch(markdown, /^\s+-\s*:\s*$/m);
 });
 
+test("exports complete, incomplete, and unknown scan coverage conservatively", () => {
+  const incomplete = buildScanReportMarkdown({
+    ...scanResult([]),
+    scanCompleteness: {
+      complete: false,
+      traversalFailureCount: 1,
+      fileInspectionFailureCount: 2,
+      oversizedFileCount: 3,
+      unsafePathCount: 1,
+      issueCount: 7,
+    },
+  }, reportFixture(), null, { configured: false });
+  assert.match(incomplete, /^## Scan completeness$/m);
+  assert.match(incomplete, /^Status: Incomplete$/m);
+  assert.match(incomplete, /Directory traversal failures: 1/);
+  assert.match(incomplete, /File inspection\/read failures: 2/);
+  assert.match(incomplete, /Oversized files skipped: 3/);
+  assert.match(incomplete, /Total inspection issues: 7/);
+
+  const complete = buildScanReportMarkdown({
+    ...scanResult([]),
+    scanCompleteness: {
+      complete: true,
+      traversalFailureCount: 0,
+      fileInspectionFailureCount: 0,
+      oversizedFileCount: 0,
+      unsafePathCount: 0,
+      issueCount: 0,
+    },
+  }, reportFixture(), null, { configured: false });
+  assert.match(complete, /^Status: Complete$/m);
+
+  const older = buildScanReportMarkdown(scanResult([]), reportFixture(), null, { configured: false });
+  assert.match(older, /Status: Coverage unknown/);
+  assert.doesNotMatch(older, /^Status: Complete$/m);
+});
+
 function finding(type, path, explanation, metadata = {}) {
   return {
     type,
