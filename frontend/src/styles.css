@@ -1769,6 +1769,15 @@ textarea::placeholder {
   padding: 10px 0;
 }
 
+.settings-reset-state {
+  border-top: 1px solid rgba(255, 138, 24, 0.14);
+  padding-top: 16px;
+}
+
+.settings-reset-state p {
+  margin: 6px 0 12px;
+}
+
 @media (max-width: 1280px) {
   .summary-cards {
     grid-template-columns: repeat(3, minmax(0, 1fr));

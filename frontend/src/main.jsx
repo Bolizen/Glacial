@@ -8,6 +8,13 @@ import {
   shouldReloadSelectedProjectAfterMutation,
 } from "./projectRequests.js";
 import { buildScanReportMarkdown, normalizeFinding, normalizeScanCompleteness, SCAN_GUIDANCE } from "./reportMarkdown.js";
+import {
+  clearSessionState,
+  readSessionState,
+  serializeSessionState,
+  stateForWorkspace,
+  writeSessionState,
+} from "./sessionState.js";
 import "./styles.css";
 
 const API_BASE = "http://127.0.0.1:8000";
@@ -20,6 +27,7 @@ const EMPTY_AGENT_FORM = {
 };
 const MAJOR_SECTIONS = ["changelog", "scanReport", "agents", "notes", "history"];
 const OPEN_MAJOR_SECTIONS = Object.fromEntries(MAJOR_SECTIONS.map((section) => [section, true]));
+const PROJECT_REQUIRED_SECTIONS = new Set(["trustProfiles", "reports"]);
 const SECTION_NAV = [
   { id: "workspace", label: "Workspace Overview", icon: "#" },
   { id: "projects", label: "Projects", icon: "[]" },
@@ -86,6 +94,7 @@ export function App() {
   const [workspaceRootError, setWorkspaceRootError] = useState("");
   const [metadataSaving, setMetadataSaving] = useState(false);
   const [unregisteringPath, setUnregisteringPath] = useState("");
+  const [sessionStateReady, setSessionStateReady] = useState(false);
   const selectedPathRef = useRef("");
   const projectGenerationRef = useRef(0);
   const projectsRequestRef = useRef({ id: 0, controller: null });
@@ -93,6 +102,12 @@ export function App() {
   const workspaceGenerationRef = useRef(0);
   const unregisterRequestRef = useRef(0);
   const scanningRef = useRef(false);
+  const initialSessionStateRef = useRef(undefined);
+  const restorationPendingRef = useRef(true);
+  const pendingScanRestoreRef = useRef(null);
+  const skipNextSessionWriteRef = useRef(false);
+  const lastSessionWriteRef = useRef("");
+  if (initialSessionStateRef.current === undefined) initialSessionStateRef.current = readSessionState();
   const projectRequestsByScopeRef = useRef({
     notes: 0,
     scanHistory: 0,
@@ -156,6 +171,22 @@ export function App() {
     setCopyStatus("");
   }, [displayedScan?.id]);
 
+  useEffect(() => {
+    if (!sessionStateReady || !projectRoot) return;
+    if (pendingScanRestoreRef.current) return;
+    const snapshot = sessionSnapshot();
+    const serialized = serializeSessionState(snapshot);
+    if (!serialized) return;
+    if (skipNextSessionWriteRef.current) {
+      skipNextSessionWriteRef.current = false;
+      lastSessionWriteRef.current = serialized;
+      return;
+    }
+    if (serialized === lastSessionWriteRef.current) return;
+    lastSessionWriteRef.current = serialized;
+    writeSessionState(snapshot);
+  }, [sessionStateReady, projectRoot, selectedPath, selectedSection, selectedScanId, majorSectionsOpen]);
+
   function resetProjectState(path) {
     setMessage("");
     setProjectDetailsLoading(Boolean(path));
@@ -175,8 +206,9 @@ export function App() {
     setMetadataSaving(false);
   }
 
-  function selectProject(path) {
+  function selectProject(path, { restoring = false } = {}) {
     const nextPath = path || "";
+    if (!restoring) pendingScanRestoreRef.current = null;
     if (selectedPathRef.current === nextPath) return;
     selectedPathRef.current = nextPath;
     projectGenerationRef.current += 1;
@@ -258,6 +290,32 @@ export function App() {
 
       const currentPath = selectedPathRef.current;
       const selectableProjects = data.projects.filter((project) => project.available !== false);
+      if (restorationPendingRef.current) {
+        restorationPendingRef.current = false;
+        const restored = stateForWorkspace(initialSessionStateRef.current, data.project_root);
+        const restoredProject = restored
+          ? selectableProjects.find((project) => project.path === restored.selectedProjectPath)
+          : null;
+        if (restored) {
+          setMajorSectionsOpen({ ...OPEN_MAJOR_SECTIONS, ...restored.panels });
+          setSelectedSection(
+            PROJECT_REQUIRED_SECTIONS.has(restored.activeSection) && !restoredProject
+              ? "workspace"
+              : restored.activeSection,
+          );
+          if (restoredProject && restored.selectedScanId !== null) {
+            pendingScanRestoreRef.current = {
+              projectPath: restoredProject.path,
+              scanId: restored.selectedScanId,
+            };
+          }
+        }
+        const initialPath = restoredProject?.path || selectableProjects[0]?.path || "";
+        selectProject(initialPath, { restoring: true });
+        setSessionStateReady(true);
+        return;
+      }
+
       const stillSelected = selectableProjects.some((project) => project.path === currentPath);
       if ((!currentPath || !stillSelected) && selectableProjects.length > 0) {
         selectProject(selectableProjects[0].path);
@@ -471,8 +529,14 @@ export function App() {
       const data = await api(`/api/scans/history?project_path=${encodeURIComponent(path)}`, { signal });
       if (!scopedProjectRequestIsCurrent("scanHistory", requestId, path, generation)) return;
       setScanHistory(data.scans);
+      const pending = pendingScanRestoreRef.current;
+      if (pending?.projectPath === path) {
+        pendingScanRestoreRef.current = null;
+        if (data.scans.some((scan) => scan.id === pending.scanId)) setSelectedScanId(pending.scanId);
+      }
     } catch (error) {
       if (!isAbortError(error) && scopedProjectRequestIsCurrent("scanHistory", requestId, path, generation)) {
+        if (pendingScanRestoreRef.current?.projectPath === path) pendingScanRestoreRef.current = null;
         setScanHistory([]);
         setMessage(error.message);
       }
@@ -588,6 +652,10 @@ export function App() {
         body: { project_root: value },
       });
       if (workspaceRequestRef.current !== requestId) return;
+      clearSessionState();
+      lastSessionWriteRef.current = "";
+      initialSessionStateRef.current = null;
+      pendingScanRestoreRef.current = null;
       workspaceGenerationRef.current += 1;
       unregisterRequestRef.current += 1;
       setUnregisteringPath("");
@@ -642,7 +710,10 @@ export function App() {
     try {
       const data = await api("/api/projects", { method: "DELETE", body: { project_path: project.path } });
       if (unregisterRequestRef.current !== requestId || workspaceGenerationRef.current !== workspaceGeneration) return;
-      if (selectedPathRef.current === project.path) selectProject("");
+      if (selectedPathRef.current === project.path) {
+        persistSessionSnapshot({ selectedProjectPath: "", selectedScanId: null });
+        selectProject("");
+      }
       await refreshProjects();
       if (unregisterRequestRef.current === requestId) setMessage(data.message);
     } catch (error) {
@@ -654,6 +725,41 @@ export function App() {
 
   function setMajorSectionOpen(section, open) {
     setMajorSectionsOpen((current) => (current[section] === open ? current : { ...current, [section]: open }));
+  }
+
+  function selectHistoricalScan(scanId) {
+    pendingScanRestoreRef.current = null;
+    setSelectedScanId(scanId);
+  }
+
+  function sessionSnapshot(overrides = {}) {
+    return {
+      workspaceRoot: projectRoot,
+      selectedProjectPath: selectedPath,
+      activeSection: selectedSection,
+      selectedScanId,
+      panels: majorSectionsOpen,
+      ...overrides,
+    };
+  }
+
+  function persistSessionSnapshot(overrides = {}) {
+    const snapshot = sessionSnapshot(overrides);
+    lastSessionWriteRef.current = serializeSessionState(snapshot) || "";
+    writeSessionState(snapshot);
+  }
+
+  function resetSavedUiState() {
+    pendingScanRestoreRef.current = null;
+    clearSessionState();
+    lastSessionWriteRef.current = "";
+    skipNextSessionWriteRef.current = true;
+    setSelectedScanId(null);
+    setSelectedSection("workspace");
+    setMajorSectionsOpen({ ...OPEN_MAJOR_SECTIONS });
+    const defaultProject = projects.find((project) => project.available !== false)?.path || "";
+    selectProject(defaultProject, { restoring: true });
+    setMessage("Saved UI state reset. Backend data and workspace configuration were not changed.");
   }
 
   function handleSidebarNav(event) {
@@ -811,7 +917,7 @@ export function App() {
                 open={majorSectionsOpen.scanReport}
                 onOpenChange={(open) => setMajorSectionOpen("scanReport", open)}
               />
-              <History scans={scanHistory} selectedScanId={selectedScanId} onSelectScan={setSelectedScanId} open={majorSectionsOpen.history} onOpenChange={(open) => setMajorSectionOpen("history", open)} />
+              <History scans={scanHistory} selectedScanId={selectedScanId} onSelectScan={selectHistoricalScan} open={majorSectionsOpen.history} onOpenChange={(open) => setMajorSectionOpen("history", open)} />
             </>
           ) : null}
 
@@ -824,7 +930,7 @@ export function App() {
 
           {selectedSection === "settings" ? (
             <>
-              <SettingsSection projectRoot={projectRoot} selectedProject={selectedProject} onChangeRoot={changeWorkspaceRoot} changing={workspaceRootChanging} error={workspaceRootError} />
+              <SettingsSection projectRoot={projectRoot} selectedProject={selectedProject} onChangeRoot={changeWorkspaceRoot} changing={workspaceRootChanging} error={workspaceRootError} onResetSavedState={resetSavedUiState} />
               {selectedProject && !projectDetailsLoading ? (
                 <>
                   <AgentGenerator form={agentForm} updateField={updateAgentField} preview={agentPreview} exists={agentsExists} onPreview={previewAgents} onWrite={writeAgents} open={majorSectionsOpen.agents} onOpenChange={(open) => setMajorSectionOpen("agents", open)} />
@@ -1016,7 +1122,7 @@ function ProjectExpectationsSummary({ profile, onEdit }) {
   );
 }
 
-function SettingsSection({ projectRoot, selectedProject, onChangeRoot, changing, error }) {
+function SettingsSection({ projectRoot, selectedProject, onChangeRoot, changing, error, onResetSavedState }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(projectRoot);
 
@@ -1062,6 +1168,11 @@ function SettingsSection({ projectRoot, selectedProject, onChangeRoot, changing,
           </div>
         </form>
       ) : null}
+      <div className="settings-reset-state">
+        <strong>Saved UI state</strong>
+        <p className="muted">Reset the saved project selection, active section, historical scan, and panel layout. Backend projects, scans, notes, trust profiles, and workspace configuration are not changed.</p>
+        <button type="button" className="secondary-button" onClick={onResetSavedState}>Reset saved UI state</button>
+      </div>
     </section>
   );
 }

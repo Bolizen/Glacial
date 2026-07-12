@@ -5,6 +5,7 @@ import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { JSDOM } from "jsdom";
 import { createServer } from "vite";
+import { SESSION_STATE_KEY } from "./sessionState.js";
 
 const PROJECT_A_PATH = "C:/workspace/project-a";
 const PROJECT_B_PATH = "C:/workspace/project-b";
@@ -78,6 +79,115 @@ afterEach(async () => {
       dom = null;
     }
   }
+});
+
+test("restores a valid project, section, historical scan, and panel state once", async () => {
+  storeSession({
+    selectedProjectPath: PROJECT_B_PATH,
+    activeSection: "reports",
+    selectedScanId: 22,
+    panels: { scanReport: false, history: true },
+  });
+  await renderApp();
+  const restoredScan = { ...scan(22, "medium", "2026-07-11T09:30:00Z"), project_path: PROJECT_B_PATH };
+  await resolveDetails(await takeDetailRequests(PROJECT_B_PATH), { scans: [restoredScan] });
+
+  assert.match(selectedProjectText(), /Project B/);
+  assert.equal(document.querySelector(".topbar h1").textContent, "Reports");
+  assert.equal(document.querySelector("#reports").open, false);
+  assert.ok(document.querySelector(".history-row.selected-history-row"));
+  assert.equal(fetchHarness.count("/api/scans/history"), 1);
+  assert.equal(fetchHarness.count("/api/notes"), 1);
+});
+
+test("missing and unavailable stored projects fall back through normal selection", async () => {
+  storeSession({ selectedProjectPath: "C:/workspace/missing", activeSection: "reports" });
+  await renderApp();
+  await resolveDetails(await takeDetailRequests(PROJECT_A_PATH));
+  assert.match(selectedProjectText(), /Project A/);
+  assert.equal(document.querySelector(".topbar h1").textContent, "Workspace Overview");
+});
+
+test("an unavailable stored registration is not restored", async () => {
+  storeSession({ selectedProjectPath: PROJECT_B_PATH, activeSection: "reports" });
+  await renderApp([PROJECT_A, { ...PROJECT_B, available: false, availability: "missing" }]);
+  await resolveDetails(await takeDetailRequests(PROJECT_A_PATH));
+  assert.match(selectedProjectText(), /Project A/);
+  assert.equal(fetchHarness.count("/api/scans/history"), 1);
+});
+
+test("workspace mismatch ignores all stored workspace state", async () => {
+  storeSession({
+    workspaceRoot: "D:/other",
+    selectedProjectPath: PROJECT_B_PATH,
+    activeSection: "reports",
+    selectedScanId: 22,
+    panels: { scanReport: false },
+  });
+  await renderApp();
+  await resolveDetails(await takeDetailRequests(PROJECT_A_PATH));
+  assert.match(selectedProjectText(), /Project A/);
+  assert.equal(document.querySelector(".topbar h1").textContent, "Workspace Overview");
+});
+
+test("manual project selection wins while restored history is pending", async () => {
+  storeSession({ selectedProjectPath: PROJECT_A_PATH, activeSection: "reports", selectedScanId: 31 });
+  await renderApp();
+  const restoredA = await takeDetailRequests(PROJECT_A_PATH);
+  await resolveDetails(restoredA, { skip: ["scanHistory"] });
+
+  await selectProject("Project B");
+  await resolveDetails(await takeDetailRequests(PROJECT_B_PATH), {
+    scans: [{ ...scan(31, "high", "2026-07-11T09:31:00Z"), project_path: PROJECT_B_PATH }],
+  });
+  await respond(restoredA.scanHistory, { scans: [scan(31, "low", "2026-07-11T09:30:00Z")] });
+
+  assert.match(selectedProjectText(), /Project B/);
+  assert.equal(document.querySelectorAll(".history-row.selected-history-row").length, 0);
+});
+
+test("a missing stored historical scan falls back to latest view", async () => {
+  storeSession({ selectedProjectPath: PROJECT_A_PATH, activeSection: "reports", selectedScanId: 999 });
+  await renderApp();
+  await resolveDetails(await takeDetailRequests(PROJECT_A_PATH), {
+    scans: [scan(32, "low", "2026-07-11T09:32:00Z")],
+  });
+  assert.equal(document.querySelectorAll(".history-row.selected-history-row").length, 0);
+  assert.equal(document.querySelector(".scan-summary .risk").textContent, "low");
+});
+
+test("reset clears only saved UI state and returns to defaults without reload", async () => {
+  window.localStorage.setItem("unrelated", "keep");
+  storeSession({ selectedProjectPath: PROJECT_B_PATH, activeSection: "settings", panels: { notes: false } });
+  await renderApp();
+  await resolveDetails(await takeDetailRequests(PROJECT_B_PATH));
+
+  await click(buttonWithText("Reset saved UI state"));
+  const detailsA = await takeDetailRequests(PROJECT_A_PATH);
+  await resolveDetails(detailsA);
+  assert.equal(window.localStorage.getItem(SESSION_STATE_KEY), null);
+  assert.equal(window.localStorage.getItem("unrelated"), "keep");
+  assert.match(selectedProjectText(), /Project A/);
+  assert.equal(document.querySelector(".topbar h1").textContent, "Workspace Overview");
+  assert.match(messageText(), /Backend data and workspace configuration were not changed/);
+});
+
+test("transient drafts and mutation state are never restored", async () => {
+  storeSession({
+    selectedProjectPath: PROJECT_A_PATH,
+    activeSection: "settings",
+    agentPreview: "sensitive preview",
+    noteBody: "draft note",
+    isScanning: true,
+    error: "old failure",
+  });
+  await renderApp();
+  await resolveDetails(await takeDetailRequests(PROJECT_A_PATH));
+
+  assert.equal(document.querySelector('textarea[placeholder="Project purpose"]').value, "");
+  assert.equal(document.querySelector('textarea[placeholder="Add a note"]').value, "");
+  assert.doesNotMatch(document.body.textContent, /sensitive preview|draft note|old failure/);
+  assert.equal(runScanButton().textContent, "Run Scan");
 });
 
 test("late project A details cannot overwrite selected project B", async () => {
@@ -311,6 +421,9 @@ test("workspace root failure preserves selection and success invalidates it", as
   assert.equal(fetchHarness.count("/api/config/project-root", "PUT"), 2);
   const changed = await fetchHarness.next("/api/config/project-root", { method: "PUT" });
   await respond(changed, { project_root: "C:/new-workspace" });
+  const stateAfterRootChange = parseStoredSession();
+  assert.ok(stateAfterRootChange === null || stateAfterRootChange.workspaceRoot === "C:/new-workspace");
+  assert.notEqual(stateAfterRootChange?.selectedProjectPath, PROJECT_A_PATH);
   assert.ok(fetchHarness.count("/api/projects") >= 2);
   const projectsRequest = await fetchHarness.next("/api/projects");
   await respond(projectsRequest, { project_root: "C:/new-workspace", message: "", projects: [] });
@@ -358,6 +471,8 @@ test("project metadata and unregister lifecycle update the real UI flow", async 
   await click([...selectedRow.querySelectorAll("button")].find((button) => button.textContent.includes("Unregister")));
   const unregister = await fetchHarness.next("/api/projects", { method: "DELETE" });
   await respond(unregister, { unregistered: true, path: PROJECT_A_PATH, message: "Project unregistered. Project files were not changed." });
+  assert.equal(parseStoredSession().selectedProjectPath, "");
+  assert.equal(parseStoredSession().selectedScanId, null);
   const afterUnregister = await fetchHarness.next("/api/projects");
   await respond(afterUnregister, { project_root: "C:/workspace", message: "", projects: [missingB] });
   assert.match(messageText(), /files were not changed/);
@@ -565,6 +680,23 @@ function visibleRisk() {
 function categoryStatuses() {
   return [...document.querySelectorAll(".findings-overview .category-row")]
     .map((row) => row.lastElementChild.textContent);
+}
+
+function storeSession(overrides = {}) {
+  window.localStorage.setItem(SESSION_STATE_KEY, JSON.stringify({
+    version: 1,
+    workspaceRoot: "C:/workspace",
+    selectedProjectPath: "",
+    activeSection: "workspace",
+    selectedScanId: null,
+    panels: {},
+    ...overrides,
+  }));
+}
+
+function parseStoredSession() {
+  const value = window.localStorage.getItem(SESSION_STATE_KEY);
+  return value ? JSON.parse(value) : null;
 }
 
 function createFetchHarness() {
