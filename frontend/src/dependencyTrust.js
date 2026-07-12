@@ -153,8 +153,8 @@ function text(value) {
 }
 
 function compareEntries(left, right) {
-  return [left.ecosystem, left.name, left.direct ? "0" : "1", left.group, left.lockedVersion]
-    .join("\0").localeCompare([right.ecosystem, right.name, right.direct ? "0" : "1", right.group, right.lockedVersion].join("\0"));
+  return [left.direct ? "0" : "1", left.ecosystem, left.name, left.group, left.lockedVersion]
+    .join("\0").localeCompare([right.direct ? "0" : "1", right.ecosystem, right.name, right.group, right.lockedVersion].join("\0"));
 }
 
 function compareChanges(left, right) {

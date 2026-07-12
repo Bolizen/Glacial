@@ -20,6 +20,8 @@ MAX_DEPENDENCY_BYTES = 5 * 1024 * 1024
 MAX_ENTRIES = 2000
 MAX_CHANGES = 300
 MAX_FINDINGS = 500
+MAX_DEPENDENCY_FILES = 500
+MAX_REQUIREMENTS_DEPTH = 100
 SUPPORTED_INTEGRITY_ALGORITHMS = {"sha256", "sha384", "sha512"}
 NODE_MANIFESTS = {"package.json"}
 NODE_LOCKFILES = {"package-lock.json", "npm-shrinkwrap.json"}
@@ -56,6 +58,14 @@ def analyze_dependencies(
 ) -> dict[str, Any]:
     state = _AnalysisState(project_path)
     input_map = {relative: path for path, relative in inputs if is_dependency_metadata(relative)}
+    ordered_inputs = sorted(input_map.items())
+    if len(ordered_inputs) > MAX_DEPENDENCY_FILES:
+        state.record_file_limit(
+            len(ordered_inputs) - MAX_DEPENDENCY_FILES,
+            "dependency-input-file-limit",
+            "Supported dependency metadata exceeded the safe file-count limit.",
+        )
+        input_map = dict(ordered_inputs[:MAX_DEPENDENCY_FILES])
     for relative in sorted(input_map):
         path = input_map[relative]
         lower_name = path.name.lower()
@@ -120,7 +130,7 @@ def analyze_dependencies(
         "limitations": sorted(state.limitations, key=lambda item: (item.get("path", ""), item["reason"])),
         "analyzedFiles": sorted(state.analyzed_files),
         "failedFiles": sorted(state.failed_files),
-        "completenessGapCount": len(state.failed_files) + sum(1 for item in state.limitations if not item.get("path")),
+        "completenessGapCount": state.completeness_gap_count(),
         "findings": findings,
         "offlineOnly": True,
     }
@@ -192,8 +202,39 @@ class _AnalysisState:
         self.node_lock_root_groups: dict[str, dict[str, str]] = {}
         self.node_lock_version: int | None = None
         self.node_declared_manager = ""
+        self.poetry_manifest_paths: set[str] = set()
         self._requirements_seen: set[str] = set()
         self._requirements_stack: list[str] = []
+        self._skipped_file_count = 0
+        self._finding_keys: set[tuple[str, ...]] = set()
+
+    def record_file_limit(self, count: int, reason: str, explanation: str) -> None:
+        self._skipped_file_count += count
+        self.add_limitation(reason, explanation)
+        self.add_finding(
+            "dependency-analysis-incomplete", "medium",
+            "Some dependency metadata was not analyzed because a safe file-count limit was reached.",
+            "Reduce or manually review unusually numerous dependency metadata files.",
+        )
+
+    def completeness_gap_count(self) -> int:
+        counted_reasons = {"dependency-input-file-limit", "requirements-file-limit", "requirements-depth-limit"}
+        global_limitations = sum(
+            1 for item in self.limitations
+            if not item.get("path") and item.get("reason") not in counted_reasons
+        )
+        return len(self.failed_files) + self._skipped_file_count + global_limitations
+
+    def _analysis_gap(
+        self, relative: str, reason: str, limitation: str, explanation: str, action: str,
+    ) -> None:
+        if relative:
+            self.failed_files.add(relative)
+        self.add_limitation(reason, limitation, relative)
+        self.add_finding(
+            "dependency-analysis-incomplete", "medium", explanation, action,
+            path=relative,
+        )
 
     def _append_entry(self, entry: dict[str, Any], *, locked: bool) -> bool:
         if len(self.direct_entries) + len(self.locked_entries) >= MAX_ENTRIES:
@@ -274,6 +315,14 @@ class _AnalysisState:
         groups = self._parse_node_dependency_groups(data, relative)
         self._parse_node_bundling(data, relative)
         self._parse_node_overrides(data, relative)
+        for field in ("workspaces", "resolutions"):
+            if data.get(field) not in (None, [], {}):
+                self._analysis_gap(
+                    relative, f"node-{field}-not-resolved",
+                    f"package.json field '{field}' was detected but is not resolved by offline dependency analysis.",
+                    f"The Node '{field}' configuration was inventoried but not fully interpreted.",
+                    f"Review the '{field}' configuration and related lockfile changes manually.",
+                )
         self.node_manifest_groups = groups
         self._mark_analyzed(relative)
 
@@ -529,6 +578,22 @@ class _AnalysisState:
             return
         if relative in self._requirements_seen:
             return
+        if len(self._requirements_stack) >= MAX_REQUIREMENTS_DEPTH:
+            if self._requirements_stack:
+                self.failed_files.add(self._requirements_stack[-1])
+            self.record_file_limit(
+                1, "requirements-depth-limit",
+                "A requirements include chain exceeded the safe recursion-depth limit.",
+            )
+            return
+        if len(self._requirements_seen) >= MAX_DEPENDENCY_FILES:
+            if self._requirements_stack:
+                self.failed_files.add(self._requirements_stack[-1])
+            self.record_file_limit(
+                1, "requirements-file-limit",
+                "Requirements includes exceeded the safe file-count limit.",
+            )
+            return
         self._requirements_seen.add(relative)
         self._requirements_stack.append(relative)
         content = self.read_bytes(path, relative, "manifest")
@@ -669,6 +734,21 @@ class _AnalysisState:
         data = self._read_object(path, relative, "manifest", "dependency-manifest-parse-error", _toml_object)
         if data is None:
             return
+        build_requires = data.get("build-system", {}).get("requires") if isinstance(data.get("build-system"), dict) else None
+        if build_requires:
+            self._analysis_gap(
+                relative, "pyproject-build-requires-unsupported",
+                "pyproject build-system requirements are not included in normalized dependency analysis.",
+                "Build-system requirements were detected but not analyzed as project dependencies.",
+                "Review build-system requirements manually before invoking a build frontend.",
+            )
+        if data.get("dependency-groups"):
+            self._analysis_gap(
+                relative, "pyproject-dependency-groups-unsupported",
+                "pyproject dependency-groups are not supported by normalized dependency analysis.",
+                "Dependency groups were detected but could not be interpreted reliably.",
+                "Review dependency groups manually and use a supported lockfile where possible.",
+            )
         if data.get("project") is not None and not isinstance(data.get("project"), dict):
             self._python_structure_error(relative, "The pyproject project table is not an object.")
         project = data.get("project") if isinstance(data.get("project"), dict) else {}
@@ -690,6 +770,7 @@ class _AnalysisState:
                     self._python_structure_error(relative, "A PEP 621 optional dependency group is not a list.")
         poetry = _nested_dict(data, "tool", "poetry")
         if poetry:
+            self.poetry_manifest_paths.add(relative)
             self.package_managers.add("poetry")
             self._add_poetry_group(poetry.get("dependencies"), "poetry", relative)
             self._add_poetry_group(poetry.get("dev-dependencies"), "poetry-dev", relative, dev=True)
@@ -927,6 +1008,33 @@ class _AnalysisState:
     def _finish_node_consistency_checks(self) -> None:
         node_manifests = sorted(path for path in self.manifests if Path(path).name.lower() == "package.json")
         node_locks = sorted(path for path in self.lockfiles if Path(path).name.lower() in NODE_LOCKFILES)
+        manifests_with_dependencies = {
+            entry.get("manifestPath", "") for entry in self.direct_entries
+            if entry.get("ecosystem") == "node"
+        }
+        for manifest in sorted(manifests_with_dependencies):
+            if not _has_sibling(manifest, node_locks, NODE_LOCKFILES):
+                self._analysis_gap(
+                    manifest, "node-lockfile-unavailable",
+                    "A Node manifest declares dependencies without a supported sibling npm lockfile.",
+                    "Resolved Node dependency identity and integrity are unavailable offline.",
+                    "Create or review the intended package-manager lockfile before installation.",
+                )
+        for lockfile in node_locks:
+            if not _has_sibling(lockfile, node_manifests, NODE_MANIFESTS):
+                self._analysis_gap(
+                    lockfile, "node-manifest-unavailable",
+                    "An npm lockfile has no sibling package.json manifest.",
+                    "The npm lockfile could not be compared with its root manifest.",
+                    "Restore or review the corresponding package.json before installation.",
+                )
+        if self.node_declared_manager and self.node_declared_manager != "npm" and node_manifests:
+            self._analysis_gap(
+                node_manifests[0], "unsupported-node-package-manager",
+                "The declared Node package manager is not supported for lockfile normalization.",
+                "The declared Node package manager cannot be fully verified by the npm-focused analyzer.",
+                "Review the declared package manager and its lockfile manually.",
+            )
         single_node_context = (
             len(node_manifests) == 1
             and len(node_locks) == 1
@@ -985,6 +1093,41 @@ class _AnalysisState:
             entry for entry in self.direct_entries
             if entry["ecosystem"] == "python" and not _requirements_self_lock(entry)
         ]
+        pipfiles = sorted(path for path in self.manifests if Path(path).name.lower() == "pipfile")
+        pipfile_locks = sorted(path for path in self.lockfiles if Path(path).name.lower() == "pipfile.lock")
+        poetry_locks = sorted(path for path in self.lockfiles if Path(path).name.lower() == "poetry.lock")
+        for manifest in pipfiles:
+            if any(entry.get("manifestPath") == manifest for entry in python_direct_entries) and not _has_sibling(manifest, pipfile_locks, {"pipfile.lock"}):
+                self._analysis_gap(
+                    manifest, "pipfile-lock-unavailable",
+                    "Pipfile declares dependencies without a sibling Pipfile.lock.",
+                    "Resolved Pipenv dependency identity and hashes are unavailable offline.",
+                    "Generate or review Pipfile.lock before installing dependencies.",
+                )
+        for lockfile in pipfile_locks:
+            if not _has_sibling(lockfile, pipfiles, {"pipfile"}):
+                self._analysis_gap(
+                    lockfile, "pipfile-manifest-unavailable",
+                    "Pipfile.lock has no sibling Pipfile.",
+                    "The Pipenv lockfile could not be compared with its manifest.",
+                    "Restore or review the corresponding Pipfile before installation.",
+                )
+        for manifest in sorted(self.poetry_manifest_paths):
+            if not _has_sibling(manifest, poetry_locks, {"poetry.lock"}):
+                self._analysis_gap(
+                    manifest, "poetry-lock-unavailable",
+                    "A Poetry manifest has no sibling poetry.lock.",
+                    "Resolved Poetry dependency identity and hashes are unavailable offline.",
+                    "Generate or review poetry.lock before installing dependencies.",
+                )
+        for lockfile in poetry_locks:
+            if not _has_sibling(lockfile, self.poetry_manifest_paths, {"pyproject.toml"}):
+                self._analysis_gap(
+                    lockfile, "poetry-manifest-unavailable",
+                    "poetry.lock has no sibling Poetry pyproject.toml manifest.",
+                    "The Poetry lockfile could not be compared with its manifest.",
+                    "Restore or review the corresponding pyproject.toml before installation.",
+                )
         for direct in sorted(python_direct_entries, key=_entry_sort_key):
             compatible_locks = [
                 entry for entry in self.locked_entries
@@ -1188,6 +1331,10 @@ class _AnalysisState:
             "metadata": _compact(metadata or {}),
         }
         finding.update({key: value for key, value in optional.items() if value not in ("", {}, [])})
+        identity = _finding_identity(finding)
+        if identity in self._finding_keys:
+            return
+        self._finding_keys.add(identity)
         self.findings.append(finding)
 
 
@@ -1506,8 +1653,7 @@ def _classify_resolved_source(resolved: str, version: str, *, link: bool) -> tup
     if resolved.startswith("http://"):
         return "url", _safe_url_host(resolved, include_scheme=True)
     if resolved.startswith("https://"):
-        host = _safe_url_host(resolved, include_scheme=resolved.startswith("http://"))
-        return ("registry" if host == "registry.npmjs.org" else "url"), host
+        return "registry", _safe_url_host(resolved)
     if version.startswith(("file:", "link:")):
         return "local", "local path"
     return "registry", ""
@@ -1531,6 +1677,8 @@ def _classify_poetry_source(source: dict[str, Any]) -> tuple[str, str]:
         return "vcs", _safe_url_host(url)
     if source_type in {"directory", "file"}:
         return "local", "local path"
+    if source_type == "legacy" and url:
+        return "registry", _safe_url_host(url)
     if url:
         return "url", _safe_url_host(url, include_scheme=url.startswith("http://"))
     return "registry", ""
@@ -1780,6 +1928,11 @@ def _node_lock_matches_direct(direct: dict[str, Any], locked: dict[str, Any]) ->
     )
 
 
+def _has_sibling(path: str, candidates: Any, names: set[str]) -> bool:
+    parent = Path(path).parent
+    return any(Path(candidate).parent == parent and Path(candidate).name.lower() in names for candidate in candidates)
+
+
 def _corresponding_lock_present(direct: dict[str, Any], lockfiles: set[str]) -> bool:
     return any(
         _lock_matches_direct(direct, {"name": direct.get("name"), "lockfilePath": path})
@@ -1841,14 +1994,18 @@ def _dedupe_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
     seen: set[tuple[str, ...]] = set()
     result: list[dict[str, Any]] = []
     for finding in findings:
-        key = tuple(str(finding.get(field, "")) for field in (
-            "type", "severity", "path", "ecosystem", "package", "dependencyGroup", "sourceIdentifier",
-        ))
+        key = _finding_identity(finding)
         if key in seen:
             continue
         seen.add(key)
         result.append(finding)
     return result
+
+
+def _finding_identity(finding: dict[str, Any]) -> tuple[str, ...]:
+    return tuple(str(finding.get(field, "")) for field in (
+        "type", "severity", "path", "ecosystem", "package", "dependencyGroup", "sourceIdentifier",
+    ))
 
 
 def _highest_severity(findings: list[dict[str, Any]]) -> str:

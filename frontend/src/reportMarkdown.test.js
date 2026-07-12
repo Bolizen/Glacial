@@ -262,6 +262,43 @@ test("exports dependency trust summaries, changes, limitations, and detailed evi
   assert.doesNotMatch(markdown, /undefined|null|\[object Object\]/);
 });
 
+test("dependency Markdown remains bounded for a capped adversarial inventory", () => {
+  const entries = Array.from({ length: 80 }, (_, index) => ({
+    ecosystem: "node",
+    name: `package-${String(index).padStart(3, "0")}`,
+    group: "dependencies",
+    requestedSpecification: "^1",
+    lockedVersion: "1.2.3",
+    sourceType: "registry",
+    sourceIdentifier: "registry.example",
+    integrityPresent: true,
+    direct: true,
+  }));
+  const result = {
+    ...scanResult([]),
+    dependencyTrust: {
+      schemaVersion: 1,
+      status: "complete",
+      ecosystems: ["node"],
+      manifests: ["package.json"],
+      lockfiles: ["package-lock.json"],
+      directDependencyCount: 80,
+      lockedDependencyCount: 80,
+      integrityCoverage: { total: 80, present: 80, missing: 0 },
+      entries,
+      comparison: { baselineStatus: "unavailable", changeCount: 0, changes: [] },
+      limitations: [],
+      offlineOnly: true,
+    },
+  };
+
+  const markdown = buildScanReportMarkdown(result, reportFixture({ totalFindings: 0 }), null, { configured: false });
+
+  assert.equal((markdown.match(/^\| node \| package-/gm) || []).length, 50);
+  assert.match(markdown, /30 additional normalized entries are omitted/);
+  assert.ok(markdown.length < 20_000);
+});
+
 function finding(type, path, explanation, metadata = {}) {
   return {
     type,

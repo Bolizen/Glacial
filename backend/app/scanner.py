@@ -233,7 +233,12 @@ def scan_project(project_path: Path, previous_dependency_trust: dict[str, Any] |
         if not (finding.get("type") == "package-json-read-error" and finding.get("path") in dependency_parse_paths)
     ]
     findings.extend(dependency_findings)
-    dependency_failed_paths = set(dependency_trust.get("failedFiles", []))
+    dependency_input_paths = {relative for _, relative in dependency_inputs}
+    dependency_analyzed_paths = set(dependency_trust.get("analyzedFiles", []))
+    dependency_failed_paths = (
+        set(dependency_trust.get("failedFiles", []))
+        | (dependency_input_paths - dependency_analyzed_paths)
+    )
     reviewed_files = [path for path in reviewed_files if path not in dependency_failed_paths]
     dependency_gap_count = max(0, int(dependency_trust.get("completenessGapCount", 0)))
     already_counted = len(dependency_failed_paths.intersection(generic_failed_dependency_paths))

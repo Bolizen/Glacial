@@ -440,8 +440,48 @@ class DependencyTrustPersistenceTests(unittest.TestCase):
             )
         legacy = next(scan for scan in main.scan_history(str(self.project))["scans"] if scan["scan_date"] == "legacy")
         self.assertIsNone(legacy["dependencyTrust"])
+
+        (self.project / "requirements.txt").write_text("requests==2.33.0\nnewpkg>=1\n", encoding="utf-8")
+        after_legacy = main.run_scan(ProjectPathRequest(project_path=str(self.project)))
+        self.assertEqual(after_legacy["dependencyTrust"]["comparison"]["baselineStatus"], "available")
+        version_change = next(
+            change for change in after_legacy["dependencyTrust"]["comparison"]["changes"]
+            if change["changeType"] == "version-changed" and change["name"] == "requests"
+        )
+        self.assertEqual(version_change["previousValue"], "2.32.0")
+
         project_payload = main.list_projects()["projects"][0]
         self.assertNotIn("entries", project_payload)
+
+    def test_dependency_baseline_never_crosses_projects(self) -> None:
+        main.run_scan(ProjectPathRequest(project_path=str(self.project)))
+        other = self.root / "other"
+        other.mkdir()
+        (other / "requirements.txt").write_text("requests==9.9.9\n", encoding="utf-8")
+        with database.get_connection() as connection:
+            connection.execute(
+                "INSERT INTO projects (path, name, description, project_type, created_at) VALUES (?, 'other', '', '', 'now')",
+                (str(other),),
+            )
+
+        result = main.run_scan(ProjectPathRequest(project_path=str(other)))
+
+        self.assertEqual(result["dependencyTrust"]["comparison"]["baselineStatus"], "unavailable")
+        self.assertEqual(result["dependencyTrust"]["changeCount"], 0)
+
+    def test_sensitive_dependency_sources_remain_sanitized_through_history(self) -> None:
+        (self.project / "requirements.txt").write_text(
+            "privatepkg @ https://api-user:api-pass@packages.example/private.whl?token=history-secret#fragment\n",
+            encoding="utf-8",
+        )
+
+        current = main.run_scan(ProjectPathRequest(project_path=str(self.project)))
+        history = main.scan_history(str(self.project))["scans"]
+        serialized = json.dumps({"current": current["dependencyTrust"], "history": history[0]["dependencyTrust"], "findings": history[0]["findings"]})
+
+        for secret in ("api-user", "api-pass", "history-secret", "fragment"):
+            self.assertNotIn(secret, serialized)
+        self.assertIn("packages.example", serialized)
 
 
 if __name__ == "__main__":

@@ -38,3 +38,17 @@ test("large inventories and changes are capped deterministically", () => {
   assert.equal(trust.comparison.changes.length, 50);
   assert.equal(trust.comparison.hiddenChangeCount, 20);
 });
+
+test("direct dependencies remain visible when transitive inventory exceeds the UI cap", () => {
+  const transitive = Array.from({ length: 80 }, (_, index) => ({ ecosystem: "node", name: `a-transitive-${index}`, direct: false }));
+  const trust = normalizeDependencyTrust({
+    schemaVersion: 1,
+    status: "complete",
+    entries: [...transitive, { ecosystem: "node", name: "react", direct: true }, { ecosystem: "python", name: "fastapi", direct: true }],
+    comparison: { changes: [] },
+  });
+
+  assert.deepEqual(trust.entries.filter((entry) => entry.direct).map((entry) => entry.name), ["react", "fastapi"]);
+  assert.equal(trust.entries.length, 50);
+  assert.equal(trust.hiddenEntryCount, 32);
+});

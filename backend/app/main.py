@@ -21,6 +21,7 @@ from .database import (
     scan_completeness_for_row,
     set_setting,
 )
+from .dependency_trust import SCHEMA_VERSION as DEPENDENCY_TRUST_SCHEMA_VERSION
 from .safety import configured_root, ensure_inside_root, ensure_project_directory, existing_workspace_root, has_multiple_hardlinks, sanitize_folder_name
 from .scanner import scan_project
 from .schemas import AgentPreviewRequest, NoteCreate, ProjectCreate, ProjectMetadataUpdate, ProjectPathRequest, ProjectRegister, ProjectRootUpdate, TrustProfileRequest
@@ -266,13 +267,24 @@ def write_agents(payload: AgentPreviewRequest) -> dict[str, object]:
 @app.post("/api/scans")
 def run_scan(payload: ProjectPathRequest) -> dict[str, object]:
     project = _ensure_project(payload.project_path)
+    previous_dependency_trust = None
     with get_connection() as connection:
-        previous_row = connection.execute(
-            "SELECT * FROM scans WHERE project_path = ? ORDER BY scan_date DESC, id DESC LIMIT 1",
+        previous_rows = connection.execute(
+            "SELECT * FROM scans WHERE project_path = ? ORDER BY scan_date DESC, id DESC",
             (str(project),),
-        ).fetchone()
-    previous_scan = row_to_scan(previous_row) if previous_row else None
-    previous_dependency_trust = previous_scan.get("dependencyTrust") if previous_scan else None
+        )
+        try:
+            for row in previous_rows:
+                candidate = row_to_scan(row).get("dependencyTrust")
+                if (
+                    isinstance(candidate, dict)
+                    and candidate.get("schemaVersion") == DEPENDENCY_TRUST_SCHEMA_VERSION
+                    and isinstance(candidate.get("entries"), list)
+                ):
+                    previous_dependency_trust = candidate
+                    break
+        finally:
+            previous_rows.close()
     result = scan_project(project, previous_dependency_trust=previous_dependency_trust)
     now = _now()
     finding_summary = _finding_summary(result["findings"])
