@@ -475,6 +475,15 @@ test("root layout reserves stable vertical scrollbar space", () => {
   assert.match(styles, /@media \(max-width: 620px\)[\s\S]*?\.notice-stack\s*\{[^}]*left:\s*14px;[^}]*right:\s*14px;[^}]*width:\s*auto;/);
 });
 
+test("dependency status badges stay compact with a narrow-screen wrap fallback", () => {
+  const styles = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+  const badgeRule = styles.match(/\.dependency-status\s*\{[^}]*\}/s)?.[0] || "";
+  assert.match(badgeRule, /display:\s*inline-flex/);
+  assert.match(badgeRule, /max-width:\s*100%/);
+  assert.match(badgeRule, /white-space:\s*nowrap/);
+  assert.match(styles, /@media \(max-width: 360px\)[\s\S]*?\.dependency-status\s*\{[^}]*overflow-wrap:\s*anywhere;[^}]*white-space:\s*normal;/);
+});
+
 test("complete Node and Python dependency analysis renders compact offline trust evidence", async () => {
   await renderApp();
   const result = {
@@ -495,13 +504,73 @@ test("complete Node and Python dependency analysis renders compact offline trust
   await openReports();
 
   const panel = document.querySelector(".dependency-trust");
-  assert.match(panel.textContent, /Supported checks complete/);
+  assert.match(panel.textContent, /Checks complete/);
   assert.match(panel.textContent, /Node and Python|node, python/i);
   assert.match(panel.textContent, /alpha/);
   assert.match(panel.textContent, /requests/);
   assert.match(panel.textContent, /npm \(expected\)/);
   assert.match(panel.textContent, /Offline-only/);
   assert.ok(panel.querySelectorAll(".dependency-entry").length <= 50);
+});
+
+test("complete empty project shows dependency trust without claiming a clean graph", async () => {
+  const empty = {
+    ...withCompleteness(scan(95, "none", "2026-07-11T14:05:00Z"), { complete: true }),
+    dependencyTrust: emptyDependencyTrustFixture(),
+  };
+  await renderApp();
+  await resolveDetails(await takeDetailRequests(PROJECT_A_PATH), { scans: [empty] });
+
+  const overview = document.querySelector(".dependency-trust-overview");
+  assert.ok(overview, "Expected Dependency Trust in the selected scan overview");
+  assert.match(overview.textContent, /No metadata detected/);
+  assert.match(overview.textContent, /No supported Node or Python dependency graph was analyzed/);
+  assert.doesNotMatch(overview.textContent, /clean|verified|Integrity|Consistency issues/i);
+
+  await openReports();
+  const detailed = document.querySelector(".dependency-trust");
+  assert.match(detailed.textContent, /No metadata detected/);
+  assert.match(detailed.textContent, /no dependency graph/i);
+  assert.equal(detailed.querySelector(".dependency-metrics"), null);
+});
+
+test("unsupported dependency metadata remains distinct from an empty modern scan", async () => {
+  const unsupported = {
+    ...withCompleteness(scan(96, "medium", "2026-07-11T14:06:00Z"), { complete: false, dependencyAnalysisFailureCount: 1 }),
+    dependencyTrust: emptyDependencyTrustFixture({
+      status: "unsupported",
+      manifests: ["dependencies.custom"],
+      limitations: [{ reason: "unsupported-format", explanation: "The detected dependency format is not supported.", path: "dependencies.custom" }],
+    }),
+  };
+  await renderApp();
+  await resolveDetails(await takeDetailRequests(PROJECT_A_PATH), { scans: [unsupported] });
+
+  const overview = document.querySelector(".dependency-trust-overview");
+  assert.match(overview.textContent, /Unsupported metadata/);
+  assert.match(overview.textContent, /format is not supported/);
+  assert.doesNotMatch(overview.textContent, /No metadata detected/);
+});
+
+test("historical modern scan with no dependency metadata keeps the explicit empty state", async () => {
+  const current = {
+    ...withCompleteness(scan(98, "low", "2026-07-11T14:08:00Z"), { complete: true }),
+    dependencyTrust: dependencyTrustFixture(),
+  };
+  const historicalEmpty = {
+    ...withCompleteness(scan(97, "none", "2026-07-11T14:07:00Z"), { complete: true }),
+    dependencyTrust: emptyDependencyTrustFixture(),
+  };
+  await renderApp();
+  await resolveDetails(await takeDetailRequests(PROJECT_A_PATH), { scans: [current, historicalEmpty] });
+  await openReports();
+  const historyRows = [...document.querySelectorAll(".history-row")];
+  await click(historyRows[1].querySelector(".history-view-button"));
+
+  const panel = document.querySelector(".dependency-trust");
+  assert.match(panel.textContent, /No metadata detected/);
+  assert.match(panel.textContent, /No supported Node or Python dependency graph was analyzed/);
+  assert.match(document.querySelector(".scan-view-label").textContent, /Viewing history scan/);
 });
 
 test("dependency analysis distinguishes incomplete and legacy history states", async () => {
@@ -518,7 +587,7 @@ test("dependency analysis distinguishes incomplete and legacy history states", a
   const legacy = { ...scan(92, "none", "2026-07-11T13:59:00Z"), dependencyTrust: undefined };
   await resolveDetails(await takeDetailRequests(PROJECT_A_PATH), { scans: [incomplete, legacy] });
   await openReports();
-  assert.match(document.querySelector(".dependency-trust").textContent, /Analysis incomplete/);
+  assert.match(document.querySelector(".dependency-trust").textContent, /Incomplete/);
   assert.match(document.querySelector(".dependency-trust").textContent, /Lockfile exceeded/);
   const historyRows = [...document.querySelectorAll(".history-row")];
   assert.equal(historyRows.length, 2);
@@ -1138,6 +1207,25 @@ function dependencyTrustFixture(overrides = {}) {
     offlineOnly: true,
     ...overrides,
   };
+}
+
+function emptyDependencyTrustFixture(overrides = {}) {
+  return dependencyTrustFixture({
+    status: "unsupported",
+    ecosystems: [],
+    manifests: [],
+    lockfiles: [],
+    packageManagers: [],
+    directDependencyCount: 0,
+    lockedDependencyCount: 0,
+    integrityCoverage: { total: 0, present: 0, missing: 0 },
+    unusualSourceCount: 0,
+    installScriptIndicatorCount: 0,
+    consistencyIssueCount: 0,
+    entries: [],
+    limitations: [],
+    ...overrides,
+  });
 }
 
 async function flushMicrotasks() {

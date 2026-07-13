@@ -1,6 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { dependencyStatusLabel, normalizeDependencyTrust } from "./dependencyTrust.js";
+import {
+  dependencyStatusDescription,
+  dependencyStatusLabel,
+  dependencyTrustHasNoSupportedMetadata,
+  normalizeDependencyTrust,
+} from "./dependencyTrust.js";
 import {
   isAbortError,
   projectListResponsePolicy,
@@ -933,6 +938,7 @@ export function App() {
               <section className="dashboard-grid">
                 <OverallRiskPanel report={displayedReport} result={displayedScan} trustProfile={trustProfile} />
                 <FindingsOverview report={displayedReport} result={displayedScan} />
+                {displayedScan ? <DependencyTrustPanel trust={displayedReport.dependencyTrust} findings={displayedReport.dependencyFindings} trustContext={displayedTrustContext} compact /> : null}
                 <ProjectExpectationsSummary profile={trustProfile} onEdit={() => setSelectedSection("trustProfiles")} />
                 <RecentActivity changelog={changelog} scans={scanHistory} />
               </section>
@@ -1561,16 +1567,17 @@ function ScanCompletenessSummary({ completeness, viewMode, isScanning, onRunScan
   );
 }
 
-function DependencyTrustPanel({ trust, findings, trustContext }) {
+function DependencyTrustPanel({ trust, findings, trustContext, compact = false }) {
   const directEntries = trust.entries.filter((entry) => entry.direct);
   const visibleFindings = findings.slice(0, 50);
+  const noSupportedMetadata = dependencyTrustHasNoSupportedMetadata(trust);
   const expectedManagers = trustContext?.packageManagers || [];
   const managerContext = trust.packageManagers.map((manager) => ({
     manager,
     expected: expectedManagers.some((expected) => String(expected).toLowerCase() === manager.toLowerCase()),
   }));
   return (
-    <section className={`dependency-trust dependency-status-${trust.status}`}>
+    <section className={`dependency-trust dependency-status-${trust.status}${compact ? " dependency-trust-overview" : ""}`}>
       <div className="panel-heading">
         <div>
           <h3>Dependency Trust</h3>
@@ -1578,7 +1585,19 @@ function DependencyTrustPanel({ trust, findings, trustContext }) {
         </div>
         <span className="dependency-status">{dependencyStatusLabel(trust)}</span>
       </div>
-      {!trust.available ? <p className="muted">This scan has no dependency-trust metadata. Run a new scan to analyze locally available dependency metadata.</p> : (
+      <p className="muted dependency-state-description">{dependencyStatusDescription(trust)}</p>
+      {compact ? (
+        trust.available && !noSupportedMetadata ? (
+          <div className="dependency-overview-counts">
+            <span>Manifests <strong>{trust.manifests.length}</strong></span>
+            <span>Lockfiles <strong>{trust.lockfiles.length}</strong></span>
+            <span>Direct dependencies <strong>{trust.directDependencyCount}</strong></span>
+            <span>Dependency findings <strong>{findings.length}</strong></span>
+          </div>
+        ) : null
+      ) : !trust.available || noSupportedMetadata ? (
+        <p className="review-note">Offline-only: no dependency graph, package reputation, installed dependency code, or registry intelligence was analyzed.</p>
+      ) : (
         <>
           <div className="dependency-metrics">
             <div><strong>{trust.directDependencyCount}</strong><span>Direct</span></div>

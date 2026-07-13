@@ -1,13 +1,39 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { dependencyStatusLabel, normalizeDependencyTrust } from "./dependencyTrust.js";
+import {
+  dependencyStatusDescription,
+  dependencyStatusLabel,
+  dependencyReportStatusLabel,
+  dependencyTrustHasNoSupportedMetadata,
+  normalizeDependencyTrust,
+} from "./dependencyTrust.js";
 
 test("legacy dependency analysis remains unavailable rather than clean", () => {
   const trust = normalizeDependencyTrust(undefined);
   assert.equal(trust.available, false);
   assert.equal(trust.status, "unavailable");
   assert.equal(dependencyStatusLabel(trust), "Analysis unavailable");
+});
+
+test("empty modern and detected unsupported metadata have distinct conservative states", () => {
+  const empty = normalizeDependencyTrust({ schemaVersion: 1, status: "unsupported", entries: [] });
+  assert.equal(dependencyTrustHasNoSupportedMetadata(empty), true);
+  assert.equal(dependencyStatusLabel(empty), "No metadata detected");
+  assert.equal(dependencyReportStatusLabel(empty), "No supported dependency metadata detected");
+  assert.match(dependencyStatusDescription(empty), /No supported Node or Python dependency graph was analyzed/);
+  assert.doesNotMatch(dependencyStatusDescription(empty), /clean|verified/i);
+
+  const unsupported = normalizeDependencyTrust({
+    schemaVersion: 1,
+    status: "unsupported",
+    manifests: ["dependencies.custom"],
+    entries: [],
+  });
+  assert.equal(dependencyTrustHasNoSupportedMetadata(unsupported), false);
+  assert.equal(dependencyStatusLabel(unsupported), "Unsupported metadata");
+  assert.equal(dependencyReportStatusLabel(unsupported), "Unsupported dependency metadata");
+  assert.match(dependencyStatusDescription(unsupported), /format is not supported/);
 });
 
 test("complete, incomplete, and malformed states preserve compact counts and false values", () => {
@@ -22,10 +48,23 @@ test("complete, incomplete, and malformed states preserve compact counts and fal
     comparison: { baselineStatus: "available", changes: [] },
     offlineOnly: true,
   });
-  assert.equal(dependencyStatusLabel(trust), "Supported checks complete");
+  assert.equal(dependencyStatusLabel(trust), "Checks complete");
+  assert.equal(dependencyReportStatusLabel(trust), "Supported checks complete");
   assert.deepEqual(trust.ecosystems, ["node", "python"]);
   assert.equal(trust.entries[0].integrityPresent, false);
   assert.equal(trust.directDependencyCount, 0);
+});
+
+test("every dependency badge state uses a compact label", () => {
+  const values = [
+    [undefined, "Analysis unavailable"],
+    [{ schemaVersion: 1, status: "complete" }, "Checks complete"],
+    [{ schemaVersion: 1, status: "incomplete" }, "Incomplete"],
+    [{ schemaVersion: 1, status: "unsupported", manifests: ["dependencies.custom"] }, "Unsupported metadata"],
+    [{ schemaVersion: 1, status: "malformed" }, "Malformed metadata"],
+    [{ schemaVersion: 1, status: "unsupported" }, "No metadata detected"],
+  ];
+  values.forEach(([value, expected]) => assert.equal(dependencyStatusLabel(normalizeDependencyTrust(value)), expected));
 });
 
 test("large inventories and changes are capped deterministically", () => {

@@ -299,6 +299,39 @@ test("exports dependency trust summaries, changes, limitations, and detailed evi
   assert.doesNotMatch(markdown, /undefined|null|\[object Object\]/);
 });
 
+test("dependency Markdown distinguishes empty, unsupported, and legacy analysis", () => {
+  const emptyResult = {
+    ...scanResult([]),
+    dependencyTrust: {
+      schemaVersion: 1,
+      status: "unsupported",
+      ecosystems: [],
+      manifests: [],
+      lockfiles: [],
+      packageManagers: [],
+      entries: [],
+      comparison: { baselineStatus: "unavailable", changes: [] },
+    },
+  };
+  const empty = buildScanReportMarkdown(emptyResult, reportFixture({ totalFindings: 0 }), null, { configured: false });
+  assert.match(empty, /^Status: No supported dependency metadata detected$/m);
+  assert.match(empty, /No supported Node or Python dependency graph was analyzed/);
+  assert.doesNotMatch(empty, /Integrity coverage: 0\/0|Supported checks complete|clean|verified/i);
+
+  const unsupported = buildScanReportMarkdown({
+    ...emptyResult,
+    dependencyTrust: { ...emptyResult.dependencyTrust, manifests: ["dependencies.custom"] },
+  }, reportFixture({ totalFindings: 0 }), null, { configured: false });
+  assert.match(unsupported, /^Status: Unsupported dependency metadata$/m);
+  assert.match(unsupported, /format is not supported/);
+  assert.doesNotMatch(unsupported, /No supported dependency metadata detected/);
+
+  const legacy = buildScanReportMarkdown(scanResult([]), reportFixture({ totalFindings: 0 }), null, { configured: false });
+  assert.match(legacy, /^Status: Analysis unavailable$/m);
+  assert.match(legacy, /predates dependency analysis/);
+  assert.doesNotMatch(legacy, /No supported dependency metadata detected/);
+});
+
 test("dependency Markdown remains bounded for a capped adversarial inventory", () => {
   const entries = Array.from({ length: 80 }, (_, index) => ({
     ecosystem: "node",

@@ -479,13 +479,57 @@ pre {
   padding: 1rem;
 }
 
+.dependency-trust-overview {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.dependency-state-description {
+  margin-bottom: 10px;
+}
+
+.dependency-overview-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+}
+
+.dependency-overview-counts span {
+  color: #a8b0b2;
+  font-size: 0.82rem;
+}
+
+.dependency-overview-counts strong {
+  color: #f5f0e8;
+  margin-left: 4px;
+}
+
 .dependency-status {
+  align-self: flex-start;
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 999px;
   color: #cbd1d0;
+  display: inline-flex;
+  flex: 0 0 auto;
   font-size: 0.78rem;
   font-weight: 800;
+  justify-self: start;
+  line-height: 1.2;
+  max-width: 100%;
   padding: 5px 9px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.dependency-trust .panel-heading > div {
+  min-width: 0;
+}
+
+@media (max-width: 360px) {
+  .dependency-status {
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
 }
 
 .dependency-status-complete .dependency-status {

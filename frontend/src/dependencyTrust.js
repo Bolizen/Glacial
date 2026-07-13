@@ -53,10 +53,41 @@ export function normalizeDependencyTrust(value) {
 
 export function dependencyStatusLabel(trust) {
   if (!trust?.available) return "Analysis unavailable";
+  if (trust.status === "complete") return "Checks complete";
+  if (trust.status === "malformed") return "Malformed metadata";
+  if (dependencyTrustHasNoSupportedMetadata(trust)) return "No metadata detected";
+  if (trust.status === "unsupported") return "Unsupported metadata";
+  return "Incomplete";
+}
+
+export function dependencyReportStatusLabel(trust) {
+  if (!trust?.available) return "Analysis unavailable";
   if (trust.status === "complete") return "Supported checks complete";
   if (trust.status === "malformed") return "Malformed dependency metadata";
-  if (trust.status === "unsupported") return "No supported dependency metadata";
+  if (dependencyTrustHasNoSupportedMetadata(trust)) return "No supported dependency metadata detected";
+  if (trust.status === "unsupported") return "Unsupported dependency metadata";
   return "Analysis incomplete";
+}
+
+export function dependencyStatusDescription(trust) {
+  if (!trust?.available) return "This scan predates dependency analysis, so no dependency-trust assessment is available.";
+  if (dependencyTrustHasNoSupportedMetadata(trust)) {
+    return "No supported Node or Python dependency graph was analyzed. This does not verify that the project has no dependencies or dependency risk.";
+  }
+  if (trust.status === "unsupported") return "Dependency metadata was detected, but its format is not supported for offline analysis.";
+  if (trust.status === "malformed") return "Dependency metadata could not be parsed reliably, so no complete dependency assessment is available.";
+  if (trust.status === "incomplete") return "Some detected dependency metadata could not be analyzed completely.";
+  return "Supported local dependency metadata checks completed. Offline analysis does not establish package reputation or safety.";
+}
+
+export function dependencyTrustHasNoSupportedMetadata(trust) {
+  return Boolean(trust?.available)
+    && trust.status === "unsupported"
+    && (trust.ecosystems?.length || 0) === 0
+    && (trust.manifests?.length || 0) === 0
+    && (trust.lockfiles?.length || 0) === 0
+    && (trust.packageManagers?.length || 0) === 0
+    && (trust.entries?.length || 0) === 0;
 }
 
 function unavailableDependencyTrust() {

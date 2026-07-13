@@ -214,14 +214,24 @@ function formatDependencyTrust(value, findings) {
   const trust = normalizeDependencyTrust(value);
   if (!trust.available) {
     return [
-      "Status: Analysis unavailable. This scan predates offline dependency analysis.",
+      `Status: ${dependencyReportStatusLabel(trust)}`,
+      dependencyStatusDescription(trust),
       "",
       "Offline-only: no registry reputation, malware intelligence, dependency installation, installed-code inspection, or project-code execution was performed.",
     ].join("\n");
   }
+  if (dependencyTrustHasNoSupportedMetadata(trust)) {
+    return [
+      `Status: ${dependencyReportStatusLabel(trust)}`,
+      dependencyStatusDescription(trust),
+      "",
+      "Offline-only: no dependency graph, registry reputation, malware intelligence, dependency installation, installed-code inspection, or project-code execution was analyzed.",
+    ].join("\n");
+  }
   const dependencyFindingCount = findings.filter((finding) => presentText(finding?.type).startsWith("dependency-")).length;
   const lines = [
-    `Status: ${escapeMarkdownText(dependencyStatusLabel(trust))}`,
+    `Status: ${escapeMarkdownText(dependencyReportStatusLabel(trust))}`,
+    escapeMarkdownText(dependencyStatusDescription(trust)),
     `- Ecosystems: ${trust.ecosystems.length ? trust.ecosystems.map(inlineCode).join(", ") : "None detected"}`,
     `- Manifests detected: ${trust.manifests.length}`,
     `- Lockfiles detected: ${trust.lockfiles.length}`,
@@ -547,4 +557,9 @@ function formatReportDate(value) {
   if (Number.isNaN(date.getTime())) return presentText(value);
   return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
-import { dependencyStatusLabel, normalizeDependencyTrust } from "./dependencyTrust.js";
+import {
+  dependencyStatusDescription,
+  dependencyReportStatusLabel,
+  dependencyTrustHasNoSupportedMetadata,
+  normalizeDependencyTrust,
+} from "./dependencyTrust.js";
