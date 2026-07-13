@@ -505,6 +505,42 @@ test("root layout reserves stable vertical scrollbar space", () => {
   assert.match(styles, /@media \(max-width: 620px\)[\s\S]*?\.notice-stack\s*\{[^}]*left:\s*14px;[^}]*right:\s*14px;[^}]*width:\s*auto;/);
 });
 
+test("selected and unselected history rows retain readable narrow-layout structure", async () => {
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 680 });
+  const current = withCompleteness({
+    ...scan(89, "high", "2026-07-11T13:59:00Z"),
+    findingCount: 2,
+    findingSummary: { lockfile: 1, "suspicious-text-pattern": 1 },
+  }, { complete: true });
+  const previous = withCompleteness({
+    ...scan(88, "low", "2026-07-10T13:59:00Z"),
+    findingCount: 1,
+    findingSummary: { "dependency-analysis-incomplete": 1 },
+  }, { complete: false, dependencyAnalysisFailureCount: 1 });
+  await renderApp();
+  await resolveDetails(await takeDetailRequests(PROJECT_A_PATH), { scans: [current, previous] });
+  await openReports();
+
+  const rows = [...document.querySelectorAll(".history-row")];
+  assert.equal(rows.length, 2);
+  assert.equal(rows.some((row) => row.classList.contains("selected-history-row")), false);
+  await click(rows[0].querySelector(".history-view-button"));
+  assert.ok(rows[0].classList.contains("selected-history-row"));
+  assert.equal(rows[1].classList.contains("selected-history-row"), false);
+  assert.equal(rows[0].querySelector(".history-view-button").textContent, "Viewing");
+  assert.equal(rows[1].querySelector(".history-view-button").textContent, "View");
+  assert.match(rows[0].querySelector(".history-primary").textContent, /suspicious-text-pattern: 1/);
+  assert.match(rows[0].querySelector(".history-counts").textContent, /Coverage: Complete/);
+
+  const styles = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+  assert.doesNotMatch(styles, /\.selected-history-row\s*\{[^}]*background:\s*#f7f9fa/);
+  assert.match(styles, /\.selected-history-row\s*\{[^}]*background:\s*rgba\(255, 138, 24, 0\.07\);[^}]*border:\s*1px solid rgba\(255, 138, 24, 0\.3\)/s);
+  assert.match(styles, /\.history-row\s*\{[^}]*grid-template-columns:\s*minmax\(190px, 1fr\) max-content minmax\(260px, 1fr\) max-content;/s);
+  assert.match(styles, /\.history-row\s*>\s*div:first-child span\s*\{[^}]*overflow-wrap:\s*break-word;[^}]*word-break:\s*normal;/s);
+  assert.doesNotMatch(styles, /\.history-row\s*>\s*div:first-child span\s*\{[^}]*overflow-wrap:\s*anywhere;/s);
+  assert.match(styles, /@media \(max-width: 1180px\)[\s\S]*?\.history-row\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) max-content;[\s\S]*?\.history-primary\s*\{[^}]*grid-column:\s*1 \/ -1;[\s\S]*?\.history-counts\s*\{[^}]*grid-column:\s*1 \/ -1;/);
+});
+
 test("dependency status badges stay compact with a narrow-screen wrap fallback", () => {
   const styles = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
   const badgeRule = styles.match(/\.dependency-status\s*\{[^}]*\}/s)?.[0] || "";

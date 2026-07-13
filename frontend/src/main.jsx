@@ -2274,11 +2274,11 @@ function History({ scans, selectedScanId, onSelectScan, open, onOpenChange }) {
           const reviewSummary = findingReviewSummary(scan);
           return (
           <div className={`history-row ${selected ? "selected-history-row" : ""}`} key={scan.id}>
-            <div>
+            <div className="history-primary">
               <strong>{formatDate(scan.scan_date)}</strong>
               <span>{formatFindingSummary(scan.findingSummary)}</span>
             </div>
-            <span className={`risk risk-${scan.overall_risk}`}>{scan.overall_risk === "none" ? findingCountLabel(scan.findingCount ?? scan.findings.length) : `Risk: ${scan.overall_risk}`}</span>
+            <span className={`risk history-risk risk-${scan.overall_risk}`}>{scan.overall_risk === "none" ? findingCountLabel(scan.findingCount ?? scan.findings.length) : `Risk: ${scan.overall_risk}`}</span>
             <div className="history-counts">
               {scan.overall_risk !== "none" ? <span>{findingCountLabel(scan.findingCount ?? scan.findings.length)}</span> : null}
               <span>{scan.reviewedFileCount ?? 0} reviewed</span>
