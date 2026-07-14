@@ -13,7 +13,7 @@ CodexForge is an early stage local-first project focused on project scanning, sa
 
 ## Licensing
 
-Licensing terms have not yet been selected. No permission for reuse, redistribution, modification, or commercial use is presently granted. The existing `LICENSE` file currently contains only a copyright notice and does not state a software license.
+Licensing terms have not yet been selected. No permission for reuse, redistribution, modification, or commercial use is presently granted. The `COPYRIGHT.md` file records the current copyright notice and does not state a software license.
 
 
 
