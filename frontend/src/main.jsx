@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { API_BASE_URL } from "./apiConfig.js";
 import {
   dependencyStatusDescription,
   dependencyStatusLabel,
@@ -25,7 +26,6 @@ import {
 } from "./sessionState.js";
 import "./styles.css";
 
-const API_BASE = "http://127.0.0.1:8000";
 const TRANSIENT_NOTICE_MS = 4000;
 const EMPTY_AGENT_FORM = {
   project_purpose: "",
@@ -2302,7 +2302,7 @@ function History({ scans, selectedScanId, onSelectScan, open, onOpenChange }) {
 }
 
 async function api(path, options = {}) {
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
     method: options.method || "GET",
     signal: options.signal,
     headers: options.body ? { "Content-Type": "application/json" } : undefined,

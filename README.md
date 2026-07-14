@@ -9,7 +9,11 @@ AI coding agents are more useful when generated work is easy to review before ex
 
 # Current Status
 
-CodexForge is an early stage open source project. It currently focuses on local-first project scanning, safety review, and safe AGENTS.md generation.
+CodexForge is an early stage local-first project focused on project scanning, safety review, and safe AGENTS.md generation.
+
+## Licensing
+
+Licensing terms have not yet been selected. No permission for reuse, redistribution, modification, or commercial use is presently granted. The existing `LICENSE` file currently contains only a copyright notice and does not state a software license.
 
 
 
@@ -33,6 +37,8 @@ CodexForge is an early stage open source project. It currently focuses on local-
 
 Clone the repository and open two terminals from the repo root.
 
+Clean-room setup and verification have been completed with Python 3.13.13, Node.js 24.16.0, and npm 11.13.0. These are verified versions, not declared minimum-version guarantees.
+
 ```bash
 git clone <repo-url>
 cd CodexForge
@@ -46,8 +52,12 @@ PowerShell:
 cd backend
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.lock.txt
+.\.venv\Scripts\python.exe -m pip check
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
+
+If `python` is not available as a Windows command, try `py -3 -m venv .venv`. If neither launcher is on `PATH`, invoke an installed Python executable by its full path to create `.venv`; use `.\.venv\Scripts\python.exe` for all remaining backend commands.
 
 macOS/Linux:
 
@@ -55,22 +65,45 @@ macOS/Linux:
 cd backend
 python -m venv .venv
 ./.venv/bin/python -m pip install -r requirements.lock.txt
+./.venv/bin/python -m pip check
+./.venv/bin/python -m unittest discover -s tests -v
 ./.venv/bin/python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-If `requirements.lock.txt` is not present, install from `requirements.txt` instead. The API runs at `http://127.0.0.1:8000`.
+If `requirements.lock.txt` is not present, install from `requirements.txt` instead. The API runs at `http://127.0.0.1:8000` by default. On Windows without permission to create symlinks, three real symlink integration tests are expected to skip; the deterministic link and reparse-point tests still run.
 
 ### Frontend
 
 ```bash
 cd frontend
-npm install --ignore-scripts
+npm ci --ignore-scripts
+npm test
+npm run build
+npm audit --ignore-scripts
 npm run dev
 ```
 
-On Windows PowerShell, use `npm.cmd install --ignore-scripts` and `npm.cmd run dev`.
+On Windows PowerShell, use the corresponding `npm.cmd ci --ignore-scripts`, `npm.cmd test`, `npm.cmd run build`, `npm.cmd audit --ignore-scripts`, and `npm.cmd run dev` commands.
 
 The app runs at `http://127.0.0.1:5173`.
+
+### Local service configuration
+
+The frontend sends API requests to `http://127.0.0.1:8000` by default. Set `VITE_API_BASE_URL` before `npm run dev` or `npm run build` to use another backend base URL:
+
+```powershell
+$env:VITE_API_BASE_URL = "http://127.0.0.1:8010"
+npm.cmd run dev
+```
+
+The backend accepts browser requests from `http://127.0.0.1:5173` and `http://localhost:5173` by default. Set `CODEXFORGE_CORS_ORIGINS` to a comma-separated list of explicit HTTP or HTTPS origins when the frontend uses other origins. Wildcards, credentials, paths, queries, and fragments are rejected.
+
+```powershell
+$env:CODEXFORGE_CORS_ORIGINS = "http://127.0.0.1:5174,http://localhost:5174"
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+The documented default ports remain `8000` for the backend and `5173` for the frontend.
 
 ## Notes
 

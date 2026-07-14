@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
-    "test": "node --test src/projectRequests.test.js src/reportMarkdown.test.js src/sessionState.test.js src/dependencyTrust.test.js src/findingReviews.test.js src/trustedDependencyBaseline.test.js src/App.integration.test.js",
+    "test": "node --test src/apiConfig.test.js src/projectRequests.test.js src/reportMarkdown.test.js src/sessionState.test.js src/dependencyTrust.test.js src/findingReviews.test.js src/trustedDependencyBaseline.test.js src/App.integration.test.js",
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {

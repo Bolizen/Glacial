@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .agents import generate_agents_md
 from .agents_write import filesystem_error_status, safe_write_project_file
 from .changelog import CHANGELOG_ENTRIES
+from .config import allowed_cors_origins
 from .database import (
     WORKSPACE_ROOT_SETTING,
     get_connection,
@@ -43,7 +44,7 @@ RISK_TOLERANCES = {"cautious", "normal", "permissive"}
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
+    allow_origins=allowed_cors_origins(),
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
