@@ -279,6 +279,7 @@ test("incomplete scan with no findings remains explicitly unverified", async () 
     oversizedFileCount: 1,
     unsafePathCount: 0,
     policyExcludedFileCount: 1,
+    resourceBudgetExceededCount: 1,
   };
   await renderApp([{
     ...PROJECT_A,
@@ -306,6 +307,7 @@ test("incomplete scan with no findings remains explicitly unverified", async () 
   assert.match(document.body.textContent, /File inspection failures: 2/);
   assert.match(document.body.textContent, /Oversized files: 1/);
   assert.match(document.body.textContent, /Repository policy exclusions: 1/);
+  assert.match(document.body.textContent, /Scanner resource budgets exceeded: 1/);
   assertHistorySummary("0 findings", "Coverage: Incomplete");
 });
 
@@ -1752,6 +1754,7 @@ function withCompleteness(value, completeness) {
     unsafePathCount: completeness.unsafePathCount || 0,
     dependencyAnalysisFailureCount: completeness.dependencyAnalysisFailureCount || 0,
     policyExcludedFileCount: completeness.policyExcludedFileCount || 0,
+    resourceBudgetExceededCount: completeness.resourceBudgetExceededCount || 0,
   };
   return {
     ...value,

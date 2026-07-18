@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from .dependency_trust import (
     MAX_DEPENDENCY_BYTES,
@@ -55,6 +55,17 @@ EXECUTABLE_EXTENSIONS = {
 SKIP_DIRS = {".git", "node_modules", "dist", "build", ".venv", "venv", "__pycache__"}
 IGNORE_FILE_NAME = ".glacialignore"
 MAX_TEXT_BYTES = 1024 * 1024
+# These defaults leave ample room for large source repositories while bounding
+# attacker-controlled allocation and traversal work. Generated/vendor trees are
+# already excluded by SKIP_DIRS, and dependency analysis retains its own tighter caps.
+MAX_IGNORE_BYTES = 256 * 1024
+MAX_IGNORE_PATTERNS = 10_000
+MAX_SCAN_DIRECTORIES = 50_000
+MAX_SCAN_FILES = 100_000
+MAX_SCAN_FILESYSTEM_ENTRIES = 150_000
+MAX_SCAN_INSPECTED_BYTES = 512 * 1024 * 1024
+MAX_SCAN_FINDINGS = 10_000
+MAX_SCAN_RESULT_RECORDS = 100_000
 
 PATTERNS = {
     "Invoke-Expression": ("high", "PowerShell dynamic execution pattern found."),
@@ -67,6 +78,14 @@ PATTERNS = {
     "child_process": ("high", "Node.js process execution API reference found."),
     "eval(": ("high", "Dynamic code evaluation pattern found."),
 }
+
+
+class _ContentInspection(NamedTuple):
+    findings: list[dict[str, Any]]
+    lifecycle_scripts: list[dict[str, str]]
+    issue: str | None
+    inspected_bytes: int
+    aggregate_bytes_observed: int | None = None
 
 
 def scan_project(project_path: Path, previous_dependency_trust: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -84,18 +103,72 @@ def scan_project(project_path: Path, previous_dependency_trust: dict[str, Any] |
         "unsafePathCount": 0,
         "dependencyAnalysisFailureCount": 0,
         "policyExcludedFileCount": 0,
+        "resourceBudgetExceededCount": 0,
     }
     dependency_inputs: list[tuple[Path, str]] = []
     generic_failed_dependency_paths: set[str] = set()
-    ignore_patterns, ignore_finding, ignore_issue = _load_ignore_patterns(project_path)
     reported_linked_paths: set[str] = set()
     failed_inspection_paths: set[str] = set()
     reported_traversal_failures: set[str] = set()
+    exceeded_budgets: set[str] = set()
+    stop_traversal = False
+    work_counts = {
+        "directoriesEncountered": 1,
+        "filesEncountered": 0,
+        "filesystemEntriesEncountered": 0,
+        "inspectedBytes": 0,
+        "resultRecords": 0,
+    }
+
+    def record_resource_budget(
+        budget: str,
+        limit: int,
+        observed: int,
+        path: str,
+    ) -> None:
+        nonlocal stop_traversal
+        if budget in exceeded_budgets:
+            stop_traversal = True
+            return
+        exceeded_budgets.add(budget)
+        stop_traversal = True
+        issue_counts["resourceBudgetExceededCount"] += 1
+        findings.append(_resource_budget_finding(budget, limit, observed, path, work_counts))
+
+    def append_finding(finding: dict[str, Any]) -> bool:
+        if len(findings) >= MAX_SCAN_FINDINGS:
+            record_resource_budget(
+                "findings",
+                MAX_SCAN_FINDINGS,
+                len(findings) + 1,
+                str(finding.get("path") or "."),
+            )
+            return False
+        findings.append(finding)
+        return True
+
+    def append_result_record(records: list[Any], value: Any, path: str) -> bool:
+        observed = work_counts["resultRecords"] + 1
+        if observed > MAX_SCAN_RESULT_RECORDS:
+            record_resource_budget(
+                "result-records",
+                MAX_SCAN_RESULT_RECORDS,
+                observed,
+                path,
+            )
+            return False
+        records.append(value)
+        work_counts["resultRecords"] = observed
+        return True
+
+    ignore_patterns, ignore_finding, ignore_issue = _load_ignore_patterns(project_path)
     if ignore_finding:
-        findings.append(ignore_finding)
+        append_finding(ignore_finding)
         reported_linked_paths.add(ignore_finding["path"])
         issue_counts[ignore_issue] += 1
-        if ignore_issue == "fileInspectionFailureCount":
+        if ignore_issue == "resourceBudgetExceededCount":
+            exceeded_budgets.add(str(ignore_finding.get("budget") or "ignore-policy"))
+        if ignore_issue in {"fileInspectionFailureCount", "resourceBudgetExceededCount"}:
             failed_inspection_paths.add(ignore_finding["path"])
 
     def record_traversal_error(error: OSError) -> None:
@@ -103,7 +176,7 @@ def scan_project(project_path: Path, previous_dependency_trust: dict[str, Any] |
         if relative_path in reported_traversal_failures:
             return
         reported_traversal_failures.add(relative_path)
-        findings.append(
+        append_finding(
             _inspection_finding(
                 relative_path,
                 "directory-traversal-error",
@@ -116,30 +189,98 @@ def scan_project(project_path: Path, previous_dependency_trust: dict[str, Any] |
         )
         issue_counts["traversalFailureCount"] += 1
 
-    for current_root, dirs, files in os.walk(project_path, followlinks=False, onerror=record_traversal_error):
-        root_path = Path(current_root)
-        safe_dirs = []
-        for dirname in dirs:
+    if work_counts["directoriesEncountered"] > MAX_SCAN_DIRECTORIES:
+        record_resource_budget(
+            "directories",
+            MAX_SCAN_DIRECTORIES,
+            work_counts["directoriesEncountered"],
+            ".",
+        )
+
+    pending_directories = [project_path]
+    while pending_directories and not stop_traversal:
+        root_path = pending_directories.pop()
+        directory_names: list[str] = []
+        file_names: list[str] = []
+        try:
+            with os.scandir(root_path) as entries:
+                for entry in entries:
+                    observed_entries = work_counts["filesystemEntriesEncountered"] + 1
+                    work_counts["filesystemEntriesEncountered"] = observed_entries
+                    if observed_entries > MAX_SCAN_FILESYSTEM_ENTRIES:
+                        record_resource_budget(
+                            "filesystem-entries",
+                            MAX_SCAN_FILESYSTEM_ENTRIES,
+                            observed_entries,
+                            _relative_path(root_path / entry.name, project_path),
+                        )
+                        break
+                    try:
+                        is_directory = entry.is_dir(follow_symlinks=False)
+                    except OSError as error:
+                        record_traversal_error(error)
+                        if stop_traversal:
+                            break
+                        continue
+                    if is_directory:
+                        observed = work_counts["directoriesEncountered"] + 1
+                        if observed > MAX_SCAN_DIRECTORIES:
+                            work_counts["directoriesEncountered"] = observed
+                            record_resource_budget(
+                                "directories",
+                                MAX_SCAN_DIRECTORIES,
+                                observed,
+                                _relative_path(root_path / entry.name, project_path),
+                            )
+                            break
+                        work_counts["directoriesEncountered"] = observed
+                        directory_names.append(entry.name)
+                    else:
+                        observed = work_counts["filesEncountered"] + 1
+                        if observed > MAX_SCAN_FILES:
+                            work_counts["filesEncountered"] = observed
+                            record_resource_budget(
+                                "files",
+                                MAX_SCAN_FILES,
+                                observed,
+                                _relative_path(root_path / entry.name, project_path),
+                            )
+                            break
+                        work_counts["filesEncountered"] = observed
+                        file_names.append(entry.name)
+        except OSError as error:
+            record_traversal_error(error)
+            continue
+
+        if stop_traversal:
+            break
+
+        safe_dirs: list[str] = []
+        for dirname in sorted(directory_names):
             directory_path = root_path / dirname
             relative_path = _relative_path(directory_path, project_path)
             if is_reparse_point_or_symlink(directory_path):
                 if relative_path not in reported_linked_paths:
-                    findings.append(_linked_path_finding(relative_path))
+                    if not append_finding(_linked_path_finding(relative_path)):
+                        break
                     reported_linked_paths.add(relative_path)
                     issue_counts["unsafePathCount"] += 1
                 continue
             if dirname.lower() in SKIP_DIRS:
                 continue
             safe_dirs.append(dirname)
-        dirs[:] = safe_dirs
+        if stop_traversal:
+            break
+        pending_directories.extend(root_path / dirname for dirname in reversed(safe_dirs))
 
-        for filename in sorted(files):
+        for filename in sorted(file_names):
             file_path = root_path / filename
             relative_path = _relative_path(file_path, project_path)
 
             if is_reparse_point_or_symlink(file_path):
                 if relative_path not in reported_linked_paths:
-                    findings.append(_linked_path_finding(relative_path))
+                    if not append_finding(_linked_path_finding(relative_path)):
+                        break
                     reported_linked_paths.add(relative_path)
                     issue_counts["unsafePathCount"] += 1
                 continue
@@ -147,7 +288,8 @@ def scan_project(project_path: Path, previous_dependency_trust: dict[str, Any] |
             unsafe_finding = _unsafe_file_finding(file_path, relative_path)
             if unsafe_finding:
                 if relative_path not in reported_linked_paths:
-                    findings.append(unsafe_finding)
+                    if not append_finding(unsafe_finding):
+                        break
                     reported_linked_paths.add(relative_path)
                     issue_counts[
                         "unsafePathCount"
@@ -157,7 +299,8 @@ def scan_project(project_path: Path, previous_dependency_trust: dict[str, Any] |
                 continue
 
             if relative_path in ignore_patterns:
-                ignored_files.append(relative_path)
+                if not append_result_record(ignored_files, relative_path, relative_path):
+                    break
                 issue_counts["policyExcludedFileCount"] += 1
                 continue
             if relative_path in failed_inspection_paths:
@@ -169,59 +312,85 @@ def scan_project(project_path: Path, previous_dependency_trust: dict[str, Any] |
             dependency_metadata = is_dependency_metadata(relative_path)
 
             if lower_name in MANIFESTS or _is_requirements_manifest(relative_path):
-                manifests.append(relative_path)
+                if not append_result_record(manifests, relative_path, relative_path):
+                    break
 
             if lower_name in LOCKFILES:
-                lockfiles.append(relative_path)
+                if not append_result_record(lockfiles, relative_path, relative_path):
+                    break
 
             if dependency_metadata:
                 dependency_inputs.append((file_path, relative_path))
 
             if is_secret_file:
-                secret_files.append(relative_path)
-                findings.append(
+                if not append_result_record(secret_files, relative_path, relative_path):
+                    break
+                if not append_finding(
                     _finding(
                         relative_path,
                         "secret-looking-file",
                         "high",
                         "Secret-looking file found. Review before sharing or running tools.",
                     )
-                )
+                ):
+                    break
 
             if suffix in EXECUTABLE_EXTENSIONS:
                 severity, explanation = EXECUTABLE_EXTENSIONS[suffix]
-                findings.append(_finding(relative_path, "executable-or-script-file", severity, explanation))
+                if not append_finding(_finding(relative_path, "executable-or-script-file", severity, explanation)):
+                    break
 
             if lower_name in LOCKFILES:
-                findings.append(
+                if not append_finding(
                     _finding(
                         relative_path,
                         "lockfile",
                         "low",
                         "Dependency lockfile found. Review dependency changes before installing.",
                     )
-                )
+                ):
+                    break
 
             if is_secret_file:
                 # Secret-looking files are intentionally classified by name only and
                 # are never opened. That classification completes their intended review.
-                reviewed_files.append(relative_path)
+                if not append_result_record(reviewed_files, relative_path, relative_path):
+                    break
                 continue
 
-            content_findings, package_scripts, issue = _inspect_file_content(
+            inspection = _inspect_file_content(
                 file_path,
                 relative_path,
                 is_package_json=lower_name == "package.json",
                 max_bytes=MAX_DEPENDENCY_BYTES if dependency_metadata else MAX_TEXT_BYTES,
+                aggregate_bytes_remaining=MAX_SCAN_INSPECTED_BYTES - work_counts["inspectedBytes"],
             )
-            findings.extend(content_findings)
-            lifecycle_scripts.extend(package_scripts)
-            if issue:
-                issue_counts[issue] += 1
+            if inspection.aggregate_bytes_observed is not None:
+                record_resource_budget(
+                    "inspected-bytes",
+                    MAX_SCAN_INSPECTED_BYTES,
+                    work_counts["inspectedBytes"] + inspection.aggregate_bytes_observed,
+                    relative_path,
+                )
+                break
+            work_counts["inspectedBytes"] += inspection.inspected_bytes
+            for finding in inspection.findings:
+                if not append_finding(finding):
+                    break
+            if stop_traversal:
+                break
+            for package_script in inspection.lifecycle_scripts:
+                if not append_result_record(lifecycle_scripts, package_script, relative_path):
+                    break
+            if stop_traversal:
+                break
+            if inspection.issue:
+                issue_counts[inspection.issue] += 1
                 if dependency_metadata:
                     generic_failed_dependency_paths.add(relative_path)
             else:
-                reviewed_files.append(relative_path)
+                if not append_result_record(reviewed_files, relative_path, relative_path):
+                    break
 
     dependency_trust = analyze_dependencies(
         project_path,
@@ -238,7 +407,9 @@ def scan_project(project_path: Path, previous_dependency_trust: dict[str, Any] |
         finding for finding in findings
         if not (finding.get("type") == "package-json-read-error" and finding.get("path") in dependency_parse_paths)
     ]
-    findings.extend(dependency_findings)
+    for dependency_finding in dependency_findings:
+        if not append_finding(dependency_finding):
+            break
     dependency_input_paths = {relative for _, relative in dependency_inputs}
     dependency_analyzed_paths = set(dependency_trust.get("analyzedFiles", []))
     dependency_failed_paths = (
@@ -278,11 +449,12 @@ def _inspect_file_content(
     *,
     is_package_json: bool,
     max_bytes: int = MAX_TEXT_BYTES,
-) -> tuple[list[dict[str, Any]], list[dict[str, str]], str | None]:
+    aggregate_bytes_remaining: int = MAX_SCAN_INSPECTED_BYTES,
+) -> _ContentInspection:
     try:
         file_size = file_path.stat().st_size
     except OSError as error:
-        return [_inspection_finding(
+        return _ContentInspection([_inspection_finding(
             relative_path,
             "filesystem-entry-inspection-error",
             "medium",
@@ -290,10 +462,10 @@ def _inspect_file_content(
             "Review filesystem permissions and inspect this file manually before trusting the scan.",
             operation="inspect-file-metadata",
             error=_sanitized_error(error),
-        )], [], "fileInspectionFailureCount"
+        )], [], "fileInspectionFailureCount", 0)
 
     if file_size > max_bytes:
-        return [_inspection_finding(
+        return _ContentInspection([_inspection_finding(
             relative_path,
             "oversized-file-skipped",
             "low",
@@ -302,13 +474,16 @@ def _inspect_file_content(
             fileSizeBytes=file_size,
             sizeLimitBytes=max_bytes,
             reason="content-size-limit",
-        )], [], "oversizedFileCount"
+        )], [], "oversizedFileCount", 0)
+
+    if file_size > aggregate_bytes_remaining:
+        return _ContentInspection([], [], None, 0, file_size)
 
     try:
         with file_path.open("rb") as file_handle:
-            content = file_handle.read(max_bytes + 1)
+            content = file_handle.read(min(max_bytes + 1, aggregate_bytes_remaining + 1))
     except OSError as error:
-        return [_inspection_finding(
+        return _ContentInspection([_inspection_finding(
             relative_path,
             "filesystem-entry-inspection-error",
             "medium",
@@ -316,10 +491,13 @@ def _inspect_file_content(
             "Review filesystem permissions and inspect this file manually before trusting the scan.",
             operation="read-file-content",
             error=_sanitized_error(error),
-        )], [], "fileInspectionFailureCount"
+        )], [], "fileInspectionFailureCount", 0)
+
+    if len(content) > aggregate_bytes_remaining:
+        return _ContentInspection([], [], None, 0, len(content))
 
     if len(content) > max_bytes:
-        return [_inspection_finding(
+        return _ContentInspection([_inspection_finding(
             relative_path,
             "oversized-file-skipped",
             "low",
@@ -328,13 +506,13 @@ def _inspect_file_content(
             fileSizeBytes=max(file_size, len(content)),
             sizeLimitBytes=max_bytes,
             reason="content-size-limit",
-        )], [], "oversizedFileCount"
+        )], [], "oversizedFileCount", len(content))
 
     text = content.decode("utf-8", errors="ignore")
     findings: list[dict[str, Any]] = _scan_text_patterns(text, relative_path)
     lifecycle_scripts: list[dict[str, str]] = []
     if not is_package_json:
-        return findings, lifecycle_scripts, None
+        return _ContentInspection(findings, lifecycle_scripts, None, len(content))
 
     data, parse_issue = decode_json_object(content)
     if parse_issue is not None:
@@ -347,11 +525,16 @@ def _inspect_file_content(
             operation="parse-package-json",
             reason=parse_issue,
         ))
-        return findings, lifecycle_scripts, "fileInspectionFailureCount"
+        return _ContentInspection(
+            findings,
+            lifecycle_scripts,
+            "fileInspectionFailureCount",
+            len(content),
+        )
 
     scripts = data.get("scripts")
     if not isinstance(scripts, dict):
-        return findings, lifecycle_scripts, None
+        return _ContentInspection(findings, lifecycle_scripts, None, len(content))
     for script_name in sorted(LIFECYCLE_SCRIPTS.intersection(scripts.keys())):
         lifecycle_scripts.append({"path": relative_path, "script": script_name})
         findings.append(_finding(
@@ -361,7 +544,7 @@ def _inspect_file_content(
             f"package.json defines a '{script_name}' lifecycle script. Review it before installing dependencies.",
             script=script_name,
         ))
-    return findings, lifecycle_scripts, None
+    return _ContentInspection(findings, lifecycle_scripts, None, len(content))
 
 
 def _scan_text_patterns(text: str, relative_path: str) -> list[dict[str, Any]]:
@@ -393,7 +576,16 @@ def _load_ignore_patterns(
         return set(), unsafe_finding, issue
 
     try:
-        lines = ignore_path.read_text(encoding="utf-8").splitlines()
+        file_size = ignore_path.stat().st_size
+        if file_size > MAX_IGNORE_BYTES:
+            return set(), _resource_budget_finding(
+                "ignore-bytes",
+                MAX_IGNORE_BYTES,
+                file_size,
+                IGNORE_FILE_NAME,
+            ), "resourceBudgetExceededCount"
+        with ignore_path.open("rb") as ignore_file:
+            content = ignore_file.read(MAX_IGNORE_BYTES + 1)
     except FileNotFoundError:
         return set(), None, "fileInspectionFailureCount"
     except OSError as error:
@@ -407,12 +599,42 @@ def _load_ignore_patterns(
             error=_sanitized_error(error),
         ), "fileInspectionFailureCount"
 
+    if len(content) > MAX_IGNORE_BYTES:
+        return set(), _resource_budget_finding(
+            "ignore-bytes",
+            MAX_IGNORE_BYTES,
+            len(content),
+            IGNORE_FILE_NAME,
+        ), "resourceBudgetExceededCount"
+    try:
+        lines = content.decode("utf-8").splitlines()
+    except UnicodeDecodeError:
+        return set(), _inspection_finding(
+            IGNORE_FILE_NAME,
+            "ignore-policy-read-error",
+            "medium",
+            ".glacialignore is not valid UTF-8, so its ignore rules were not applied.",
+            "Correct or remove the ignore policy and rescan before trusting scan coverage.",
+            operation="parse-ignore-policy",
+            reason="invalid-utf8",
+        ), "fileInspectionFailureCount"
+
     patterns = set()
     for line in lines:
         pattern = line.strip()
         if not pattern or pattern.startswith("#"):
             continue
-        patterns.add(pattern.replace("\\", "/"))
+        normalized = pattern.replace("\\", "/")
+        if normalized in patterns:
+            continue
+        if len(patterns) >= MAX_IGNORE_PATTERNS:
+            return set(), _resource_budget_finding(
+                "ignore-patterns",
+                MAX_IGNORE_PATTERNS,
+                len(patterns) + 1,
+                IGNORE_FILE_NAME,
+            ), "resourceBudgetExceededCount"
+        patterns.add(normalized)
     return patterns, None, "fileInspectionFailureCount"
 
 
@@ -439,6 +661,32 @@ def _inspection_finding(
     **metadata: Any,
 ) -> dict[str, Any]:
     return _finding(path, finding_type, severity, explanation, action=action, **metadata)
+
+
+def _resource_budget_finding(
+    budget: str,
+    limit: int,
+    observed: int,
+    path: str,
+    observed_counts: dict[str, int] | None = None,
+) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "budget": budget,
+        "limit": limit,
+        "observed": observed,
+        "reason": "scan-resource-budget-exceeded",
+    }
+    if observed_counts:
+        metadata["observedCounts"] = dict(observed_counts)
+    return _inspection_finding(
+        path,
+        "scan-resource-budget-exceeded",
+        "medium",
+        f"Scanner resource budget '{budget}' was exceeded (limit {limit}, observed {observed}), so additional repository coverage was stopped or rejected.",
+        "Review the retained evidence and reduce or manually inspect the unscanned repository content before rescanning.",
+        operation="enforce-scan-resource-budget",
+        **metadata,
+    )
 
 
 def _linked_path_finding(path: str) -> dict[str, str]:

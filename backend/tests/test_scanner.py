@@ -224,6 +224,25 @@ class ScannerCompletenessTests(unittest.TestCase):
         self.project_path.mkdir()
         self.addCleanup(self.temporary_directory.cleanup)
 
+    def assert_resource_budget(
+        self,
+        result: dict[str, object],
+        budget: str,
+        limit: int,
+        observed: int,
+    ) -> dict[str, object]:
+        self.assertFalse(result["scanCompleteness"]["complete"])
+        self.assertEqual(result["scanCompleteness"]["resourceBudgetExceededCount"], 1)
+        finding = next(
+            finding
+            for finding in result["findings"]
+            if finding["type"] == "scan-resource-budget-exceeded"
+            and finding["budget"] == budget
+        )
+        self.assertEqual(finding["limit"], limit)
+        self.assertEqual(finding["observed"], observed)
+        return finding
+
     def assert_package_json_failure(self, result: dict[str, object], reason: str) -> None:
         self.assertFalse(result["scanCompleteness"]["complete"])
         self.assertEqual(result["scanCompleteness"]["fileInspectionFailureCount"], 1)
@@ -330,8 +349,136 @@ class ScannerCompletenessTests(unittest.TestCase):
             "unsafePathCount": 0,
             "dependencyAnalysisFailureCount": 0,
             "policyExcludedFileCount": 0,
+            "resourceBudgetExceededCount": 0,
             "issueCount": 0,
         })
+
+    def test_oversized_ignore_policy_is_rejected_before_content_allocation(self) -> None:
+        ignore_file = self.project_path / ".glacialignore"
+        ignored_target = self.project_path / "target.ps1"
+        ignored_target.write_text("Invoke-Expression $payload", encoding="utf-8")
+        with patch.object(scanner, "MAX_IGNORE_BYTES", 16):
+            ignore_file.write_text("target.ps1\n" + ("x" * 32), encoding="utf-8")
+            with patch.object(Path, "open", autospec=True, side_effect=AssertionError("oversized policy was opened")):
+                patterns, finding, issue = scanner._load_ignore_patterns(self.project_path)
+
+            self.assertEqual(patterns, set())
+            self.assertEqual(issue, "resourceBudgetExceededCount")
+            self.assertEqual(finding["budget"], "ignore-bytes")
+            self.assertEqual(finding["limit"], 16)
+            self.assertGreater(finding["observed"], 16)
+
+            result = scan_project(self.project_path)
+
+        self.assertEqual(result["ignoredFiles"], [])
+        self.assertIn("target.ps1", result["reviewedFiles"])
+        self.assertTrue(any(
+            item["path"] == "target.ps1" and item["type"] == "suspicious-text-pattern"
+            for item in result["findings"]
+        ))
+        self.assert_resource_budget(result, "ignore-bytes", 16, ignore_file.stat().st_size)
+
+    def test_excessive_ignore_patterns_reject_the_entire_policy(self) -> None:
+        (self.project_path / ".glacialignore").write_text(
+            "target.ps1\nnoise-one.txt\nnoise-two.txt\n",
+            encoding="utf-8",
+        )
+        (self.project_path / "target.ps1").write_text("Invoke-Expression $payload", encoding="utf-8")
+
+        with patch.object(scanner, "MAX_IGNORE_PATTERNS", 2):
+            result = scan_project(self.project_path)
+
+        self.assertEqual(result["ignoredFiles"], [])
+        self.assertIn("target.ps1", result["reviewedFiles"])
+        self.assertTrue(any(item["path"] == "target.ps1" for item in result["findings"]))
+        self.assert_resource_budget(result, "ignore-patterns", 2, 3)
+
+    def test_file_budget_stops_traversal_and_preserves_prior_high_risk_evidence(self) -> None:
+        flood = self.project_path / "flood"
+        flood.mkdir()
+        (self.project_path / "evidence.ps1").write_text("Invoke-Expression $payload", encoding="utf-8")
+        for name in ("one.txt", "two.txt"):
+            (flood / name).write_text("ordinary content", encoding="utf-8")
+
+        with patch.object(scanner, "MAX_SCAN_FILES", 2):
+            result = scan_project(self.project_path)
+
+        self.assertIn("evidence.ps1", result["reviewedFiles"])
+        self.assertTrue(any(
+            item["path"] == "evidence.ps1" and item["severity"] == "high"
+            for item in result["findings"]
+        ))
+        finding = self.assert_resource_budget(result, "files", 2, 3)
+        self.assertEqual(finding["observedCounts"]["filesEncountered"], 3)
+
+    def test_directory_budget_stops_traversal_and_preserves_prior_evidence(self) -> None:
+        first = self.project_path / "first"
+        second = first / "second"
+        second.mkdir(parents=True)
+        (self.project_path / "evidence.ps1").write_text("Invoke-Expression $payload", encoding="utf-8")
+
+        with patch.object(scanner, "MAX_SCAN_DIRECTORIES", 2):
+            result = scan_project(self.project_path)
+
+        self.assertIn("evidence.ps1", result["reviewedFiles"])
+        self.assertTrue(any(item["path"] == "evidence.ps1" for item in result["findings"]))
+        finding = self.assert_resource_budget(result, "directories", 2, 3)
+        self.assertEqual(finding["observedCounts"]["directoriesEncountered"], 3)
+
+    def test_filesystem_entry_budget_bounds_total_traversal_work(self) -> None:
+        flood = self.project_path / "flood"
+        flood.mkdir()
+        (self.project_path / "evidence.ps1").write_text("Invoke-Expression $payload", encoding="utf-8")
+        (flood / "one.txt").write_text("ordinary content", encoding="utf-8")
+
+        with patch.object(scanner, "MAX_SCAN_FILESYSTEM_ENTRIES", 2):
+            result = scan_project(self.project_path)
+
+        self.assertIn("evidence.ps1", result["reviewedFiles"])
+        finding = self.assert_resource_budget(result, "filesystem-entries", 2, 3)
+        self.assertEqual(finding["observedCounts"]["filesystemEntriesEncountered"], 3)
+
+    def test_aggregate_byte_budget_stops_before_the_next_file_read(self) -> None:
+        evidence = "Invoke-Expression $payload"
+        (self.project_path / "a.ps1").write_text(evidence, encoding="utf-8")
+        (self.project_path / "b.txt").write_text("x", encoding="utf-8")
+
+        with patch.object(scanner, "MAX_SCAN_INSPECTED_BYTES", len(evidence.encode("utf-8"))):
+            result = scan_project(self.project_path)
+
+        self.assertIn("a.ps1", result["reviewedFiles"])
+        self.assertNotIn("b.txt", result["reviewedFiles"])
+        self.assertTrue(any(item["path"] == "a.ps1" for item in result["findings"]))
+        self.assert_resource_budget(
+            result,
+            "inspected-bytes",
+            len(evidence.encode("utf-8")),
+            len(evidence.encode("utf-8")) + 1,
+        )
+
+    def test_finding_and_result_record_accumulation_are_bounded(self) -> None:
+        (self.project_path / "a.ps1").write_text("Invoke-Expression $payload", encoding="utf-8")
+        (self.project_path / "b.ps1").write_text("Invoke-Expression $payload", encoding="utf-8")
+
+        with patch.object(scanner, "MAX_SCAN_FINDINGS", 2):
+            finding_limited = scan_project(self.project_path)
+
+        self.assertLessEqual(len(finding_limited["findings"]), 3)
+        self.assertTrue(any(
+            item["path"] == "a.ps1" and item["severity"] == "high"
+            for item in finding_limited["findings"]
+        ))
+        self.assert_resource_budget(finding_limited, "findings", 2, 3)
+
+        for path in self.project_path.iterdir():
+            path.unlink()
+        (self.project_path / "a.txt").write_text("ordinary", encoding="utf-8")
+        (self.project_path / "b.txt").write_text("ordinary", encoding="utf-8")
+        with patch.object(scanner, "MAX_SCAN_RESULT_RECORDS", 1):
+            result_limited = scan_project(self.project_path)
+
+        self.assertEqual(result_limited["reviewedFiles"], ["a.txt"])
+        self.assert_resource_budget(result_limited, "result-records", 1, 2)
 
     def test_repository_ignore_policy_cannot_claim_complete_security_coverage(self) -> None:
         scripts_path = self.project_path / "scripts"
@@ -383,14 +530,9 @@ class ScannerCompletenessTests(unittest.TestCase):
 
     def test_walk_error_is_recorded(self) -> None:
         blocked = self.project_path / "blocked"
+        error = PermissionError(13, f"Access denied at {self.project_path}", str(blocked))
 
-        def failing_walk(path: Path, *, followlinks: bool, onerror: object) -> list[tuple[str, list[str], list[str]]]:
-            error = PermissionError(13, f"Access denied at {self.project_path}", str(blocked))
-            onerror(error)
-            onerror(error)
-            return [(str(path), [], [])]
-
-        with patch.object(scanner.os, "walk", side_effect=failing_walk):
+        with patch.object(scanner.os, "scandir", side_effect=error):
             result = scan_project(self.project_path)
 
         self.assertEqual(result["scanCompleteness"]["traversalFailureCount"], 1)
@@ -424,14 +566,14 @@ class ScannerCompletenessTests(unittest.TestCase):
         ignore_file = self.project_path / ".glacialignore"
         ignore_file.write_text("payload.txt\n", encoding="utf-8")
         (self.project_path / "payload.txt").write_text("ordinary content", encoding="utf-8")
-        original_read_text = Path.read_text
+        original_open = Path.open
 
-        def read_text(path: Path, *args: object, **kwargs: object) -> str:
-            if path == ignore_file:
+        def open_file(path: Path, *args: object, **kwargs: object) -> object:
+            if path == ignore_file and args and args[0] == "rb":
                 raise OSError(5, "Ignore read failed")
-            return original_read_text(path, *args, **kwargs)
+            return original_open(path, *args, **kwargs)
 
-        with patch.object(Path, "read_text", autospec=True, side_effect=read_text):
+        with patch.object(Path, "open", autospec=True, side_effect=open_file):
             result = scan_project(self.project_path)
 
         self.assertEqual(result["scanCompleteness"]["fileInspectionFailureCount"], 1)

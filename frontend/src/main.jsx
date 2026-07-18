@@ -1714,6 +1714,7 @@ function ScanCompletenessSummary({ completeness, viewMode, isScanning, onRunScan
           <span>Unsafe paths skipped: {completeness.unsafePathCount}</span>
           <span>Dependency analysis failures: {completeness.dependencyAnalysisFailureCount}</span>
           <span>Repository policy exclusions: {completeness.policyExcludedFileCount}</span>
+          <span>Scanner resource budgets exceeded: {completeness.resourceBudgetExceededCount}</span>
           <span>Total issues: {completeness.issueCount}</span>
         </div>
       )}

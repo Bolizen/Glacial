@@ -52,14 +52,27 @@ class ScanCompletenessPersistenceTests(unittest.TestCase):
     def test_scan_and_history_preserve_completeness_and_finding_metadata(self) -> None:
         scan_result = {
             "overall_risk": "medium",
-            "findings": [{
-                "path": "blocked",
-                "type": "directory-traversal-error",
-                "severity": "medium",
-                "explanation": "Directory could not be read.",
-                "action": "Inspect it manually.",
-                "operation": "traverse-directory",
-            }],
+            "findings": [
+                {
+                    "path": "blocked",
+                    "type": "directory-traversal-error",
+                    "severity": "medium",
+                    "explanation": "Directory could not be read.",
+                    "action": "Inspect it manually.",
+                    "operation": "traverse-directory",
+                },
+                {
+                    "path": "flood/file.txt",
+                    "type": "scan-resource-budget-exceeded",
+                    "severity": "medium",
+                    "explanation": "The file budget was exceeded.",
+                    "action": "Inspect the remainder manually.",
+                    "operation": "enforce-scan-resource-budget",
+                    "budget": "files",
+                    "limit": 2,
+                    "observed": 3,
+                },
+            ],
             "manifests": [],
             "lockfiles": [],
             "lifecycleScripts": [],
@@ -76,7 +89,8 @@ class ScanCompletenessPersistenceTests(unittest.TestCase):
                 "unsafePathCount": 0,
                 "dependencyAnalysisFailureCount": 0,
                 "policyExcludedFileCount": 2,
-                "issueCount": 3,
+                "resourceBudgetExceededCount": 1,
+                "issueCount": 4,
             },
         }
         payload = ProjectPathRequest(project_path=str(self.project_path))
@@ -94,6 +108,10 @@ class ScanCompletenessPersistenceTests(unittest.TestCase):
         self.assertEqual(history[0]["scanCompleteness"], scan_result["scanCompleteness"])
         self.assertEqual(history[0]["findings"][0]["action"], "Inspect it manually.")
         self.assertEqual(history[0]["findings"][0]["operation"], "traverse-directory")
+        self.assertEqual(history[0]["findings"][1]["budget"], "files")
+        self.assertEqual(history[0]["findings"][1]["limit"], 2)
+        self.assertEqual(history[0]["findings"][1]["observed"], 3)
+        self.assertEqual(history[0]["scanCompleteness"]["resourceBudgetExceededCount"], 1)
         self.assertEqual(project["last_scan_completeness"], scan_result["scanCompleteness"])
 
     def test_older_scan_without_completeness_metadata_returns_unknown(self) -> None:
@@ -154,6 +172,7 @@ class ScanCompletenessPersistenceTests(unittest.TestCase):
             "unsafePathCount": 0,
             "dependencyAnalysisFailureCount": 0,
             "policyExcludedFileCount": 1,
+            "resourceBudgetExceededCount": 0,
             "issueCount": 1,
         }
         self.assertEqual(history[0]["scanCompleteness"], expected)

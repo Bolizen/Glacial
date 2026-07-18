@@ -104,6 +104,7 @@ export function normalizeScanCompleteness(result) {
       unsafePathCount: 0,
       dependencyAnalysisFailureCount: 0,
       policyExcludedFileCount: 0,
+      resourceBudgetExceededCount: 0,
       issueCount: 0,
     };
   }
@@ -113,6 +114,7 @@ export function normalizeScanCompleteness(result) {
     oversizedFileCount: nonNegativeCount(value.oversizedFileCount),
     unsafePathCount: nonNegativeCount(value.unsafePathCount),
     dependencyAnalysisFailureCount: nonNegativeCount(value.dependencyAnalysisFailureCount),
+    resourceBudgetExceededCount: nonNegativeCount(value.resourceBudgetExceededCount),
     policyExcludedFileCount: Math.max(
       nonNegativeCount(value.policyExcludedFileCount),
       nonNegativeCount(result?.ignoredFileCount),
@@ -366,6 +368,7 @@ function formatScanCompleteness(completeness) {
     `- Unsafe linked or hardlinked paths skipped: ${completeness.unsafePathCount}`,
     `- Dependency analysis failures: ${completeness.dependencyAnalysisFailureCount}`,
     `- Repository policy exclusions: ${completeness.policyExcludedFileCount}`,
+    `- Scanner resource budgets exceeded: ${completeness.resourceBudgetExceededCount}`,
     `- Total inspection issues: ${completeness.issueCount}`,
   ].join("\n");
 }

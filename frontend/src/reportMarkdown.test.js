@@ -244,7 +244,8 @@ test("exports complete, incomplete, and unknown scan coverage conservatively", (
       oversizedFileCount: 3,
       unsafePathCount: 1,
       policyExcludedFileCount: 4,
-      issueCount: 11,
+      resourceBudgetExceededCount: 5,
+      issueCount: 16,
     },
   }, emptyReport, null, { configured: false });
   assert.match(incomplete, /^## Scan completeness$/m);
@@ -253,7 +254,8 @@ test("exports complete, incomplete, and unknown scan coverage conservatively", (
   assert.match(incomplete, /File inspection\/read failures: 2/);
   assert.match(incomplete, /Oversized files skipped: 3/);
   assert.match(incomplete, /Repository policy exclusions: 4/);
-  assert.match(incomplete, /Total inspection issues: 11/);
+  assert.match(incomplete, /Scanner resource budgets exceeded: 5/);
+  assert.match(incomplete, /Total inspection issues: 16/);
   assert.match(incomplete, /No manifests recorded in this scan; coverage incomplete\./);
   assert.match(incomplete, /No lockfiles recorded in this scan; coverage incomplete\./);
   assert.match(incomplete, /No package lifecycle scripts recorded in this scan; coverage incomplete\./);

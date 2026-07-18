@@ -261,6 +261,7 @@ def _scan_completeness(metadata: dict[str, Any]) -> dict[str, Any] | None:
         "unsafePathCount",
         "dependencyAnalysisFailureCount",
         "policyExcludedFileCount",
+        "resourceBudgetExceededCount",
     )
     counts = {
         field: max(0, int(value.get(field, 0)))
