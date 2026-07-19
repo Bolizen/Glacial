@@ -11,9 +11,14 @@
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
-    "desktop:backend": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ..\\scripts\\desktop\\Build-DesktopBackend.ps1",
-    "desktop:portable": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ..\\scripts\\desktop\\Build-PortableDesktop.ps1",
-    "test": "node --test src/apiConfig.test.js src/apiTransport.test.js src/projectRequests.test.js src/reportMarkdown.test.js src/sessionState.test.js src/dependencyTrust.test.js src/findingReviews.test.js src/trustedDependencyBaseline.test.js src/App.integration.test.js",
+    "desktop:backend": "node ../scripts/desktop/desktop-development.mjs build-backend",
+    "desktop:portable": "node ../scripts/desktop/desktop-development.mjs build-portable",
+    "desktop:backend:plan": "node ../scripts/desktop/desktop-development.mjs build-backend --dry-run",
+    "desktop:portable:plan": "node ../scripts/desktop/desktop-development.mjs build-portable --dry-run",
+    "release:windows:plan": "node ../scripts/desktop/Build-SignedWindowsRelease.mjs --dry-run",
+    "release:windows:signed": "node ../scripts/desktop/Build-SignedWindowsRelease.mjs",
+    "test:release-signing": "node --test ../scripts/desktop/windows-signing.test.mjs",
+    "test": "node --test src/apiConfig.test.js src/apiTransport.test.js src/projectRequests.test.js src/reportMarkdown.test.js src/sessionState.test.js src/dependencyTrust.test.js src/findingReviews.test.js src/trustedDependencyBaseline.test.js src/App.integration.test.js ../scripts/desktop/windows-signing.test.mjs",
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
