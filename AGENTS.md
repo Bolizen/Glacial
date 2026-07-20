@@ -40,7 +40,7 @@
 
 ## Glacial Golden Rule
 
-Glacial is allowed to generate and write project instructions, not to become a general-purpose filesystem gremlin. Keep file writes narrowly scoped, predictable, and reviewable.
+Glacial is allowed to generate and write project instructions, not to become a general-purpose filesystem. Keep file writes narrowly scoped, predictable, and reviewable.
 
 
 
@@ -55,3 +55,24 @@ When changing file-writing or path-handling code, include tests for:
 - Absolute path injection.
 - Symlink or junction escape attempts where practical.
 - Empty, malformed, or suspicious path input.
+
+
+
+## Numbered Google Drive handoffs
+
+A task prompt may begin with a zero-padded three-digit handoff ID, such as `001`.
+
+When a handoff ID is present:
+
+1. Complete the task according to the task-specific prompt.
+2. Compose the normal final response that will be shown to the user.
+3. Before submitting that final response, create:
+   `My Drive/Icefields/Glacial/<HANDOFF_ID>/`
+4. Write the exact final-response Markdown, verbatim, to:
+   `My Drive/Icefields/Glacial/<HANDOFF_ID>/result.md`
+5. The contents of `result.md` and the final response shown to the user must be identical. Do not summarize, expand, omit, or reformat either version.
+6. Write to `result.tmp` first, then atomically rename it to `result.md`.
+7. Never overwrite or reuse an existing handoff ID.
+8. Never include credentials, tokens, private keys, signing secrets, or other sensitive values.
+
+These requirements are additive only. They must not alter, broaden, reinterpret, or override the task-specific prompt.
