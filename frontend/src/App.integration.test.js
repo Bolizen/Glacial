@@ -1094,7 +1094,7 @@ test("switching projects releases metadata loading ownership", async () => {
 
   const projectBRow = [...document.querySelectorAll(".projects-table-row")]
     .find((row) => row.textContent.includes("Project B"));
-  await click([...projectBRow.querySelectorAll("button")].find((button) => button.textContent === "Select"));
+  await click(projectBRow.querySelector(".project-select-target"));
   await resolveDetails(await takeDetailRequests(PROJECT_B_PATH));
   assert.equal(buttonWithText("Save Metadata").disabled, false);
 
@@ -1152,19 +1152,26 @@ test("project metadata and unregister lifecycle update the real UI flow", async 
   await resolveDetails(await takeDetailRequests(PROJECT_A_PATH));
   window.confirm = () => true;
   await click(document.querySelector('a[href="#projects"]'));
-  assert.match(document.body.textContent, /Old description/);
   assert.match(document.body.textContent, /Python/);
   assert.match(document.body.textContent, /Unavailable: missing/);
   assert.match(document.body.textContent, /Not scanned/);
   const projectsSection = document.querySelector(".projects-section");
   assert.ok(projectsSection.querySelector(":scope > .panel-heading .new-project-button"));
   assert.ok(projectsSection.querySelector(".projects-table-scroll > .projects-table"));
-  assert.equal(projectsSection.querySelector(".projects-table-header span:nth-child(2)").textContent, "Scan Status");
-  assert.equal(projectsSection.querySelector(".project-row-actions").querySelectorAll("button").length, 2);
+  assert.equal(projectsSection.querySelectorAll(".projects-table-row").length, 2);
+  assert.equal(projectsSection.querySelector(".project-row-actions").querySelectorAll("button").length, 1);
+  const selectedEntry = projectsSection.querySelector(".projects-table-row.selected");
+  assert.match(selectedEntry.querySelector(".selected-project-marker").textContent, /Selected project/);
+  assert.equal(selectedEntry.querySelector(".project-select-target").disabled, false);
 
-  const form = document.querySelector(".projects-section form");
+  const editor = document.querySelector(".projects-section .project-metadata-editor");
+  assert.ok(editor, "Expected separate project metadata editor");
+  assert.match(editor.textContent, /Edit project details/);
+  assert.match(editor.textContent, /Project A/);
+  const form = editor.querySelector("form");
   assert.ok(form.classList.contains("project-action-form"));
   assert.equal(form.querySelectorAll("input, textarea, button").length, 3);
+  assert.equal(form.querySelector("textarea").value, "Old description");
   await input(form.querySelector("input"), "TypeScript");
   await input(form.querySelector("textarea"), "New description");
   await click(buttonWithText("Save Metadata"));

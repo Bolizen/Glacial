@@ -1311,49 +1311,59 @@ function ProjectsSection({ projects, selectedPath, onSelectProject, onNewProject
       </div>
       {loading ? <p className="muted">Loading projects...</p> : null}
       <div className="projects-table-scroll">
-        <div className="projects-table">
-          <div className="projects-table-header">
-            <span>Name</span>
-            <span>Scan Status</span>
-            <span>Notes</span>
-            <span>Last Scan</span>
-            <span>Action</span>
-          </div>
+        <div className="projects-table" role="list" aria-label="Registered projects">
           {projects.map((project) => (
-            <div className={`projects-table-row${selectedPath === project.path ? " selected" : ""}`} key={project.path}>
-              <div className="project-identity">
-                <strong>{project.name}</strong>
-                {project.project_type ? <small>{project.project_type}</small> : null}
-                {project.description ? <small>{project.description}</small> : null}
-                <span title={project.path}>{project.path}</span>
-                {project.available === false ? <small>Unavailable: {project.availability}</small> : null}
-              </div>
-              <span className="project-risk-cell">
-                <span className={`risk risk-${project.last_risk_level}`}>{projectFindingRiskLabel(project)}</span>
-                <small>{projectCoverageLabel(project)}</small>
-              </span>
-              <span className="project-notes"><small>Notes</small>{project.notes_count}</span>
-              <span className="project-last-scan"><small>Last scan</small>{formatDate(project.last_scan_time)}</span>
+            <article className={`projects-table-row${selectedPath === project.path ? " selected" : ""}${project.available === false ? " unavailable" : ""}`} key={project.path} role="listitem">
+              <button type="button" className="project-select-target" onClick={() => onSelectProject(project.path)} disabled={project.available === false} aria-pressed={selectedPath === project.path}>
+                <span className="project-identity">
+                  <span className="project-name-line">
+                    <strong>{project.name}</strong>
+                    {selectedPath === project.path ? <span className="selected-project-marker">Selected project</span> : null}
+                  </span>
+                  <span className="project-path" title={project.path}>{project.path}</span>
+                  {project.project_type ? <span className="project-type">{project.project_type}</span> : null}
+                  {project.available === false ? <span className="project-availability">Unavailable: {project.availability}</span> : null}
+                </span>
+                <span className="project-risk-cell">
+                  <small>Scan status</small>
+                  <span className={`risk risk-${project.last_risk_level}`}>{projectFindingRiskLabel(project)}</span>
+                  <span>{projectCoverageLabel(project)}</span>
+                </span>
+                <span className="project-facts">
+                  <span className="project-notes"><small>Notes</small><strong>{project.notes_count}</strong></span>
+                  <span className="project-last-scan"><small>Last scan</small><strong>{formatDate(project.last_scan_time)}</strong></span>
+                </span>
+              </button>
               <div className="project-row-actions">
-                <button type="button" className="history-view-button" onClick={() => onSelectProject(project.path)} disabled={project.available === false}>
-                  {selectedPath === project.path ? "Selected" : "Select"}
-                </button>
                 <button type="button" className="history-view-button destructive-button" onClick={() => onUnregister(project)} disabled={Boolean(unregisteringPath)}>
                   {unregisteringPath === project.path ? "Unregistering..." : "Unregister"}
                 </button>
               </div>
-            </div>
+            </article>
           ))}
         </div>
       </div>
       {!loading && projects.length === 0 ? <p className="muted">No project folders found.</p> : null}
       {selected && selected.available !== false ? (
-        <form className="stack project-action-form" onSubmit={(event) => { event.preventDefault(); onSaveMetadata(selected, draft); }}>
-          <h3>Edit selected project metadata</h3>
-          <input value={draft.project_type} maxLength="120" onInput={(event) => setDraft({ ...draft, project_type: event.target.value })} placeholder="Project type (optional)" />
-          <textarea value={draft.description} maxLength="2000" onInput={(event) => setDraft({ ...draft, description: event.target.value })} placeholder="Description (optional)" rows="3" />
-          <button type="submit" disabled={metadataSaving}>{metadataSaving ? "Saving..." : "Save Metadata"}</button>
-        </form>
+        <section className="project-metadata-editor" aria-labelledby="project-metadata-title">
+          <div className="project-metadata-heading">
+            <div>
+              <h3 id="project-metadata-title">Edit project details</h3>
+              <p><strong>{selected.name}</strong><span>{selected.path}</span></p>
+            </div>
+          </div>
+          <form className="project-action-form project-metadata-form" onSubmit={(event) => { event.preventDefault(); onSaveMetadata(selected, draft); }}>
+            <label>
+              Project type
+              <input value={draft.project_type} maxLength="120" onInput={(event) => setDraft({ ...draft, project_type: event.target.value })} placeholder="Optional" />
+            </label>
+            <label className="project-description-field">
+              Description
+              <textarea value={draft.description} maxLength="2000" onInput={(event) => setDraft({ ...draft, description: event.target.value })} placeholder="Optional project context" rows="2" />
+            </label>
+            <button type="submit" disabled={metadataSaving}>{metadataSaving ? "Saving..." : "Save Metadata"}</button>
+          </form>
+        </section>
       ) : null}
     </section>
   );

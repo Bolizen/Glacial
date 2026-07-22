@@ -2681,6 +2681,12 @@ label,
   min-width: 0;
 }
 
+.projects-section {
+  justify-self: center;
+  max-width: 1120px;
+  width: 100%;
+}
+
 .projects-section .panel-heading {
   flex-wrap: wrap;
 }
@@ -2704,45 +2710,39 @@ label,
   width: 100%;
 }
 
-.projects-table-scroll {
+.projects-section .projects-table-scroll {
   max-width: 100%;
   min-width: 0;
-  overflow-x: auto;
+  overflow: visible;
 }
 
-.projects-table-header,
-.projects-table-row {
-  align-items: center;
+.projects-section .projects-table {
+  gap: var(--space-2);
+}
+
+.projects-section .projects-table-row {
+  align-items: stretch;
+  background: var(--color-surface-inset);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
   display: grid;
-  gap: var(--space-3);
-  grid-template-columns: minmax(180px, 1fr) minmax(150px, 180px) 64px minmax(120px, 150px) 120px;
-  padding: var(--space-3) var(--space-2);
+  gap: var(--space-2);
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
+  padding: var(--space-2);
+  transition: background-color var(--transition-fast), border-color var(--transition-fast);
 }
 
-.projects-table-header {
-  border-bottom: 1px solid var(--color-border);
-  color: var(--color-text-muted);
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.045em;
-  text-transform: uppercase;
-}
-
-.projects-table-row {
-  border-bottom: 1px solid var(--color-border-subtle);
-  transition: background-color var(--transition-fast);
-}
-
-.projects-table-row:hover {
+.projects-section .projects-table-row:hover {
   background: var(--color-surface-hover);
 }
 
-.projects-table-row.selected {
+.projects-section .projects-table-row.selected {
   background: var(--color-surface-selected);
-  box-shadow: inset 2px 0 0 var(--color-accent);
+  border-color: var(--color-accent);
+  box-shadow: inset 3px 0 0 var(--color-accent);
 }
 
-.projects-table-row > div,
 .settings-list > div,
 .expectation-row {
   display: grid;
@@ -2750,18 +2750,98 @@ label,
   min-width: 0;
 }
 
-.projects-table-row span,
 .settings-list span,
 .expectation-row span {
   color: var(--color-text-muted);
   overflow-wrap: anywhere;
 }
 
-.project-identity > span {
+.projects-section .project-select-target {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: minmax(250px, 1fr) minmax(160px, 190px) minmax(180px, 220px);
+  min-height: 0;
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  width: 100%;
+}
+
+.projects-section .project-select-target:hover:not(:disabled),
+.projects-section .project-select-target:focus-visible {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  color: inherit;
+  transform: none;
+}
+
+.projects-section .project-select-target:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.projects-section .project-select-target:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.projects-section .project-identity {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.projects-section .project-name-line {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.projects-section .project-name-line strong {
+  color: var(--color-text-primary);
+  font-size: 0.96rem;
+}
+
+.projects-section .selected-project-marker,
+.projects-section .project-type {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1.25;
+  padding: 3px 6px;
+}
+
+.projects-section .selected-project-marker {
+  background: var(--color-accent-soft);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.projects-section .project-type {
+  justify-self: start;
+}
+
+.projects-section .project-path {
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.projects-section .project-availability {
+  color: var(--color-warning);
+  font-size: 0.76rem;
+  font-weight: 600;
 }
 
 .project-item .risk,
@@ -2769,15 +2849,25 @@ label,
   text-transform: none;
 }
 
-.project-risk-cell,
-.project-notes,
-.project-last-scan {
+.projects-section .project-risk-cell,
+.projects-section .project-notes,
+.projects-section .project-last-scan {
   display: grid;
   gap: 3px;
   min-width: 0;
 }
 
-.project-risk-cell .risk {
+.projects-section .project-risk-cell > small,
+.projects-section .project-notes > small,
+.projects-section .project-last-scan > small {
+  color: var(--color-text-muted);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.projects-section .project-risk-cell .risk {
   justify-self: start;
   line-height: 1.25;
   min-width: 0;
@@ -2786,18 +2876,43 @@ label,
   width: auto;
 }
 
-.project-notes > small,
-.project-last-scan > small {
-  display: none;
+.projects-section .project-risk-cell > span:last-child {
+  color: var(--color-text-secondary);
+  font-size: 0.76rem;
 }
 
-.project-row-actions {
-  align-content: start;
-  gap: var(--space-1);
+.projects-section .project-facts {
+  align-items: center;
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: minmax(60px, 0.45fr) minmax(120px, 1fr);
   min-width: 0;
 }
 
-.project-row-actions button,
+.projects-section .project-facts strong {
+  color: var(--color-text-primary);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.projects-section .project-row-actions {
+  align-items: center;
+  display: flex;
+  padding-right: var(--space-2);
+}
+
+.projects-section .project-row-actions .destructive-button {
+  color: var(--color-text-muted);
+  min-height: 32px;
+  padding: 0 9px;
+}
+
+.projects-section .project-row-actions .destructive-button:hover:not(:disabled),
+.projects-section .project-row-actions .destructive-button:focus-visible {
+  color: var(--color-danger);
+}
+
+.projects-section .project-metadata-editor,
 .projects-section .project-action-form,
 .projects-section .project-action-form input,
 .projects-section .project-action-form textarea,
@@ -2806,13 +2921,62 @@ label,
   min-width: 0;
 }
 
-.projects-section .project-action-form {
+.projects-section .project-metadata-editor {
+  background: var(--color-surface-inset);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+  padding: var(--space-4);
+  width: min(100%, 900px);
+}
+
+.projects-section .project-metadata-heading h3,
+.projects-section .project-metadata-heading p {
+  margin: 0;
+}
+
+.projects-section .project-metadata-heading p {
+  align-items: baseline;
+  color: var(--color-text-muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 0.78rem;
+  gap: var(--space-2);
+  margin-top: 3px;
+}
+
+.projects-section .project-metadata-heading p span {
+  overflow-wrap: anywhere;
+}
+
+.projects-section .project-metadata-form {
+  align-items: end;
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: minmax(160px, 220px) minmax(260px, 1fr) auto;
   width: 100%;
 }
 
-.projects-section .project-action-form > button {
-  justify-self: start;
-  width: min(100%, 240px);
+.projects-section .project-metadata-form label {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.projects-section .project-metadata-form input,
+.projects-section .project-metadata-form textarea {
+  width: 100%;
+}
+
+.projects-section .project-metadata-form textarea {
+  min-height: 66px;
+  resize: vertical;
+}
+
+.projects-section .project-metadata-form > button {
+  justify-self: end;
+  white-space: nowrap;
 }
 
 .inline-action {
@@ -2851,37 +3015,8 @@ label,
     grid-template-columns: 1fr;
   }
 
-  .projects-table-header {
-    display: none;
-  }
-
-  .projects-table-row {
-    align-items: start;
-    grid-template-columns: minmax(0, 1fr) minmax(140px, 180px);
-    padding: 16px 0;
-  }
-
-  .project-identity {
-    grid-column: 1 / -1;
-  }
-
-  .project-risk-cell,
-  .project-notes,
-  .project-last-scan {
-    grid-column: 1;
-  }
-
-  .project-notes > small,
-  .project-last-scan > small {
-    color: var(--color-text-secondary);
-    display: inline;
-    font-size: 0.72rem;
-    text-transform: uppercase;
-  }
-
-  .project-row-actions {
-    grid-column: 2;
-    grid-row: 2 / span 3;
+  .projects-section .project-select-target {
+    grid-template-columns: minmax(220px, 1fr) minmax(150px, 180px) minmax(170px, 200px);
   }
 }
 
@@ -3009,6 +3144,26 @@ label,
 
   .finding-workbench-filters {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .projects-section .project-select-target {
+    align-items: start;
+    gap: var(--space-3);
+    grid-template-columns: minmax(0, 1fr) minmax(150px, 180px);
+  }
+
+  .projects-section .project-identity {
+    grid-column: 1 / -1;
+  }
+
+  .projects-section .project-metadata-form {
+    align-items: stretch;
+    grid-template-columns: minmax(150px, 220px) minmax(0, 1fr);
+  }
+
+  .projects-section .project-metadata-form > button {
+    grid-column: 1 / -1;
+    justify-self: start;
   }
 
 }
@@ -3177,20 +3332,40 @@ label,
     margin-left: 0;
   }
 
-  .projects-table-row {
+  .projects-section .project-select-target {
+    grid-template-columns: minmax(0, 1fr);
+    padding: var(--space-2);
+  }
+
+  .projects-section .project-identity,
+  .projects-section .project-risk-cell,
+  .projects-section .project-facts {
+    grid-column: 1;
+  }
+
+  .projects-section .project-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .projects-section .projects-table-row {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .project-identity,
-  .project-risk-cell,
-  .project-notes,
-  .project-last-scan,
-  .project-row-actions {
-    grid-column: 1;
-    grid-row: auto;
+  .projects-section .project-row-actions {
+    justify-content: flex-end;
+    padding: 0 var(--space-2) var(--space-1);
   }
 
-  .project-row-actions {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .projects-section .project-metadata-editor {
+    padding: var(--space-3);
+  }
+
+  .projects-section .project-metadata-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .projects-section .project-metadata-form > button {
+    grid-column: 1;
+    justify-self: stretch;
   }
 }
