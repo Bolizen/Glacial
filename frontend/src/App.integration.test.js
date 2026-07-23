@@ -610,7 +610,8 @@ test("root layout reserves stable vertical scrollbar space", () => {
   assert.match(toastRule, /position:\s*fixed/);
   assert.match(toastRule, /top:\s*var\(--toast-top, 112px\)/);
   assert.match(toastRule, /width:\s*min\(28rem, calc\(100vw - 376px\)\)/);
-  assert.match(styles, /@media \(max-width: 620px\)[\s\S]*?\.notice-stack\s*\{[^}]*left:\s*14px;[^}]*right:\s*14px;[^}]*width:\s*auto;/);
+  assert.match(styles, /\.guided-review-steps\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fit, minmax\(min\(100%, 180px\), 1fr\)\)/s);
+  assert.match(styles, /@media \(max-width: 780px\)[\s\S]*?\.notice-stack\s*\{[^}]*left:\s*14px;[^}]*right:\s*14px;[^}]*width:\s*auto;/);
 });
 
 test("selected and unselected history rows retain readable narrow-layout structure", async () => {

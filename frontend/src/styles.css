@@ -1094,7 +1094,7 @@ pre {
 .guided-review-steps {
   display: grid;
   gap: var(--space-2);
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
   list-style: none;
   margin: 0;
   padding: 0;
@@ -3463,7 +3463,7 @@ label,
 
 }
 
-@media (max-width: 620px) {
+@media (max-width: 780px) {
   .workspace {
     padding: 18px 14px;
   }
