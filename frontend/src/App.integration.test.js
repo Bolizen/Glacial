@@ -6,6 +6,7 @@ import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { JSDOM } from "jsdom";
 import { createServer } from "vite";
+import { GUIDED_REVIEW_DISMISSALS_KEY } from "./guidedReview.js";
 import { SESSION_STATE_KEY } from "./sessionState.js";
 
 const PROJECT_A_PATH = "C:/workspace/project-a";
@@ -345,6 +346,109 @@ test("complete scan with no findings retains verified clean presentation", async
   assert.equal(document.querySelector(".contextual-scan-button"), null);
   assertReportHeader("0 findings", "Complete coverage", { verified: true });
   assertHistorySummary("0 findings", "Coverage: Complete");
+});
+
+test("new project guidance leads to the first scan and dismissal changes only local UI state", async () => {
+  await renderApp();
+  await resolveDetails(await takeDetailRequests(PROJECT_A_PATH), { scans: [] });
+
+  const checklist = document.querySelector(".guided-review");
+  assert.ok(checklist, "Expected the guided review checklist");
+  assert.match(checklist.textContent, /1 of 5 steps complete/);
+  assert.match(checklist.textContent, /Project registered/);
+  assert.match(checklist.textContent, /Run first scan/);
+  assert.ok(document.querySelector(".first-scan-prompt"));
+  assert.match(document.querySelector(".first-scan-prompt").textContent, /Run this project’s first scan/);
+
+  const scanPostsBefore = fetchHarness.count("/api/scans", "POST");
+  const reviewPutsBefore = fetchHarness.count("/api/finding-reviews", "PUT");
+  await click([...checklist.querySelectorAll("button")].find((button) => button.textContent === "Dismiss"));
+
+  assert.equal(document.querySelector(".guided-review"), null);
+  assert.ok(document.querySelector(".first-scan-prompt"));
+  assert.equal(fetchHarness.count("/api/scans", "POST"), scanPostsBefore);
+  assert.equal(fetchHarness.count("/api/finding-reviews", "PUT"), reviewPutsBefore);
+  assert.deepEqual(JSON.parse(window.localStorage.getItem(GUIDED_REVIEW_DISMISSALS_KEY)), [PROJECT_A_PATH]);
+});
+
+test("Reports completion summary keeps unresolved findings and the workbench primary", async () => {
+  const current = {
+    ...scanWithFindings(86, [reviewableFinding("6")]),
+    dependencyTrust: emptyDependencyTrustFixture(),
+  };
+  await renderApp();
+  await resolveDetails(await takeDetailRequests(PROJECT_A_PATH), { scans: [current] });
+  await openReports();
+
+  const summary = document.querySelector(".review-completion");
+  const workbench = document.querySelector(".finding-workbench");
+  assert.match(summary.textContent, /Finding review in progress/);
+  assert.match(summary.textContent, /1 of 1 finding remains unresolved/);
+  assert.match(workbench.querySelector("h3").textContent, /Finding review workbench/);
+  assert.ok(summary.compareDocumentPosition(workbench) & Node.DOCUMENT_POSITION_FOLLOWING);
+  assert.equal(document.querySelector(".category-detail-views").open, false);
+});
+
+test("reviewed findings do not conceal incomplete coverage or immutable scanner context", async () => {
+  const reviewed = reviewableFinding("7", { review: findingReview(`cf1_${"7".repeat(64)}`) });
+  const current = {
+    ...withCompleteness(scanWithFindings(87, [reviewed]), {
+      complete: false,
+      fileInspectionFailureCount: 1,
+    }),
+    dependencyTrust: emptyDependencyTrustFixture(),
+  };
+  await renderApp();
+  await resolveDetails(await takeDetailRequests(PROJECT_A_PATH), { scans: [current] });
+  await openReports();
+
+  const summary = document.querySelector(".review-completion");
+  assert.match(summary.textContent, /Finding review complete; coverage remains unresolved/);
+  assert.match(summary.textContent, /1 scan-coverage gap remains/);
+  assert.doesNotMatch(summary.textContent, /^Review complete for this scan$/);
+  assert.equal(document.querySelector(".report-supporting-details").open, false);
+  assert.match(document.querySelector(".report-supporting-details").textContent, /Scanner context and raw metrics/);
+});
+
+test("applicable dependency state stays actionable until the approved snapshot matches", async () => {
+  const needsApproval = trustedBaselineScan(110, trustedBaselineFixture({
+    approval: { eligible: true, fingerprint: `cfdb2_${"d".repeat(64)}`, reason: "" },
+  }));
+  await renderApp();
+  await resolveDetails(await takeDetailRequests(PROJECT_A_PATH), { scans: [needsApproval] });
+  await openReports();
+
+  assert.match(document.querySelector(".review-completion").textContent, /Finding review complete; dependency review remains/);
+  assert.match(document.querySelector(".review-completion").textContent, /Approval required/);
+  assert.ok(document.querySelector(".dependency-trust.dependency-review-attention"));
+  assert.match(document.querySelector(".dependency-trust.dependency-review-attention").textContent, /Trust this dependency snapshot/);
+});
+
+test("genuinely complete current and historical reviews remain explicit and conservative", async () => {
+  const current = trustedBaselineScan(111, configuredTrustedBaseline("identical"));
+  const historical = {
+    ...withCompleteness(scan(109, "none", "2026-07-10T11:00:00Z"), { complete: false, traversalFailureCount: 1 }),
+    dependencyTrust: undefined,
+  };
+  await renderApp();
+  await resolveDetails(await takeDetailRequests(PROJECT_A_PATH), { scans: [current, historical] });
+  await openReports();
+
+  let summary = document.querySelector(".review-completion");
+  assert.match(summary.querySelector("h3").textContent, /^Review complete for this scan$/);
+  assert.match(summary.textContent, /Available workflow complete/);
+  assert.match(summary.textContent, /Approved snapshot/);
+  assert.match(summary.textContent, /does not prove that the project is safe, secure, or fully verified/);
+
+  const historicalRow = [...document.querySelectorAll(".history-row")]
+    .find((row) => row.textContent.includes("Jul 10"));
+  assert.ok(historicalRow, "Expected the Jul 10 historical scan");
+  await click(historicalRow.querySelector(".history-view-button"));
+  summary = document.querySelector(".review-completion");
+  assert.match(summary.textContent, /Historical scan review/);
+  assert.doesNotMatch(summary.querySelector("h3").textContent, /^Review complete for this scan$/);
+  assert.match(summary.textContent, /coverage remains unresolved/i);
+  assert.match(summary.textContent, /Dependency state unavailable/);
 });
 
 test("unresolved high contributors and risk tolerance never use success indicators", async () => {
@@ -1078,7 +1182,7 @@ test("switching projects releases scan loading ownership", async () => {
   await selectProject("Project B");
   await resolveDetails(await takeDetailRequests(PROJECT_B_PATH));
   assert.equal(runScanButton().disabled, false);
-  assert.equal(runScanButton().textContent, "Run Scan");
+  assert.equal(runScanButton().textContent, "Run first scan");
 
   await respond(request, { ...scan(12, "low", "2026-07-11T13:02:00Z"), project_path: PROJECT_A_PATH });
   const projectsRequest = await fetchHarness.next("/api/projects");
@@ -1549,7 +1653,8 @@ async function reject(request, error) {
 }
 
 function runScanButton() {
-  const button = document.querySelector(".run-scan-button");
+  const button = [...document.querySelectorAll(".run-scan-button")]
+    .find((item) => ["Run Scan", "Run first scan", "Scanning..."].includes(item.textContent));
   assert.ok(button, "Expected Run Scan button");
   return button;
 }

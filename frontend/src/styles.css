@@ -1028,9 +1028,262 @@ pre {
   margin-top: 14px;
 }
 
+.guided-review,
+.first-scan-prompt,
+.review-completion,
+.report-first-scan {
+  border-radius: var(--radius-md);
+  min-width: 0;
+}
+
+.guided-review {
+  background: linear-gradient(135deg, rgba(75, 186, 203, 0.1), rgba(255, 255, 255, 0.015));
+  border: 1px solid rgba(75, 186, 203, 0.3);
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-5);
+}
+
+.guided-review-heading,
+.guided-review-actions,
+.review-completion-heading {
+  align-items: flex-start;
+  display: flex;
+  gap: var(--space-4);
+  justify-content: space-between;
+}
+
+.guided-review-heading > div,
+.review-completion-heading > div {
+  min-width: 0;
+}
+
+.guided-review-heading h2,
+.guided-review-heading p,
+.review-completion-heading h3,
+.review-completion > p,
+.report-first-scan h3,
+.report-first-scan p,
+.first-scan-prompt h2,
+.first-scan-prompt p {
+  margin: 0;
+}
+
+.guided-review-heading p,
+.guided-review-actions span,
+.first-scan-actions span,
+.review-completion-disclaimer,
+.review-completion-history {
+  color: var(--color-text-muted);
+}
+
+.guided-review-eyebrow {
+  color: var(--color-accent);
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 750;
+  letter-spacing: 0.075em;
+  margin-bottom: var(--space-1);
+  text-transform: uppercase;
+}
+
+.guided-review-dismiss {
+  flex: 0 0 auto;
+}
+
+.guided-review-steps {
+  display: grid;
+  gap: var(--space-2);
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.guided-review-steps li {
+  align-items: flex-start;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  display: grid;
+  gap: var(--space-2);
+  grid-template-columns: auto minmax(0, 1fr);
+  min-width: 0;
+  padding: var(--space-3);
+}
+
+.guided-review-steps li.complete {
+  background: rgba(114, 199, 125, 0.055);
+  border-color: rgba(114, 199, 125, 0.22);
+}
+
+.guided-review-marker {
+  align-items: center;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 50%;
+  color: var(--color-text-muted);
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 0.75rem;
+  height: 20px;
+  justify-content: center;
+  width: 20px;
+}
+
+.guided-review-steps li.complete .guided-review-marker {
+  border-color: rgba(114, 199, 125, 0.45);
+  color: var(--color-success);
+}
+
+.guided-review-steps strong,
+.guided-review-steps small {
+  display: block;
+}
+
+.guided-review-steps strong {
+  font-size: 0.84rem;
+}
+
+.guided-review-steps small {
+  color: var(--color-text-muted);
+  font-size: 0.73rem;
+  line-height: 1.4;
+  margin-top: 3px;
+}
+
+.guided-review-actions,
+.first-scan-actions {
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.guided-review-actions span,
+.first-scan-actions span {
+  font-size: 0.82rem;
+}
+
+.first-scan-prompt {
+  background: var(--color-surface-elevated);
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-6);
+}
+
+.first-scan-prompt p {
+  color: var(--color-text-secondary);
+  max-width: 72ch;
+}
+
+.first-scan-actions {
+  display: flex;
+  gap: var(--space-3);
+}
+
+.report-first-scan {
+  background: var(--color-surface-inset);
+  border: 1px solid var(--color-border-subtle);
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-5);
+}
+
+.report-first-scan p {
+  color: var(--color-text-secondary);
+  max-width: 70ch;
+}
+
+.report-first-scan button {
+  justify-self: start;
+}
+
+.review-completion {
+  background: var(--color-surface-inset);
+  border: 1px solid var(--color-border-subtle);
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+}
+
+.review-completion-complete {
+  border-color: rgba(114, 199, 125, 0.28);
+}
+
+.review-completion-status {
+  border: 1px solid rgba(230, 179, 90, 0.35);
+  border-radius: 999px;
+  color: var(--color-warning);
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+  font-weight: 750;
+  padding: 5px 9px;
+}
+
+.review-completion-status.status-complete {
+  border-color: rgba(114, 199, 125, 0.35);
+  color: var(--color-success);
+}
+
+.review-completion-remaining {
+  color: var(--color-text-secondary);
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.review-completion-dependency {
+  align-items: baseline;
+  background: rgba(255, 255, 255, 0.025);
+  border-radius: var(--radius-sm);
+  display: grid;
+  gap: var(--space-1);
+  grid-template-columns: auto 1fr;
+  padding: var(--space-3);
+}
+
+.review-completion-dependency > span {
+  color: var(--color-text-secondary);
+  font-weight: 700;
+  justify-self: end;
+}
+
+.review-completion-dependency small {
+  color: var(--color-text-muted);
+  grid-column: 1 / -1;
+}
+
+.review-completion-disclaimer,
+.review-completion-history {
+  font-size: 0.78rem;
+}
+
+.dependency-trust.dependency-review-attention {
+  background: rgba(230, 179, 90, 0.045);
+  border: 1px solid rgba(230, 179, 90, 0.28);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+}
+
+.report-supporting-details {
+  border-top: 1px solid var(--color-border-subtle);
+  margin-top: var(--space-5);
+  padding-top: var(--space-3);
+}
+
+.report-supporting-details > summary {
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.reviewed-findings .report-supporting-details:not([open]) {
+  opacity: 0.82;
+}
+
 .finding-workbench {
   background: var(--color-surface-inset);
-  border: 1px solid var(--color-border);
+  border: 1px solid rgba(75, 186, 203, 0.3);
   border-radius: var(--radius-md);
   display: grid;
   gap: var(--space-4);
@@ -3184,6 +3437,10 @@ label,
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .guided-review-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .projects-section .project-select-target {
     align-items: start;
     gap: var(--space-3);
@@ -3295,6 +3552,31 @@ label,
   .finding-workbench-actions {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .guided-review,
+  .first-scan-prompt {
+    padding: var(--space-4);
+  }
+
+  .guided-review-heading,
+  .guided-review-actions,
+  .review-completion-heading,
+  .first-scan-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .guided-review-dismiss {
+    align-self: flex-start;
+  }
+
+  .guided-review-steps {
+    grid-template-columns: 1fr;
+  }
+
+  .review-completion-status {
+    align-self: flex-start;
   }
 
   .finding-workbench-filters {

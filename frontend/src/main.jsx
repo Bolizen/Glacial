@@ -15,6 +15,11 @@ import {
   findingWorkbenchProgress,
   nextUnresolvedFindingKey,
 } from "./findingWorkbench.js";
+import {
+  buildGuidedReviewState,
+  dismissGuidedReview,
+  readGuidedReviewDismissals,
+} from "./guidedReview.js";
 import { shortBaselineFingerprint, trustedBaselineComparisonLabel } from "./trustedDependencyBaseline.js";
 import {
   isAbortError,
@@ -114,6 +119,7 @@ export function App() {
   const [findingReviewState, setFindingReviewState] = useState({});
   const [trustedBaselineMutation, setTrustedBaselineMutation] = useState({ saving: false, error: "", success: "" });
   const [sessionStateReady, setSessionStateReady] = useState(false);
+  const [dismissedGuidedReviews, setDismissedGuidedReviews] = useState(() => readGuidedReviewDismissals());
   const [toastTop, setToastTop] = useState(112);
   const topbarRef = useRef(null);
   const selectedPathRef = useRef("");
@@ -162,6 +168,20 @@ export function App() {
     () => (displayedScan ? buildScanReportMarkdown(displayedScan, displayedReport, displayedComparison, displayedTrustContext) : ""),
     [displayedScan, displayedReport, displayedComparison, displayedTrustContext],
   );
+  const latestProjectScan = scanResult || scanHistory[0] || null;
+  const latestProjectReport = useMemo(() => buildScanReport(latestProjectScan), [latestProjectScan]);
+  const latestGuidedReview = useMemo(() => buildGuidedReviewState({
+    project: selectedProject,
+    scan: latestProjectScan,
+    completeness: latestProjectReport.completeness,
+    dependencyTrust: latestProjectReport.dependencyTrust,
+  }), [selectedProject, latestProjectScan, latestProjectReport]);
+  const displayedGuidedReview = useMemo(() => buildGuidedReviewState({
+    project: selectedProject,
+    scan: displayedScan,
+    completeness: displayedReport.completeness,
+    dependencyTrust: displayedReport.dependencyTrust,
+  }), [selectedProject, displayedScan, displayedReport]);
   const selectedSectionInfo = SECTION_NAV.find((section) => section.id === selectedSection) || SECTION_NAV[0];
 
   useEffect(() => {
@@ -415,7 +435,10 @@ export function App() {
       setCreateForm({ project_name: "", existing_path: "", description: "", project_type: "" });
       setCreateProjectOpen(false);
       await refreshProjects();
-      if (workspaceGenerationRef.current === workspaceGeneration) selectProject(created.path);
+      if (workspaceGenerationRef.current === workspaceGeneration) {
+        selectProject(created.path);
+        setSelectedSection("workspace");
+      }
     } catch (error) {
       if (workspaceGenerationRef.current === workspaceGeneration) setMessage(error.message);
     }
@@ -438,7 +461,10 @@ export function App() {
       setCreateForm({ project_name: "", existing_path: "", description: "", project_type: "" });
       setCreateProjectOpen(false);
       await refreshProjects();
-      if (workspaceGenerationRef.current === workspaceGeneration) selectProject(registered.path);
+      if (workspaceGenerationRef.current === workspaceGeneration) {
+        selectProject(registered.path);
+        setSelectedSection("workspace");
+      }
     } catch (error) {
       if (workspaceGenerationRef.current === workspaceGeneration) setMessage(error.message);
     }
@@ -559,7 +585,9 @@ export function App() {
       if (scopedProjectRequestIsCurrent("scanMutation", requestId, projectPath, generation)) {
         setScanResult(data);
         setSelectedScanId(null);
-        setMessage("Scan complete. Review the findings below.");
+        setSelectedSection("reports");
+        setMajorSectionOpen("scanReport", true);
+        setMessage("Scan complete. Continue with the guided review.");
         await loadScanHistory(projectPath, generation);
         if (!projectRequestIsCurrent(projectPath, generation)) {
           reloadSelectedProjectAfterStaleMutation(projectPath, generation);
@@ -930,6 +958,16 @@ export function App() {
     setMessage("Saved UI state reset. Backend data and workspace configuration were not changed.");
   }
 
+  function openReports() {
+    setSelectedSection("reports");
+    setMajorSectionOpen("scanReport", true);
+  }
+
+  function dismissSelectedGuidedReview() {
+    if (!selectedPath) return;
+    setDismissedGuidedReviews((current) => dismissGuidedReview(selectedPath, current));
+  }
+
   function handleSidebarNav(event) {
     const link = event.target.closest("a");
     if (!link) return;
@@ -1065,21 +1103,34 @@ export function App() {
         <section className="content">
           {selectedSection === "workspace" && selectedProject && !projectDetailsLoading ? (
             <>
-              <RiskSummaryHero
-                report={displayedReport}
-                result={displayedScan}
-                comparison={displayedComparison}
-                trustProfile={trustProfile}
-                isScanning={isScanning}
-                reportActionsDisabled={!displayedReportMarkdown}
-                runScanDisabled={!selectedPath || isScanning || selectedProject?.available === false}
-                onExport={() => exportScanReport(displayedReportMarkdown)}
-                onCopy={copyReportMarkdown}
-                onRunScan={runScan}
-              />
+              {!dismissedGuidedReviews.includes(selectedPath) ? (
+                <GuidedReviewChecklist
+                  state={latestGuidedReview}
+                  isScanning={isScanning}
+                  onRunScan={runScan}
+                  onOpenReports={openReports}
+                  onDismiss={dismissSelectedGuidedReview}
+                />
+              ) : null}
+              {displayedScan ? (
+                <RiskSummaryHero
+                  report={displayedReport}
+                  result={displayedScan}
+                  comparison={displayedComparison}
+                  trustProfile={trustProfile}
+                  isScanning={isScanning}
+                  reportActionsDisabled={!displayedReportMarkdown}
+                  runScanDisabled={!selectedPath || isScanning || selectedProject?.available === false}
+                  onExport={() => exportScanReport(displayedReportMarkdown)}
+                  onCopy={copyReportMarkdown}
+                  onRunScan={runScan}
+                />
+              ) : (
+                <FirstScanPrompt isScanning={isScanning} onRunScan={runScan} />
+              )}
               <OverviewSecondarySummary projects={projects} report={displayedReport} result={displayedScan} />
               <section className="dashboard-grid">
-                <FindingsOverview report={displayedReport} result={displayedScan} />
+                {displayedScan ? <FindingsOverview report={displayedReport} result={displayedScan} /> : null}
                 {displayedScan ? <DependencyTrustPanel trust={displayedReport.dependencyTrust} findings={displayedReport.dependencyFindings} trustContext={displayedTrustContext} scan={displayedScan} viewMode={scanViewMode} compact trustedBaselineMutation={trustedBaselineMutation} onApproveTrustedBaseline={approveTrustedBaseline} onUpdateTrustedBaselineNote={updateTrustedBaselineNote} onClearTrustedBaseline={clearTrustedBaseline} onManageTrustedBaseline={() => { setSelectedSection("reports"); setMajorSectionOpen("scanReport", true); }} /> : null}
                 <ProjectExpectationsSummary profile={trustProfile} onEdit={() => setSelectedSection("trustProfiles")} />
                 <RecentActivity changelog={changelog} scans={scanHistory} />
@@ -1100,6 +1151,7 @@ export function App() {
               <ScanReport
                 result={displayedScan}
                 report={displayedReport}
+                completionState={displayedGuidedReview}
                 comparison={displayedComparison}
                 trustContext={displayedTrustContext}
                 viewMode={scanViewMode}
@@ -1156,6 +1208,57 @@ export function App() {
         />
       ) : null}
     </main>
+  );
+}
+
+function GuidedReviewChecklist({ state, isScanning, onRunScan, onOpenReports, onDismiss }) {
+  const nextAction = !state.hasScan
+    ? { label: isScanning ? "Scanning..." : "Run first scan", onClick: onRunScan, disabled: isScanning }
+    : state.workflowComplete
+      ? { label: "View review summary", onClick: onOpenReports, disabled: false }
+      : { label: "Continue review", onClick: onOpenReports, disabled: false };
+
+  return (
+    <section className={`guided-review guided-review-${state.status}`} aria-labelledby="guided-review-title">
+      <div className="guided-review-heading">
+        <div>
+          <span className="guided-review-eyebrow">First-project review</span>
+          <h2 id="guided-review-title">Guided review checklist</h2>
+          <p>{state.completedStepCount} of {state.steps.length} steps complete. Completion records review work; it does not prove the project safe.</p>
+        </div>
+        <button type="button" className="tertiary-button guided-review-dismiss" onClick={onDismiss}>Dismiss</button>
+      </div>
+      <ol className="guided-review-steps">
+        {state.steps.map((step) => (
+          <li className={step.complete ? "complete" : "pending"} key={step.id}>
+            <span className="guided-review-marker" aria-hidden="true">{step.complete ? "✓" : "·"}</span>
+            <span>
+              <strong>{step.label}</strong>
+              <small>{step.detail}</small>
+            </span>
+          </li>
+        ))}
+      </ol>
+      <div className="guided-review-actions">
+        <button type="button" className="run-scan-button" onClick={nextAction.onClick} disabled={nextAction.disabled}>{nextAction.label}</button>
+        {state.hasScan && !state.workflowComplete ? <span>{state.remaining[0]}</span> : null}
+        {state.workflowComplete ? <span>Available review steps are complete for the latest scan.</span> : null}
+      </div>
+    </section>
+  );
+}
+
+function FirstScanPrompt({ isScanning, onRunScan }) {
+  return (
+    <section className="panel first-scan-prompt" aria-labelledby="first-scan-title">
+      <span className="guided-review-eyebrow">Next step</span>
+      <h2 id="first-scan-title">Run this project’s first scan</h2>
+      <p>Glacial will inspect supported local project metadata and text without executing project content. The scan establishes findings, coverage, and dependency context for review.</p>
+      <div className="first-scan-actions">
+        <button type="button" className="run-scan-button" onClick={onRunScan} disabled={isScanning}>{isScanning ? "Scanning..." : "Run first scan"}</button>
+        <span>No safety or verification claim is made before or after the scan.</span>
+      </div>
+    </section>
   );
 }
 
@@ -1616,9 +1719,9 @@ function TrustProfilePanel({ profile, message, onSave }) {
   );
 }
 
-function ScanReport({ result, report, comparison, trustContext, viewMode, isScanning, onRunScan, onReviewFinding, onReopenFinding, findingReviewState, trustedBaselineMutation, onApproveTrustedBaseline, onUpdateTrustedBaselineNote, onClearTrustedBaseline, open, onOpenChange }) {
+function ScanReport({ result, report, completionState, comparison, trustContext, viewMode, isScanning, onRunScan, onReviewFinding, onReopenFinding, findingReviewState, trustedBaselineMutation, onApproveTrustedBaseline, onUpdateTrustedBaselineNote, onClearTrustedBaseline, open, onOpenChange }) {
   return (
-    <details className="panel section-toggle" id="reports" open={open} onToggle={(event) => onOpenChange(event.currentTarget.open)}>
+    <details className={`panel section-toggle${completionState.allFindingsReviewed ? " reviewed-findings" : ""}`} id="reports" open={open} onToggle={(event) => onOpenChange(event.currentTarget.open)}>
       <summary className="section-summary">
         <span className="section-caret" aria-hidden="true"></span>
         <div>
@@ -1628,11 +1731,10 @@ function ScanReport({ result, report, comparison, trustContext, viewMode, isScan
         {result ? <ScanHeaderStatus result={result} completeness={report.completeness} /> : null}
       </summary>
       <div className="section-body">
-      {!result ? <p className="muted">Run a scan to see findings for this project.</p> : null}
+      {!result ? <ReportFirstScanPrompt isScanning={isScanning} onRunScan={onRunScan} /> : null}
       {result ? (
         <>
-          <ScanSummary report={report} risk={result.overall_risk} />
-          <ScanCompletenessSummary completeness={report.completeness} viewMode={viewMode} isScanning={isScanning} onRunScan={onRunScan} />
+          <ReviewCompletionSummary state={completionState} viewMode={viewMode} />
           <FindingWorkbench
             findings={result.findings}
             scanIdentity={result.id ?? result.scan_date}
@@ -1640,11 +1742,16 @@ function ScanReport({ result, report, comparison, trustContext, viewMode, isScan
             onReopenFinding={onReopenFinding}
             findingReviewState={findingReviewState}
           />
-          <DependencyTrustPanel trust={report.dependencyTrust} findings={report.dependencyFindings} trustContext={trustContext} scan={result} viewMode={viewMode} onReviewFinding={onReviewFinding} onReopenFinding={onReopenFinding} findingReviewState={findingReviewState} trustedBaselineMutation={trustedBaselineMutation} onApproveTrustedBaseline={onApproveTrustedBaseline} onUpdateTrustedBaselineNote={onUpdateTrustedBaselineNote} onClearTrustedBaseline={onClearTrustedBaseline} />
+          <DependencyTrustPanel trust={report.dependencyTrust} findings={report.dependencyFindings} trustContext={trustContext} scan={result} viewMode={viewMode} attention={completionState.dependency.requiresAction} onReviewFinding={onReviewFinding} onReopenFinding={onReopenFinding} findingReviewState={findingReviewState} trustedBaselineMutation={trustedBaselineMutation} onApproveTrustedBaseline={onApproveTrustedBaseline} onUpdateTrustedBaselineNote={onUpdateTrustedBaselineNote} onClearTrustedBaseline={onClearTrustedBaseline} />
+          <ScanCompletenessSummary completeness={report.completeness} viewMode={viewMode} isScanning={isScanning} onRunScan={onRunScan} />
           <div className="scan-view-label">
             {viewMode === "history" ? `Viewing history scan from ${formatDate(result.scan_date)}` : `Viewing latest scan from ${formatDate(result.scan_date)}`}
           </div>
-          <RiskExplanation report={report} risk={result.overall_risk} />
+          <details className="report-supporting-details" open={!completionState.allFindingsReviewed}>
+            <summary>Scanner context and raw metrics</summary>
+            <ScanSummary report={report} risk={result.overall_risk} />
+            <RiskExplanation report={report} risk={result.overall_risk} />
+          </details>
           <ScanComparison comparison={comparison} />
           <TrustProfileContext context={trustContext} />
           <div className="scan-detail-toggles">
@@ -1670,6 +1777,44 @@ function ScanReport({ result, report, comparison, trustContext, viewMode, isScan
       {result ? <p className="review-note">Review high severity items first, then lifecycle scripts and files that launch processes or fetch remote content.</p> : null}
       </div>
     </details>
+  );
+}
+
+function ReportFirstScanPrompt({ isScanning, onRunScan }) {
+  return (
+    <section className="report-first-scan">
+      <span className="guided-review-eyebrow">Review not started</span>
+      <h3>Run the first scan to begin review</h3>
+      <p>Findings, scan coverage, and dependency context will appear here. Glacial does not execute project content during the scan.</p>
+      <button type="button" className="run-scan-button" onClick={onRunScan} disabled={isScanning}>{isScanning ? "Scanning..." : "Run first scan"}</button>
+    </section>
+  );
+}
+
+function ReviewCompletionSummary({ state, viewMode }) {
+  return (
+    <section className={`review-completion review-completion-${state.status}`} aria-labelledby="review-completion-title">
+      <div className="review-completion-heading">
+        <div>
+          <span className="guided-review-eyebrow">{viewMode === "history" ? "Historical scan review" : "Current scan review"}</span>
+          <h3 id="review-completion-title">{state.title}</h3>
+        </div>
+        <span className={`review-completion-status status-${state.status}`}>{state.workflowComplete ? "Available workflow complete" : "Action remains"}</span>
+      </div>
+      <p>{state.summary}</p>
+      {state.remaining.length ? (
+        <ul className="review-completion-remaining">
+          {state.remaining.map((item) => <li key={item}>{item}</li>)}
+        </ul>
+      ) : null}
+      <div className={`review-completion-dependency dependency-${state.dependency.status}`}>
+        <strong>Dependency review</strong>
+        <span>{state.dependency.label}</span>
+        <small>{state.dependency.detail}</small>
+      </div>
+      {viewMode === "history" ? <p className="review-completion-history">This summary describes the selected historical scan and does not change its evidence.</p> : null}
+      <p className="review-completion-disclaimer">Completing this workflow records human review and available scan coverage. It does not prove that the project is safe, secure, or fully verified.</p>
+    </section>
   );
 }
 
@@ -1763,7 +1908,7 @@ function ScanCompletenessSummary({ completeness, viewMode, isScanning, onRunScan
   );
 }
 
-function DependencyTrustPanel({ trust, findings, trustContext, scan, viewMode = "latest", compact = false, onReviewFinding, onReopenFinding, findingReviewState = {}, trustedBaselineMutation = {}, onApproveTrustedBaseline, onUpdateTrustedBaselineNote, onClearTrustedBaseline, onManageTrustedBaseline }) {
+function DependencyTrustPanel({ trust, findings, trustContext, scan, viewMode = "latest", compact = false, attention = false, onReviewFinding, onReopenFinding, findingReviewState = {}, trustedBaselineMutation = {}, onApproveTrustedBaseline, onUpdateTrustedBaselineNote, onClearTrustedBaseline, onManageTrustedBaseline }) {
   const directEntries = trust.entries.filter((entry) => entry.direct);
   const visibleFindings = findings.slice(0, 50);
   const noSupportedMetadata = dependencyTrustHasNoSupportedMetadata(trust);
@@ -1773,7 +1918,7 @@ function DependencyTrustPanel({ trust, findings, trustContext, scan, viewMode = 
     expected: expectedManagers.some((expected) => String(expected).toLowerCase() === manager.toLowerCase()),
   }));
   return (
-    <section className={`dependency-trust dependency-status-${trust.status}${compact ? " dependency-trust-overview" : ""}`}>
+    <section className={`dependency-trust dependency-status-${trust.status}${compact ? " dependency-trust-overview" : ""}${attention ? " dependency-review-attention" : ""}`}>
       <div className="panel-heading">
         <div>
           <h3>Dependency Trust</h3>
@@ -2222,8 +2367,8 @@ function FindingWorkbench({ findings = [], scanIdentity, onReviewFinding, onReop
     <section className="finding-workbench" aria-labelledby="finding-workbench-title">
       <div className="finding-workbench-heading">
         <div>
-          <h3 id="finding-workbench-title">Unresolved findings</h3>
-          <p>Review findings from this scan in one priority-ordered queue.</p>
+          <h3 id="finding-workbench-title">Finding review workbench</h3>
+          <p>Search, filter, and review one priority-ordered queue. Unresolved items stay first.</p>
         </div>
         <div className="finding-workbench-progress" aria-label={`${progress.reviewed} of ${progress.total} findings reviewed`}>
           <strong>{progress.reviewed} / {progress.total}</strong>
