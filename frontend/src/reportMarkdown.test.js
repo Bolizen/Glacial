@@ -80,13 +80,13 @@ test("exports every current and future finding with complete detailed evidence",
     "Ignored files",
     "Reviewed files",
     "Zone",
-    "Trust Profile Context",
+    "Project Expectations Context",
     "Comparison with previous scan",
   ]) {
     assert.match(markdown, new RegExp(`^## ${escapeRegExp(heading)}$`, "m"));
   }
   assert.match(markdown, /Project: `Z:\\workspace\\project`/);
-  assert.match(markdown, /- Package managers: npm/);
+  assert.match(markdown, /- Approved package managers: npm/);
   assert.match(markdown, /- Risk: LOW to HIGH/);
 });
 
@@ -265,7 +265,7 @@ test("legacy summary sections preserve input order and omit malformed empty rows
   assertOrdered(markdown, "`z.secret`", "`a.secret`");
   assertOrdered(markdown, "`z.ignore`", "`a.ignore`");
   assertOrdered(markdown, "`z.js`", "`a.js`");
-  assertOrdered(markdown, "zpm, apm", "- Risk tolerance:");
+  assertOrdered(markdown, "zpm, apm", "- Risk tolerance (review context only):");
   assertOrdered(markdown, "Unexpected: `z-manifest.json`", "Expected: `a-manifest.json`");
   assert.doesNotMatch(markdown, /^-\s*:\s*$/m);
   assert.doesNotMatch(markdown, /^\s+-\s*:\s*$/m);
@@ -646,6 +646,7 @@ function trustContextFixture() {
   return {
     configured: true,
     packageManagers: ["npm"],
+    ecosystems: ["node"],
     riskTolerance: "cautious",
     manifests: [{ status: "Expected", path: "package.json" }],
     lockfiles: [{ status: "Expected", path: "package-lock.json" }],

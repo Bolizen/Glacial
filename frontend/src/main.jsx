@@ -20,6 +20,11 @@ import {
   dismissGuidedReview,
   readGuidedReviewDismissals,
 } from "./guidedReview.js";
+import { ProjectExpectationsPanel } from "./ProjectExpectations.jsx";
+import {
+  EMPTY_PROJECT_EXPECTATIONS,
+  normalizeProjectExpectations,
+} from "./projectExpectations.js";
 import { shortBaselineFingerprint, trustedBaselineComparisonLabel } from "./trustedDependencyBaseline.js";
 import {
   isAbortError,
@@ -53,7 +58,7 @@ const PROJECT_REQUIRED_SECTIONS = new Set(["trustProfiles", "reports"]);
 const SECTION_NAV = [
   { id: "workspace", href: "#workspace-overview", label: "Workspace Overview", icon: "#" },
   { id: "projects", href: "#projects", label: "Projects", icon: "[]" },
-  { id: "trustProfiles", href: "#trust-profiles", label: "Trust Profiles", icon: "<>" },
+  { id: "trustProfiles", href: "#project-expectations", label: "Project Expectations", icon: "<>" },
   { id: "reports", href: "#reports", label: "Reports", icon: "=" },
   { id: "changelog", href: "#changelog", label: "Changelog", icon: "@" },
   { id: "settings", href: "#settings", label: "Settings", icon: "*" },
@@ -63,28 +68,11 @@ const TRUST_PROFILE_FIELDS = [
   "expectedManifestFiles",
   "expectedLockfiles",
   "allowedLifecycleScripts",
+  "expectedEcosystems",
   "reviewedPaths",
   "ignoredPaths",
 ];
-const EMPTY_TRUST_PROFILE = {
-  project_path: "",
-  trustedPackageManagers: [],
-  expectedManifestFiles: [],
-  expectedLockfiles: [],
-  allowedLifecycleScripts: [],
-  reviewedPaths: [],
-  ignoredPaths: [],
-  riskTolerance: "normal",
-  notes: "",
-};
-const TRUST_PROFILE_INPUTS = [
-  { field: "trustedPackageManagers", label: "Package managers", rows: 2, placeholder: "npm, pip" },
-  { field: "expectedManifestFiles", label: "Expected manifests", rows: 2, placeholder: "package.json, requirements.txt" },
-  { field: "expectedLockfiles", label: "Expected lockfiles", rows: 2, placeholder: "package-lock.json, uv.lock" },
-  { field: "allowedLifecycleScripts", label: "Allowed lifecycle scripts", rows: 2, placeholder: "prepare, postinstall" },
-  { field: "reviewedPaths", label: "Reviewed paths", rows: 2, placeholder: "src/, package.json" },
-  { field: "ignoredPaths", label: "Ignored paths", rows: 2, placeholder: "dist/, local.env" },
-];
+const EMPTY_TRUST_PROFILE = EMPTY_PROJECT_EXPECTATIONS;
 export function App() {
   const [projectRoot, setProjectRoot] = useState("");
   const [projectRootMessage, setProjectRootMessage] = useState("");
@@ -702,7 +690,7 @@ export function App() {
     try {
       const data = await api(`/api/trust-profile?project_path=${encodeURIComponent(path)}`, { signal });
       if (!scopedProjectRequestIsCurrent("trustProfile", requestId, path, generation)) return;
-      setTrustProfile({ ...EMPTY_TRUST_PROFILE, ...data });
+      setTrustProfile(normalizeProjectExpectations(data));
       setTrustProfileMessage("");
     } catch (error) {
       if (!isAbortError(error) && scopedProjectRequestIsCurrent("trustProfile", requestId, path, generation)) {
@@ -727,8 +715,8 @@ export function App() {
         reloadSelectedProjectAfterStaleMutation(projectPath, generation);
         return;
       }
-      setTrustProfile({ ...EMPTY_TRUST_PROFILE, ...data });
-      setTrustProfileMessage("Trust profile saved.");
+      setTrustProfile(normalizeProjectExpectations(data));
+      setTrustProfileMessage("Project Expectations saved.");
     } catch (error) {
       if (!isAbortError(error) && scopedProjectRequestIsCurrent("trustSave", requestId, projectPath, generation)) {
         setTrustProfileMessage(error.message);
@@ -974,6 +962,7 @@ export function App() {
     const section = {
       "#workspace-overview": "workspace",
       "#projects": "projects",
+      "#project-expectations": "trustProfiles",
       "#trust-profiles": "trustProfiles",
       "#reports": "reports",
       "#changelog": "changelog",
@@ -1143,7 +1132,14 @@ export function App() {
           ) : null}
 
           {selectedSection === "trustProfiles" && selectedProject && !projectDetailsLoading ? (
-            <TrustProfilePanel profile={trustProfile} message={trustProfileMessage} onSave={saveTrustProfile} />
+            <ProjectExpectationsPanel
+              profile={trustProfile}
+              report={displayedReport}
+              scan={displayedScan}
+              message={trustProfileMessage}
+              onSave={saveTrustProfile}
+              onOpenReports={openReports}
+            />
           ) : null}
 
           {selectedSection === "reports" && selectedProject && !projectDetailsLoading ? (
@@ -1475,24 +1471,24 @@ function ProjectsSection({ projects, selectedPath, onSelectProject, onNewProject
 function ProjectExpectationsSummary({ profile, onEdit }) {
   const rows = [
     ["Package managers", profileList(profile, "trustedPackageManagers")],
-    ["Expected manifests", profileList(profile, "expectedManifestFiles")],
-    ["Expected lockfiles", profileList(profile, "expectedLockfiles")],
-    ["Allowed lifecycle scripts", profileList(profile, "allowedLifecycleScripts")],
+    ["Dependency manifests", profileList(profile, "expectedManifestFiles")],
+    ["Lockfiles", profileList(profile, "expectedLockfiles")],
+    ["Lifecycle scripts", profileList(profile, "allowedLifecycleScripts")],
+    ["Ecosystems", profileList(profile, "expectedEcosystems")],
     ["Reviewed paths", profileList(profile, "reviewedPaths")],
-    ["Ignored paths", profileList(profile, "ignoredPaths")],
-    ["Risk tolerance", [profile.riskTolerance || "normal"]],
+    ["Expected ignored paths", profileList(profile, "ignoredPaths")],
   ];
-  const visibleRows = rows.filter(([label, values]) => label === "Risk tolerance" || values.length > 0);
-  const displayRows = visibleRows.length > 1 ? visibleRows : rows;
+  const visibleRows = rows.filter(([, values]) => values.length > 0);
+  const displayRows = visibleRows.length > 0 ? visibleRows : rows.slice(0, 4);
 
   return (
     <section className="panel overview-panel trust-profile-panel">
       <div className="panel-heading">
         <div>
           <h2>Project Expectations</h2>
-          <p className="muted">Trust profile summary for the selected project.</p>
+          <p className="muted">Explicitly approved review context. Scan observations are never accepted automatically.</p>
         </div>
-        <button type="button" className="secondary-button compact-action" onClick={onEdit}>Edit Trust Profile</button>
+        <button type="button" className="secondary-button compact-action" onClick={onEdit}>Review Expectations</button>
       </div>
       <div className="expectations-grid">
         {displayRows.map(([label, values]) => (
@@ -1558,7 +1554,7 @@ function SettingsSection({ projectRoot, selectedProject, onChangeRoot, changing,
       ) : null}
       <div className="settings-reset-state">
         <strong>Saved UI state</strong>
-        <p className="muted">Reset the saved project selection, active section, historical scan, and panel layout. Backend projects, scans, notes, trust profiles, and workspace configuration are not changed.</p>
+        <p className="muted">Reset the saved project selection, active section, historical scan, and panel layout. Backend projects, scans, notes, Project Expectations, and workspace configuration are not changed.</p>
         <button type="button" className="secondary-button" onClick={onResetSavedState}>Reset saved UI state</button>
       </div>
     </section>
@@ -1664,58 +1660,6 @@ function Changelog({ entries, open, onOpenChange }) {
           {entries.length === 0 ? <p className="muted">No changelog entries loaded.</p> : null}
       </div>
     </details>
-  );
-}
-
-function TrustProfilePanel({ profile, message, onSave }) {
-  const [draft, setDraft] = useState(formatTrustProfileDraft(profile));
-
-  useEffect(() => {
-    setDraft(formatTrustProfileDraft(profile));
-  }, [profile]);
-
-  function updateField(field, value) {
-    setDraft((current) => ({ ...current, [field]: value }));
-  }
-
-  function submit(event) {
-    event.preventDefault();
-    onSave(parseTrustProfileDraft(draft));
-  }
-
-  return (
-    <section className="panel trust-profile-panel" id="trust-profiles">
-      <div className="panel-heading">
-        <div>
-          <h2>Trust Profile</h2>
-          <p className="muted">Optional project expectations. This adds context only; findings stay visible.</p>
-        </div>
-      </div>
-      <form className="trust-profile-form" onSubmit={submit}>
-        {TRUST_PROFILE_INPUTS.map((input) => (
-          <label key={input.field}>
-            {input.label}
-            <textarea value={draft[input.field]} onChange={(event) => updateField(input.field, event.target.value)} rows={input.rows} placeholder={input.placeholder} />
-          </label>
-        ))}
-        <label>
-          Risk tolerance
-          <select value={draft.riskTolerance} onChange={(event) => updateField("riskTolerance", event.target.value)}>
-            <option value="cautious">cautious</option>
-            <option value="normal">normal</option>
-            <option value="permissive">permissive</option>
-          </select>
-        </label>
-        <label>
-          Notes
-          <textarea value={draft.notes} onChange={(event) => updateField("notes", event.target.value)} rows="3" placeholder="Local review notes for this project" />
-        </label>
-        <div className="trust-profile-actions">
-          <button type="submit">Save Trust Profile</button>
-          {message ? <span>{message}</span> : null}
-        </div>
-      </form>
-    </section>
   );
 }
 
@@ -1959,7 +1903,7 @@ function DependencyTrustPanel({ trust, findings, trustContext, scan, viewMode = 
               <ul>{trust.limitations.map((item, index) => <li key={`${item.path}-${item.reason}-${index}`}>{item.path ? <code>{item.path}</code> : null} {item.explanation || item.reason}</li>)}</ul>
             </details>
           ) : null}
-          {managerContext.length ? <p className="muted">Package managers: {managerContext.map((item) => `${item.manager}${expectedManagers.length ? (item.expected ? " (expected)" : " (not in trust profile)") : ""}`).join(", ")}.</p> : null}
+          {managerContext.length ? <p className="muted">Package managers: {managerContext.map((item) => `${item.manager}${expectedManagers.length ? (item.expected ? " (user approved)" : " (not in Project Expectations)") : ""}`).join(", ")}.</p> : null}
           <details className="dependency-details">
             <summary>Direct dependencies ({trust.directDependencyCount})</summary>
             <div className="dependency-entry-list">
@@ -2484,25 +2428,21 @@ function ComparisonItem({ label, value }) {
 function TrustProfileContext({ context }) {
   return (
     <section className="trust-context">
-      <h2>Trust Profile Context</h2>
+      <h2>Project Expectations Context</h2>
       {!context.configured ? (
-        <p className="muted">No trust profile configured. Add expected project traits to label scan metadata as expected or needing review.</p>
+        <p className="muted">No Project Expectations are approved. Scan observations and findings remain unchanged.</p>
       ) : (
         <div className="trust-context-list">
+          <TrustContextGroup title="Package managers" items={context.packageManagerStates} />
+          <TrustContextGroup title="Ecosystems" items={context.ecosystemStates} />
           <TrustContextGroup title="Manifests" items={context.manifests} />
           <TrustContextGroup title="Lockfiles" items={context.lockfiles} />
           <TrustContextGroup title="Lifecycle scripts" items={context.lifecycleScripts} />
           <TrustContextGroup title="Reviewed paths" items={context.reviewedPaths} />
           <TrustContextGroup title="Ignored paths" items={context.ignoredPaths} />
-          {context.packageManagers.length ? (
-            <div className="trust-context-item">
-              <strong>Package managers</strong>
-              <span>{context.packageManagers.join(", ")}</span>
-            </div>
-          ) : null}
           <div className="trust-context-item">
-            <strong>Risk tolerance</strong>
-            <span>{context.riskTolerance}</span>
+            <strong>Risk tolerance (review context only)</strong>
+            <span>{context.riskTolerance}; scanner findings, raw risk, dependency approval, and completion are unchanged.</span>
           </div>
           {context.notes ? <p className="trust-notes">{context.notes}</p> : null}
         </div>
@@ -2628,49 +2568,6 @@ async function api(path, options = {}) {
   return requestApi(path, options);
 }
 
-function formatTrustProfileDraft(profile) {
-  const source = { ...EMPTY_TRUST_PROFILE, ...profile };
-  return {
-    trustedPackageManagers: arrayToText(source.trustedPackageManagers),
-    expectedManifestFiles: arrayToText(source.expectedManifestFiles),
-    expectedLockfiles: arrayToText(source.expectedLockfiles),
-    allowedLifecycleScripts: arrayToText(source.allowedLifecycleScripts),
-    reviewedPaths: arrayToText(source.reviewedPaths),
-    ignoredPaths: arrayToText(source.ignoredPaths),
-    riskTolerance: source.riskTolerance || "normal",
-    notes: source.notes || "",
-  };
-}
-
-function parseTrustProfileDraft(draft) {
-  return {
-    trustedPackageManagers: textToArray(draft.trustedPackageManagers),
-    expectedManifestFiles: textToArray(draft.expectedManifestFiles),
-    expectedLockfiles: textToArray(draft.expectedLockfiles),
-    allowedLifecycleScripts: textToArray(draft.allowedLifecycleScripts),
-    reviewedPaths: textToArray(draft.reviewedPaths),
-    ignoredPaths: textToArray(draft.ignoredPaths),
-    riskTolerance: draft.riskTolerance || "normal",
-    notes: draft.notes || "",
-  };
-}
-
-function arrayToText(value) {
-  return Array.isArray(value) ? value.join("\n") : "";
-}
-
-function textToArray(value) {
-  const seen = new Set();
-  return String(value || "")
-    .split(/[,\n]/)
-    .map((item) => item.trim())
-    .filter((item) => {
-      if (!item || seen.has(item)) return false;
-      seen.add(item);
-      return true;
-    });
-}
-
 function buildScanReport(result) {
   const findings = result?.findings || [];
   const lifecycleScripts = scanArray(result, "lifecycleScripts");
@@ -2763,34 +2660,45 @@ function categoryStatus(row, completeness) {
 }
 
 function buildTrustProfileContext(report, profile = EMPTY_TRUST_PROFILE) {
-  const normalized = { ...EMPTY_TRUST_PROFILE, ...profile };
+  const normalized = normalizeProjectExpectations(profile);
   const expectedManifestFiles = scanArray(normalized, "expectedManifestFiles");
   const expectedLockfiles = scanArray(normalized, "expectedLockfiles");
   const allowedLifecycleScripts = scanArray(normalized, "allowedLifecycleScripts");
   const reviewedPaths = scanArray(normalized, "reviewedPaths");
   const ignoredPaths = scanArray(normalized, "ignoredPaths");
   const packageManagers = scanArray(normalized, "trustedPackageManagers");
+  const ecosystems = scanArray(normalized, "expectedEcosystems");
   const configured = trustProfileConfigured(normalized);
+  const scanReliable = report.completeness.known && report.completeness.complete;
+  const dependencyReliable = scanReliable
+    && report.dependencyTrust.available
+    && report.dependencyTrust.status === "complete";
 
   return {
     configured,
     packageManagers,
+    ecosystems,
+    packageManagerStates: statusForObservedExpectations(
+      report.dependencyTrust.packageManagers,
+      packageManagers,
+      dependencyReliable,
+    ),
+    ecosystemStates: statusForObservedExpectations(
+      report.dependencyTrust.ecosystems,
+      ecosystems,
+      dependencyReliable,
+    ),
     riskTolerance: normalized.riskTolerance || "normal",
     notes: normalized.notes || "",
-    manifests: [
-      ...statusForFoundPaths(report.manifests, expectedManifestFiles),
-      ...statusForMissingExpected(expectedManifestFiles, report.manifests),
-    ],
-    lockfiles: [
-      ...statusForFoundPaths(report.lockfiles, expectedLockfiles),
-      ...statusForMissingExpected(expectedLockfiles, report.lockfiles),
-    ],
-    lifecycleScripts: report.lifecycleScripts.map((script) => ({
-      status: allowedLifecycleScripts.includes(script.script) ? "Expected" : "Needs review",
-      path: `${script.path || "Unknown path"}: ${script.script || "unknown script"}`,
-    })),
-    reviewedPaths: statusForProfilePaths(reviewedPaths, report.reviewedFiles, report.reviewedFileCount),
-    ignoredPaths: statusForProfilePaths(ignoredPaths, report.ignoredFiles, report.ignoredFileCount),
+    manifests: statusForObservedExpectations(report.manifests, expectedManifestFiles, scanReliable),
+    lockfiles: statusForObservedExpectations(report.lockfiles, expectedLockfiles, scanReliable),
+    lifecycleScripts: lifecycleExpectationStates(
+      report.lifecycleScripts,
+      allowedLifecycleScripts,
+      scanReliable,
+    ),
+    reviewedPaths: statusForProfilePaths(reviewedPaths, report.reviewedFiles, report.reviewedFileCount, scanReliable),
+    ignoredPaths: statusForProfilePaths(ignoredPaths, report.ignoredFiles, report.ignoredFileCount, scanReliable),
   };
 }
 
@@ -2800,31 +2708,52 @@ function trustProfileConfigured(profile) {
     || Boolean(profile.notes);
 }
 
-function statusForFoundPaths(foundPaths, expectedPaths) {
-  if (!expectedPaths.length) {
-    return foundPaths.map((path) => ({ status: "Needs review", path }));
-  }
-  return foundPaths.map((path) => ({
-    status: pathMatchesAny(path, expectedPaths) ? "Expected" : "Unexpected",
+function statusForObservedExpectations(foundPaths, expectedPaths, reliable) {
+  const observed = foundPaths.map((path) => ({
+    status: pathMatchesAny(path, expectedPaths) ? "User approved" : reliable && expectedPaths.length ? "Changed" : "Observed",
     path,
   }));
-}
-
-function statusForMissingExpected(expectedPaths, foundPaths) {
-  return expectedPaths
+  const missing = expectedPaths
     .filter((expected) => !foundPaths.some((path) => pathMatchesExpected(path, expected)))
-    .map((path) => ({ status: "Missing expected", path }));
+    .map((path) => ({
+      status: reliable ? "Changed" : "User approved",
+      path: reliable
+        ? `${path} (approved but not observed)`
+        : `${path} (current reliable observation unavailable)`,
+    }));
+  return [...observed, ...missing];
 }
 
-function statusForProfilePaths(profilePaths, scanPaths, recordedCount = scanPaths.length) {
-  if (!scanPaths.length && recordedCount > 0) {
+function lifecycleExpectationStates(scripts, approvedScripts, reliable) {
+  const observedNames = scripts.map((script) => script.script).filter(Boolean);
+  const observed = scripts.map((script) => ({
+    status: approvedScripts.includes(script.script)
+      ? "User approved"
+      : reliable && approvedScripts.length
+        ? "Changed"
+        : "Observed",
+    path: `${script.path || "Unknown path"}: ${script.script || "unknown script"}`,
+  }));
+  const missing = approvedScripts
+    .filter((approved) => !observedNames.includes(approved))
+    .map((approved) => ({
+      status: reliable ? "Changed" : "User approved",
+      path: reliable
+        ? `${approved} (approved but not observed)`
+        : `${approved} (current reliable observation unavailable)`,
+    }));
+  return [...observed, ...missing];
+}
+
+function statusForProfilePaths(profilePaths, scanPaths, recordedCount = scanPaths.length, reliable = false) {
+  if (!reliable || (!scanPaths.length && recordedCount > 0)) {
     return profilePaths.map((path) => ({
-      status: "Needs review",
-      path: `${path} (path list unavailable for this older scan)`,
+      status: "User approved",
+      path: `${path} (current reliable observation unavailable)`,
     }));
   }
   return profilePaths.map((path) => ({
-    status: scanPaths.some((scanPath) => pathMatchesExpected(scanPath, path)) ? "Expected" : "Missing expected",
+    status: scanPaths.some((scanPath) => pathMatchesExpected(scanPath, path)) ? "User approved" : "Changed",
     path,
   }));
 }

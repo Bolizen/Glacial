@@ -611,6 +611,10 @@ test("root layout reserves stable vertical scrollbar space", () => {
   assert.match(toastRule, /top:\s*var\(--toast-top, 112px\)/);
   assert.match(toastRule, /width:\s*min\(28rem, calc\(100vw - 376px\)\)/);
   assert.match(styles, /\.guided-review-steps\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fit, minmax\(min\(100%, 180px\), 1fr\)\)/s);
+  assert.match(styles, /\.project-expectations-panel\s*\{[^}]*max-width:\s*1180px;[^}]*width:\s*100%;/s);
+  assert.match(styles, /\.expectation-field\s*\{[^}]*min-width:\s*0;/s);
+  assert.match(styles, /\.expectation-approved-item code,[\s\S]*?\.expectation-suggestion code\s*\{[^}]*overflow-wrap:\s*anywhere;[^}]*white-space:\s*normal;/s);
+  assert.match(styles, /@media \(max-width: 780px\)[\s\S]*?\.expectation-columns,[\s\S]*?\.approved-dependency-separation,[\s\S]*?\.expectation-review-context\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/);
   assert.match(styles, /@media \(max-width: 780px\)[\s\S]*?\.notice-stack\s*\{[^}]*left:\s*14px;[^}]*right:\s*14px;[^}]*width:\s*auto;/);
 });
 
@@ -683,7 +687,7 @@ test("complete Node and Python dependency analysis renders compact offline trust
   assert.match(panel.textContent, /Node and Python|node, python/i);
   assert.match(panel.textContent, /alpha/);
   assert.match(panel.textContent, /requests/);
-  assert.match(panel.textContent, /npm \(expected\)/);
+  assert.match(panel.textContent, /npm \(user approved\)/);
   assert.match(panel.textContent, /Offline-only/);
   assert.ok(panel.querySelectorAll(".dependency-entry").length <= 50);
 });
@@ -1298,7 +1302,7 @@ test("project metadata and unregister lifecycle update the real UI flow", async 
   assert.doesNotMatch(document.querySelector(".projects-table").textContent, /Project A/);
 });
 
-test("same-project AGENTS previews and trust saves keep the newest response", async () => {
+test("same-project AGENTS previews and Project Expectations saves keep the newest response", async () => {
   await renderReadyProjectA();
   await openSettings();
   const purpose = document.querySelector('textarea[placeholder="Project purpose"]');
@@ -1313,17 +1317,138 @@ test("same-project AGENTS previews and trust saves keep the newest response", as
   assert.match(document.body.textContent, /New preview/);
   assert.doesNotMatch(document.body.textContent, /Obsolete preview/);
 
-  await click(document.querySelector('a[href="#trust-profiles"]'));
-  const trustNotes = document.querySelector('.trust-profile-form textarea[placeholder="Local review notes for this project"]');
-  await input(trustNotes, "First trust save");
-  await click(buttonWithText("Save Trust Profile"));
+  await click(document.querySelector('a[href="#project-expectations"]'));
+  const trustNotes = document.querySelector('.expectation-review-context textarea[placeholder="Optional local review notes"]');
+  await input(trustNotes, "First expectation save");
+  await click(buttonWithText("Save review context"));
   const firstSave = await fetchHarness.next("/api/trust-profile", { method: "PUT" });
-  await input(trustNotes, "Second trust save");
-  await click(buttonWithText("Save Trust Profile"));
+  await input(trustNotes, "Second expectation save");
+  await click(buttonWithText("Save review context"));
   const secondSave = await fetchHarness.next("/api/trust-profile", { method: "PUT" });
-  await respond(secondSave, { project_path: PROJECT_A_PATH, notes: "Second trust save" });
-  await respond(firstSave, { project_path: PROJECT_A_PATH, notes: "First trust save" });
-  assert.equal(trustNotes.value, "Second trust save");
+  await respond(secondSave, { project_path: PROJECT_A_PATH, notes: "Second expectation save" });
+  await respond(firstSave, { project_path: PROJECT_A_PATH, notes: "First expectation save" });
+  assert.equal(trustNotes.value, "Second expectation save");
+});
+
+test("Project Expectations keeps scan observations inert and supports deliberate per-field decisions", async () => {
+  const finding = reviewableFinding("9");
+  const current = {
+    ...scanWithFindings(90, [finding]),
+    manifests: ["package.json"],
+    lockfiles: ["package-lock.json"],
+    lifecycleScripts: [{ path: "package.json", script: "postinstall" }],
+    reviewedFiles: ["src/main.js"],
+    ignoredFiles: [],
+    dependencyTrust: dependencyTrustFixture({
+      trustedBaseline: configuredTrustedBaseline("identical"),
+    }),
+  };
+  const legacyProfile = {
+    project_path: PROJECT_A_PATH,
+    expectedManifestFiles: ["legacy.json"],
+    riskTolerance: "normal",
+  };
+  await renderApp();
+  await resolveDetails(await takeDetailRequests(PROJECT_A_PATH), {
+    scans: [current],
+    trustProfile: legacyProfile,
+  });
+
+  await click(document.querySelector('a[href="#project-expectations"]'));
+  const panel = document.querySelector(".project-expectations-panel");
+  assert.ok(panel);
+  assert.match(panel.textContent, /Observations and suggestions are not approvals/);
+  assert.match(panel.textContent, /never suppresses findings/);
+  assert.doesNotMatch(panel.textContent, /approve all|trust all/i);
+
+  let packageManagers = expectationCard("Package managers");
+  assert.match(packageManagers.textContent, /Suggested/);
+  assert.match(packageManagers.textContent, /npm/);
+  assert.match(packageManagers.textContent, /pip/);
+
+  const manifests = expectationCard("Dependency manifests");
+  assert.match(manifests.textContent, /Changed/);
+  assert.match(manifests.textContent, /Legacy approved/);
+  assert.match(manifests.textContent, /Nothing was overwritten/);
+  await click([...manifests.querySelectorAll("button")].find((button) => button.textContent.includes("Retain approved")));
+  assert.match(panel.textContent, /Approved values retained/);
+
+  const npmSuggestion = [...packageManagers.querySelectorAll(".expectation-suggestion")]
+    .find((item) => item.textContent.includes("npm"));
+  await click([...npmSuggestion.querySelectorAll("button")].find((button) => button.textContent === "Accept"));
+  const acceptRequest = await fetchHarness.next("/api/trust-profile", { method: "PUT" });
+  assert.deepEqual(acceptRequest.body.trustedPackageManagers, ["npm"]);
+  assert.deepEqual(acceptRequest.body.expectationProvenance.trustedPackageManagers, {
+    npm: "accepted-suggestion",
+  });
+  await respond(acceptRequest, acceptRequest.body);
+
+  packageManagers = expectationCard("Package managers");
+  const pipSuggestion = [...packageManagers.querySelectorAll(".expectation-suggestion")]
+    .find((item) => item.textContent.includes("pip"));
+  await click([...pipSuggestion.querySelectorAll("button")].find((button) => button.textContent === "Dismiss"));
+  const dismissRequest = await fetchHarness.next("/api/trust-profile", { method: "PUT" });
+  assert.deepEqual(dismissRequest.body.dismissedSuggestions.trustedPackageManagers, ["pip"]);
+  await respond(dismissRequest, dismissRequest.body);
+  assert.match(expectationCard("Package managers").textContent, /1 suggestion dismissed/);
+
+  let ecosystems = expectationCard("Ecosystems");
+  await click([...ecosystems.querySelectorAll("button")].find((button) => button.textContent.includes("Edit manually")));
+  ecosystems = expectationCard("Ecosystems");
+  await input(ecosystems.querySelector("textarea"), "node\nrust");
+  await click([...ecosystems.querySelectorAll("button")].find((button) => button.textContent === "Save field"));
+  const manualRequest = await fetchHarness.next("/api/trust-profile", { method: "PUT" });
+  assert.deepEqual(manualRequest.body.expectedEcosystems, ["node", "rust"]);
+  assert.deepEqual(manualRequest.body.expectationProvenance.expectedEcosystems, {
+    node: "manual",
+    rust: "manual",
+  });
+  await respond(manualRequest, manualRequest.body);
+
+  ecosystems = expectationCard("Ecosystems");
+  const rustItem = [...ecosystems.querySelectorAll(".expectation-approved-item")]
+    .find((item) => item.textContent.includes("rust"));
+  await click([...rustItem.querySelectorAll("button")].find((button) => button.textContent === "Remove"));
+  const removeRequest = await fetchHarness.next("/api/trust-profile", { method: "PUT" });
+  assert.deepEqual(removeRequest.body.expectedEcosystems, ["node"]);
+  await respond(removeRequest, removeRequest.body);
+  assert.match(expectationCard("Ecosystems").textContent, /python/);
+
+  assert.match(panel.textContent, /Approved dependency snapshot/);
+  assert.match(panel.textContent, /Separate approval configured/);
+  assert.match(panel.textContent, /Risk tolerance is a personal review note only/);
+
+  await openReports();
+  assert.match(findingCard("tests/eval_fixture.py").textContent, /Unreviewed/);
+  assert.match(document.body.textContent, /1 unresolved finding still needs a review state/);
+  assert.match(document.body.textContent, /Project Expectations Context/);
+});
+
+test("Project Expectations fails conservatively for malformed legacy data and incomplete coverage", async () => {
+  const incomplete = {
+    ...withCompleteness(scan(91, "low", "2026-07-12T12:00:00Z"), { complete: false, fileInspectionFailureCount: 1 }),
+    manifests: ["package.json"],
+    dependencyTrust: dependencyTrustFixture({ status: "malformed" }),
+  };
+  await renderApp();
+  await resolveDetails(await takeDetailRequests(PROJECT_A_PATH), {
+    scans: [incomplete],
+    trustProfile: {
+      project_path: PROJECT_A_PATH,
+      trustedPackageManagers: "npm",
+      expectationProvenance: ["invalid"],
+      dismissedSuggestions: "invalid",
+      riskTolerance: "unknown",
+    },
+  });
+
+  await click(document.querySelector('a[href="#project-expectations"]'));
+  const manifests = expectationCard("Dependency manifests");
+  assert.match(manifests.textContent, /Observed/);
+  assert.match(manifests.textContent, /coverage is incomplete/);
+  assert.equal(manifests.querySelectorAll(".expectation-suggestion").length, 0);
+  assert.match(expectationCard("Package managers").textContent, /coverage is incomplete/i);
+  assert.match(document.querySelector(".expectation-review-context select").value, /normal/);
 });
 
 test("finding review and reopen update the real scan, history, and Markdown workflow", async () => {
@@ -1924,6 +2049,13 @@ function findingCard(path) {
   const card = [...document.querySelectorAll(".finding")]
     .find((item) => item.querySelector(".finding-heading > code")?.textContent === path);
   assert.ok(card, `Expected finding card for ${path}`);
+  return card;
+}
+
+function expectationCard(title) {
+  const card = [...document.querySelectorAll(".expectation-field")]
+    .find((item) => item.querySelector("h3")?.textContent === title);
+  assert.ok(card, `Expected ${title} expectation card`);
   return card;
 }
 

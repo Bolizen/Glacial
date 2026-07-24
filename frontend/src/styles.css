@@ -426,41 +426,303 @@ pre {
   margin-bottom: 0;
 }
 
-.trust-profile-form {
+.project-expectations-panel {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 12px;
+  gap: var(--space-5);
+  margin-inline: auto;
+  max-width: 1180px;
+  width: 100%;
 }
 
-.trust-profile-form label {
-  color: #415158;
-  display: grid;
-  gap: 5px;
-  font-size: 0.86rem;
-  font-weight: 700;
+.project-expectations-heading {
+  align-items: flex-start;
 }
 
-.trust-profile-form textarea,
-.trust-profile-form select {
-  font-weight: 400;
-}
-
-.trust-profile-form label:last-of-type,
-.trust-profile-actions {
-  grid-column: 1 / -1;
-}
-
-.trust-profile-actions {
-  align-items: center;
+.expectation-legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: var(--space-2);
+  justify-content: flex-end;
+  max-width: 430px;
 }
 
-.trust-profile-actions span {
-  color: #627279;
+.expectation-state {
+  align-items: center;
+  background: var(--color-surface-inset);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  display: inline-flex;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1.2;
+  padding: 4px 7px;
+  white-space: nowrap;
+}
+
+.expectation-state-observed {
+  border-color: rgba(106, 174, 191, 0.36);
+  color: var(--color-accent);
+}
+
+.expectation-state-suggested {
+  border-color: rgba(141, 156, 226, 0.4);
+  color: #aab5f2;
+}
+
+.expectation-state-approved {
+  background: var(--color-success-soft);
+  border-color: rgba(114, 199, 125, 0.34);
+  color: var(--color-success);
+}
+
+.expectation-state-changed {
+  background: var(--color-warning-soft);
+  border-color: rgba(230, 179, 90, 0.36);
+  color: var(--color-warning);
+}
+
+.expectations-safety-note {
+  background: var(--color-surface-inset);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-accent);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+}
+
+.expectations-safety-note p,
+.expectation-field-heading p,
+.expectation-suggestions p,
+.expectation-reliability,
+.expectation-changed-note p,
+.approved-dependency-separation p,
+.expectation-review-context p,
+.expectation-dismissed-count {
+  color: var(--color-text-secondary);
   font-size: 0.86rem;
+  line-height: 1.5;
+  margin: var(--space-1) 0 0;
+}
+
+.expectation-field-list {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.expectation-field {
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-4);
+}
+
+.expectation-field-changed {
+  border-left: 3px solid var(--color-warning);
+}
+
+.expectation-field-heading {
+  align-items: flex-start;
+  display: flex;
+  gap: var(--space-3);
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.expectation-field-heading > div {
+  min-width: 0;
+}
+
+.expectation-field-heading h3,
+.approved-dependency-separation h3,
+.expectation-review-context h3 {
+  font-size: 1rem;
+  margin: 0;
+}
+
+.expectation-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.expectation-value-group {
+  background: var(--color-surface-inset);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-3);
+}
+
+.expectation-value-group > strong,
+.expectation-suggestions > strong {
+  color: var(--color-text-secondary);
+  font-size: 0.76rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.expectation-value-group > p {
+  color: var(--color-text-muted);
+  font-size: 0.84rem;
+  margin: 0;
+}
+
+.expectation-value-group > div,
+.expectation-suggestions {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.expectation-approved-item,
+.expectation-observed-item,
+.expectation-suggestion {
+  align-items: center;
+  display: flex;
+  gap: var(--space-2);
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.expectation-approved-item > div,
+.expectation-observed-item {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.expectation-approved-item code,
+.expectation-observed-item code,
+.expectation-suggestion code {
+  color: var(--color-text-primary);
+  font-size: 0.84rem;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.expectation-approved-item span,
+.expectation-observed-item span {
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+}
+
+.text-button {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  color: var(--color-text-secondary);
+  font-size: 0.78rem;
+  min-height: 30px;
+  padding: 3px 6px;
+}
+
+.destructive-text-button {
+  color: var(--color-danger);
+}
+
+.expectation-suggestions {
+  background: rgba(141, 156, 226, 0.07);
+  border: 1px solid rgba(141, 156, 226, 0.2);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+}
+
+.expectation-suggestion > div {
+  display: flex;
+  flex-shrink: 0;
+  gap: var(--space-2);
+}
+
+.expectation-suggestion button {
+  min-height: 34px;
+  padding: 6px 10px;
+}
+
+.expectation-changed-note {
+  align-items: center;
+  background: var(--color-warning-soft);
+  border-radius: var(--radius-sm);
+  display: flex;
+  gap: var(--space-3);
+  justify-content: space-between;
+  padding: var(--space-3);
+}
+
+.expectation-changed-note p {
+  margin: 0;
+}
+
+.expectation-editor {
+  background: var(--color-surface-inset);
+  border-radius: var(--radius-sm);
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3);
+}
+
+.expectation-editor label,
+.expectation-review-context label {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.expectation-dismissed-count {
+  margin: 0;
+}
+
+.approved-dependency-separation {
+  align-items: start;
+  background: var(--color-surface-inset);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  display: grid;
+  gap: var(--space-5);
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  padding: var(--space-4);
+}
+
+.approved-dependency-separation > div {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.approved-dependency-separation span {
+  color: var(--color-text-secondary);
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
+.approved-dependency-separation button {
+  justify-self: start;
+}
+
+.expectation-review-context {
+  align-items: end;
+  border-top: 1px solid var(--color-border);
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: minmax(220px, 1fr) minmax(140px, 180px) minmax(240px, 1fr) max-content;
+  padding-top: var(--space-4);
+}
+
+.expectation-review-context > div {
+  align-self: center;
+}
+
+.expectation-review-context button {
+  min-height: 42px;
+}
+
+.expectation-save-message {
+  color: var(--color-text-secondary);
+  font-size: 0.86rem;
+  margin: 0;
 }
 
 .risk {
@@ -2891,6 +3153,7 @@ label,
 .scan-header-coverage.complete,
 .dependency-status-complete .dependency-status,
 .trust-status.expected,
+.trust-status.user-approved,
 .finding-review-status.reviewed {
   background: var(--color-success-soft);
   border-color: rgba(114, 199, 125, 0.34);
@@ -2901,6 +3164,7 @@ label,
 .dependency-status-incomplete .dependency-status,
 .dependency-status-malformed .dependency-status,
 .trust-status.unexpected,
+.trust-status.changed,
 .trust-status.needs-review {
   background: var(--color-warning-soft);
   border-color: rgba(230, 179, 90, 0.36);
@@ -2908,6 +3172,7 @@ label,
 }
 
 .trust-status.missing-expected,
+.trust-status.observed,
 .finding-review-status.unreviewed {
   background: var(--color-surface-inset);
   border-color: var(--color-border);
@@ -3437,6 +3702,19 @@ label,
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .expectation-review-context {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .expectation-review-context > div,
+  .expectation-review-context .expectation-notes-field {
+    grid-column: 1 / -1;
+  }
+
+  .expectation-review-context button {
+    justify-self: start;
+  }
+
   .guided-review-steps {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -3581,6 +3859,43 @@ label,
 
   .finding-workbench-filters {
     grid-template-columns: 1fr;
+  }
+
+  .project-expectations-heading,
+  .expectation-field-heading,
+  .expectation-changed-note {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .expectation-legend {
+    justify-content: flex-start;
+    max-width: none;
+  }
+
+  .expectation-columns,
+  .approved-dependency-separation,
+  .expectation-review-context {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .expectation-review-context > div,
+  .expectation-review-context .expectation-notes-field {
+    grid-column: 1;
+  }
+
+  .expectation-suggestion {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .expectation-suggestion > div {
+    flex-wrap: wrap;
+  }
+
+  .expectation-field > .compact-action,
+  .expectation-changed-note .compact-action {
+    justify-self: start;
   }
 
   .finding-workbench-progress,

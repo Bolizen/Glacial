@@ -18,7 +18,7 @@
     "release:windows:plan": "node ../scripts/desktop/Build-SignedWindowsRelease.mjs --dry-run",
     "release:windows:signed": "node ../scripts/desktop/Build-SignedWindowsRelease.mjs",
     "test:release-signing": "node --test ../scripts/desktop/windows-signing.test.mjs",
-    "test": "node --test src/apiConfig.test.js src/apiTransport.test.js src/projectRequests.test.js src/reportMarkdown.test.js src/sessionState.test.js src/dependencyTrust.test.js src/findingReviews.test.js src/findingWorkbench.test.js src/guidedReview.test.js src/trustedDependencyBaseline.test.js src/App.integration.test.js ../scripts/desktop/windows-signing.test.mjs",
+    "test": "node --test src/apiConfig.test.js src/apiTransport.test.js src/projectRequests.test.js src/reportMarkdown.test.js src/sessionState.test.js src/dependencyTrust.test.js src/findingReviews.test.js src/findingWorkbench.test.js src/guidedReview.test.js src/projectExpectations.test.js src/trustedDependencyBaseline.test.js src/App.integration.test.js ../scripts/desktop/windows-signing.test.mjs",
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {

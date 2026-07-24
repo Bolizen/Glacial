@@ -49,8 +49,11 @@ class TrustProfileRequest(ProjectPathRequest):
     expectedManifestFiles: list[str] = Field(default_factory=list)
     expectedLockfiles: list[str] = Field(default_factory=list)
     allowedLifecycleScripts: list[str] = Field(default_factory=list)
+    expectedEcosystems: list[str] = Field(default_factory=list)
     reviewedPaths: list[str] = Field(default_factory=list)
     ignoredPaths: list[str] = Field(default_factory=list)
+    expectationProvenance: dict[str, dict[str, str]] = Field(default_factory=dict)
+    dismissedSuggestions: dict[str, list[str]] = Field(default_factory=dict)
     riskTolerance: str = Field(default="normal", max_length=20)
     notes: str = Field(default="", max_length=4000)
 

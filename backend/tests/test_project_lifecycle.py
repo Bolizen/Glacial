@@ -12,7 +12,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from app import database, main, safety
-from app.schemas import ProjectMetadataUpdate, ProjectPathRequest, ProjectRootUpdate
+from app.schemas import ProjectMetadataUpdate, ProjectPathRequest, ProjectRootUpdate, TrustProfileRequest
 
 
 class ProjectLifecycleTests(unittest.TestCase):
@@ -151,6 +151,101 @@ class ProjectLifecycleTests(unittest.TestCase):
         self.assertEqual(listed["scan_state"], "not_scanned")
         main.unregister_project(ProjectPathRequest(project_path=str(self.project)))
         self.assertEqual(main.list_projects()["projects"], [])
+
+    def test_legacy_trust_profile_loads_as_backward_compatible_project_expectations(self) -> None:
+        legacy = {
+            "trustedPackageManagers": ["npm"],
+            "expectedManifestFiles": ["package.json"],
+            "reviewedPaths": ["src/"],
+            "riskTolerance": "cautious",
+            "notes": "Reviewed locally.",
+        }
+        with database.get_connection() as connection:
+            connection.execute(
+                "INSERT INTO project_trust_profiles (project_path, profile_json, updated_at) VALUES (?, ?, 'now')",
+                (str(self.project), json.dumps(legacy)),
+            )
+
+        profile = main.get_trust_profile(str(self.project))
+
+        self.assertEqual(profile["trustedPackageManagers"], ["npm"])
+        self.assertEqual(profile["expectedManifestFiles"], ["package.json"])
+        self.assertEqual(profile["reviewedPaths"], ["src/"])
+        self.assertEqual(profile["expectedEcosystems"], [])
+        self.assertEqual(profile["expectationProvenance"], {})
+        self.assertEqual(profile["dismissedSuggestions"], {})
+        self.assertEqual(profile["riskTolerance"], "cautious")
+        self.assertEqual(profile["updated_at"], "now")
+
+    def test_project_expectation_provenance_and_dismissals_round_trip_fail_closed(self) -> None:
+        updated = main.update_trust_profile(TrustProfileRequest(
+            project_path=str(self.project),
+            trustedPackageManagers=["npm", "npm"],
+            expectedEcosystems=["node"],
+            expectationProvenance={
+                "trustedPackageManagers": {
+                    "npm": "accepted-suggestion",
+                    "ghost": "manual",
+                },
+                "expectedEcosystems": {"node": "untrusted-source"},
+                "unknownField": {"value": "manual"},
+            },
+            dismissedSuggestions={
+                "trustedPackageManagers": ["npm", "pip", "pip"],
+                "expectedLockfiles": ["package-lock.json"],
+                "unknownField": ["ignored"],
+            },
+            riskTolerance="INVALID",
+        ))
+
+        self.assertEqual(updated["trustedPackageManagers"], ["npm"])
+        self.assertEqual(updated["expectedEcosystems"], ["node"])
+        self.assertEqual(updated["expectationProvenance"], {
+            "trustedPackageManagers": {"npm": "accepted-suggestion"},
+        })
+        self.assertEqual(updated["dismissedSuggestions"], {
+            "trustedPackageManagers": ["pip"],
+            "expectedLockfiles": ["package-lock.json"],
+        })
+        self.assertEqual(updated["riskTolerance"], "normal")
+        self.assertEqual(main.get_trust_profile(str(self.project)), updated)
+
+        with database.get_connection() as connection:
+            stored = json.loads(connection.execute(
+                "SELECT profile_json FROM project_trust_profiles WHERE project_path = ?",
+                (str(self.project),),
+            ).fetchone()["profile_json"])
+        self.assertNotIn("project_path", stored)
+        self.assertNotIn("updated_at", stored)
+        self.assertEqual(stored["expectedEcosystems"], ["node"])
+
+    def test_malformed_stored_project_expectations_return_conservative_defaults(self) -> None:
+        with database.get_connection() as connection:
+            connection.execute(
+                "INSERT INTO project_trust_profiles (project_path, profile_json, updated_at) VALUES (?, '[]', 'now')",
+                (str(self.project),),
+            )
+
+        profile = main.get_trust_profile(str(self.project))
+
+        self.assertEqual(profile["trustedPackageManagers"], [])
+        self.assertEqual(profile["expectationProvenance"], {})
+        self.assertEqual(profile["dismissedSuggestions"], {})
+        self.assertEqual(profile["riskTolerance"], "normal")
+
+        with database.get_connection() as connection:
+            connection.execute(
+                "UPDATE project_trust_profiles SET profile_json = ? WHERE project_path = ?",
+                (json.dumps({
+                    "trustedPackageManagers": [None, {"name": "npm"}, "pip"],
+                    "riskTolerance": {"value": "permissive"},
+                    "notes": ["not", "text"],
+                }), str(self.project)),
+            )
+        partially_malformed = main.get_trust_profile(str(self.project))
+        self.assertEqual(partially_malformed["trustedPackageManagers"], ["pip"])
+        self.assertEqual(partially_malformed["riskTolerance"], "normal")
+        self.assertEqual(partially_malformed["notes"], "")
 
 
 if __name__ == "__main__":

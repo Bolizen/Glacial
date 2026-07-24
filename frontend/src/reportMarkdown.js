@@ -226,7 +226,7 @@ export function buildScanReportMarkdown(result, report, comparison, trustContext
     "",
     formatZone(report?.zone, completeness),
     "",
-    "## Trust Profile Context",
+    "## Project Expectations Context",
     formatMarkdownTrustContext(trustContext),
     "",
     "## Comparison with previous scan",
@@ -610,15 +610,25 @@ function formatMarkdownComparison(comparison) {
 
 function formatMarkdownTrustContext(context) {
   if (!context?.configured) {
-    return "No trust profile configured. Trust profile context is optional and does not hide scanner findings.";
+    return "No Project Expectations are approved. Observations and suggestions do not hide scanner findings.";
   }
 
   const lines = [];
   if (context.packageManagers?.length) {
     const packageManagers = context.packageManagers.map(escapeMarkdownText).filter(Boolean);
-    if (packageManagers.length) lines.push(`- Package managers: ${packageManagers.join(", ")}`);
+    if (packageManagers.length) lines.push(`- Approved package managers: ${packageManagers.join(", ")}`);
   }
-  appendOptionalListItem(lines, "Risk tolerance", escapeMarkdownText(context.riskTolerance));
+  if (context.ecosystems?.length) {
+    const ecosystems = context.ecosystems.map(escapeMarkdownText).filter(Boolean);
+    if (ecosystems.length) lines.push(`- Approved ecosystems: ${ecosystems.join(", ")}`);
+  }
+  appendOptionalListItem(
+    lines,
+    "Risk tolerance (review context only)",
+    `${escapeMarkdownText(context.riskTolerance)}; scanner findings, raw risk, dependency approval, and review completion are unchanged`,
+  );
+  appendTrustContextLines(lines, "Package-manager observations", context.packageManagerStates);
+  appendTrustContextLines(lines, "Ecosystem observations", context.ecosystemStates);
   appendTrustContextLines(lines, "Manifests", context.manifests);
   appendTrustContextLines(lines, "Lockfiles", context.lockfiles);
   appendTrustContextLines(lines, "Lifecycle scripts", context.lifecycleScripts);

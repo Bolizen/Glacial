@@ -39,9 +39,12 @@ TRUST_PROFILE_FIELDS = (
     "expectedManifestFiles",
     "expectedLockfiles",
     "allowedLifecycleScripts",
+    "expectedEcosystems",
     "reviewedPaths",
     "ignoredPaths",
 )
+EXPECTATION_PROVENANCE_TYPES = {"accepted-suggestion", "manual"}
+MAX_DISMISSED_SUGGESTIONS_PER_FIELD = 200
 RISK_TOLERANCES = {"cautious", "normal", "permissive"}
 
 app.add_middleware(
@@ -555,6 +558,8 @@ def get_trust_profile(project_path: str = Query(min_length=1, max_length=1000)) 
         stored = json.loads(row["profile_json"])
     except (TypeError, json.JSONDecodeError):
         stored = {}
+    if not isinstance(stored, dict):
+        stored = {}
     profile.update(_normalize_trust_profile(stored, str(project)))
     profile["updated_at"] = row["updated_at"]
     return profile
@@ -727,8 +732,11 @@ def _empty_trust_profile(project_path: str) -> dict[str, object]:
         "expectedManifestFiles": [],
         "expectedLockfiles": [],
         "allowedLifecycleScripts": [],
+        "expectedEcosystems": [],
         "reviewedPaths": [],
         "ignoredPaths": [],
+        "expectationProvenance": {},
+        "dismissedSuggestions": {},
         "riskTolerance": "normal",
         "notes": "",
         "updated_at": None,
@@ -739,9 +747,19 @@ def _normalize_trust_profile(data: dict[str, object], project_path: str) -> dict
     profile = _empty_trust_profile(project_path)
     for field in TRUST_PROFILE_FIELDS:
         profile[field] = _normalize_string_list(data.get(field))
-    risk_tolerance = str(data.get("riskTolerance") or "normal").strip().lower()
+    profile["expectationProvenance"] = _normalize_expectation_provenance(
+        data.get("expectationProvenance"),
+        profile,
+    )
+    profile["dismissedSuggestions"] = _normalize_dismissed_suggestions(
+        data.get("dismissedSuggestions"),
+        profile,
+    )
+    risk_value = data.get("riskTolerance")
+    risk_tolerance = risk_value.strip().lower() if isinstance(risk_value, str) else "normal"
     profile["riskTolerance"] = risk_tolerance if risk_tolerance in RISK_TOLERANCES else "normal"
-    profile["notes"] = str(data.get("notes") or "").strip()[:4000]
+    notes = data.get("notes")
+    profile["notes"] = notes.strip()[:4000] if isinstance(notes, str) else ""
     return profile
 
 
@@ -757,7 +775,9 @@ def _normalize_string_list(value: object) -> list[str]:
     normalized: list[str] = []
     seen: set[str] = set()
     for item in value:
-        text = str(item).strip()
+        if not isinstance(item, str):
+            continue
+        text = item.strip()
         if not text or text in seen:
             continue
         normalized.append(text)
@@ -765,8 +785,58 @@ def _normalize_string_list(value: object) -> list[str]:
     return normalized
 
 
+def _normalize_expectation_provenance(
+    value: object,
+    profile: dict[str, object],
+) -> dict[str, dict[str, str]]:
+    if not isinstance(value, dict):
+        return {}
+    normalized: dict[str, dict[str, str]] = {}
+    for field in TRUST_PROFILE_FIELDS:
+        field_value = value.get(field)
+        if not isinstance(field_value, dict):
+            continue
+        approved = set(profile[field])
+        entries: dict[str, str] = {}
+        for item, source in field_value.items():
+            text = str(item).strip()
+            source_text = str(source).strip().lower()
+            if text in approved and source_text in EXPECTATION_PROVENANCE_TYPES:
+                entries[text] = source_text
+        if entries:
+            normalized[field] = entries
+    return normalized
+
+
+def _normalize_dismissed_suggestions(
+    value: object,
+    profile: dict[str, object],
+) -> dict[str, list[str]]:
+    if not isinstance(value, dict):
+        return {}
+    normalized: dict[str, list[str]] = {}
+    for field in TRUST_PROFILE_FIELDS:
+        dismissed = [
+            item
+            for item in _normalize_string_list(value.get(field))
+            if item not in profile[field]
+        ][:MAX_DISMISSED_SUGGESTIONS_PER_FIELD]
+        if dismissed:
+            normalized[field] = dismissed
+    return normalized
+
+
 def _profile_for_storage(profile: dict[str, object]) -> dict[str, object]:
-    return {key: profile[key] for key in (*TRUST_PROFILE_FIELDS, "riskTolerance", "notes")}
+    return {
+        key: profile[key]
+        for key in (
+            *TRUST_PROFILE_FIELDS,
+            "expectationProvenance",
+            "dismissedSuggestions",
+            "riskTolerance",
+            "notes",
+        )
+    }
 
 
 def _scan_metadata(result: dict[str, object]) -> dict[str, object]:
