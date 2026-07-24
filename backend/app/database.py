@@ -110,6 +110,20 @@ def init_db() -> None:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS project_activity_events (
+                event_id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                occurred_at TEXT NOT NULL,
+                related_scan_id INTEGER,
+                details_json TEXT NOT NULL DEFAULT '{}',
+                dedupe_key TEXT,
+                UNIQUE (project_id, dedupe_key)
+            );
+
+            CREATE INDEX IF NOT EXISTS project_activity_events_project_time
+            ON project_activity_events (project_id, occurred_at DESC, event_id DESC);
             """
         )
         connection.execute(

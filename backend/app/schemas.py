@@ -44,6 +44,24 @@ class NoteCreate(ProjectPathRequest):
     body: str = Field(min_length=1, max_length=4000)
 
 
+class TrustProfileActivityContext(BaseModel):
+    type: Literal["observed_drift_adopted"]
+    category: Literal[
+        "trustedPackageManagers",
+        "expectedManifestFiles",
+        "expectedLockfiles",
+        "allowedLifecycleScripts",
+        "expectedEcosystems",
+        "reviewedPaths",
+        "ignoredPaths",
+    ]
+    adopted_value: str = Field(min_length=1, max_length=1000)
+    replaced_value: str = Field(default="", max_length=1000)
+
+    class Config:
+        extra = "forbid"
+
+
 class TrustProfileRequest(ProjectPathRequest):
     trustedPackageManagers: list[str] = Field(default_factory=list)
     expectedManifestFiles: list[str] = Field(default_factory=list)
@@ -56,12 +74,14 @@ class TrustProfileRequest(ProjectPathRequest):
     dismissedSuggestions: dict[str, list[str]] = Field(default_factory=dict)
     riskTolerance: str = Field(default="normal", max_length=20)
     notes: str = Field(default="", max_length=4000)
+    activity_context: TrustProfileActivityContext | None = None
 
 
 class FindingReviewRequest(ProjectPathRequest):
     fingerprint: str = Field(min_length=68, max_length=68)
     status: Literal["reviewed", "expected"]
     note: str = Field(default="", max_length=1000)
+    scan_id: int | None = Field(default=None, gt=0)
 
 
 class FindingReviewDelete(ProjectPathRequest):

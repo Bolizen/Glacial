@@ -2,6 +2,16 @@ from __future__ import annotations
 
 CHANGELOG_ENTRIES = [
     {
+        "version": "0.6.4",
+        "title": "Project activity timeline",
+        "changes": [
+            "Added a compact read-only Activity view that merges project registration and persisted scans with meaningful project events.",
+            "Added append-only, project-scoped events for material Project Expectations updates, observed drift adoption, first finding-review completion, and dependency approval.",
+            "Added deterministic newest-first pagination with bounded, conservatively rendered event details and scan linkage.",
+            "Avoided events for navigation, previews, dismissals, no-op saves, individual finding decisions, and transient errors.",
+        ],
+    },
+    {
         "version": "0.6.3",
         "title": "Selective project drift adoption",
         "changes": [

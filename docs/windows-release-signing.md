@@ -1,6 +1,6 @@
 # Windows release signing
 
-Glacial v0.6.3 is intended to use an Authenticode certificate with the subject `CN=Icefields Development`. The initial certificate is self-signed and is not publicly trusted. Its signature proves byte integrity and publisher-key continuity only; it does not establish Windows reputation or public trust.
+Glacial v0.6.4 is intended to use an Authenticode certificate with the subject `CN=Icefields Development`. The initial certificate is self-signed and is not publicly trusted. Its signature proves byte integrity and publisher-key continuity only; it does not establish Windows reputation or public trust.
 
 Windows Smart App Control, SmartScreen, or organization-managed Application Control may still block Glacial. Do not disable those controls, add exclusions, restore blocked files, or instruct users to bypass warnings. Treat a block as failed or incomplete acceptance.
 
@@ -210,7 +210,7 @@ npm.cmd --prefix frontend run release:windows:signed
 
 The coordinator performs this order:
 
-1. Verify repository identity, branch, clean status, `HEAD == origin/main`, and v0.6.3 metadata.
+1. Verify repository identity, branch, clean status, `HEAD == origin/main`, and v0.6.4 metadata.
 2. Select one exact CurrentUser certificate or external signer and sign/verify a disposable timestamped PE probe.
 3. Verify build/runtime environments, build the backend once, preserve valid vendor bytes, and sign every unsigned PE.
 4. Stage the signed backend and let Tauri sign Glacial.exe, supported NSIS components, uninstaller, and final installer; the custom signer atomically captures the one verified NSIS-patched Glacial.exe before Tauri restores its working file.

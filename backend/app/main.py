@@ -4,11 +4,22 @@ import hmac
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from .activity import (
+    EVENT_DEPENDENCY_REVIEW_COMPLETED,
+    EVENT_FINDING_REVIEW_COMPLETED,
+    EVENT_OBSERVED_DRIFT_ADOPTED,
+    EVENT_PROJECT_EXPECTATIONS_UPDATED,
+    MAX_ACTIVITY_OFFSET,
+    MAX_ACTIVITY_PAGE_SIZE,
+    activity_page,
+    append_activity_event,
+)
 from .agents import generate_agents_md
 from .agents_write import filesystem_error_status, safe_write_project_file
 from .changelog import CHANGELOG_ENTRIES
@@ -252,6 +263,7 @@ def unregister_project(payload: ProjectPathRequest) -> dict[str, object]:
         connection.execute("DELETE FROM project_trust_profiles WHERE project_path = ?", (path,))
         connection.execute("DELETE FROM finding_reviews WHERE project_path = ?", (path,))
         connection.execute("DELETE FROM trusted_dependency_baselines WHERE project_path = ?", (path,))
+        connection.execute("DELETE FROM project_activity_events WHERE project_id = ?", (path,))
         connection.execute("DELETE FROM projects WHERE path = ?", (path,))
     return {
         "unregistered": True,
@@ -404,6 +416,22 @@ def scan_history(project_path: str = Query(min_length=1, max_length=1000)) -> di
     return {"scans": [enrich_trusted_baseline(enrich_scan(row_to_scan(row), reviews), baseline) for row in rows]}
 
 
+@app.get("/api/activity")
+def project_activity(
+    project_path: str = Query(min_length=1, max_length=1000),
+    limit: Annotated[int, Query(ge=1, le=MAX_ACTIVITY_PAGE_SIZE)] = 20,
+    offset: Annotated[int, Query(ge=0, le=MAX_ACTIVITY_OFFSET)] = 0,
+) -> dict[str, object]:
+    project = _ensure_project(project_path)
+    with get_connection() as connection:
+        return activity_page(
+            connection,
+            project_id=str(project),
+            limit=limit,
+            offset=offset,
+        )
+
+
 @app.get("/api/trusted-dependency-baseline")
 def get_trusted_dependency_baseline(project_path: str = Query(min_length=1, max_length=1000)) -> dict[str, object]:
     project = _ensure_project(project_path)
@@ -432,6 +460,7 @@ def approve_trusted_dependency_baseline(payload: TrustedDependencyBaselineApprov
         str(project), BASELINE_SCHEMA_VERSION, DEPENDENCY_TRUST_SCHEMA_VERSION, fingerprint,
         snapshot_json(snapshot), scan["id"], scan["scan_date"], note, now, now,
     )
+    activity_recorded = False
     with get_connection() as connection:
         connection.execute("BEGIN IMMEDIATE")
         latest = connection.execute(
@@ -441,7 +470,7 @@ def approve_trusted_dependency_baseline(payload: TrustedDependencyBaselineApprov
         if not latest or latest["id"] != scan["id"]:
             raise HTTPException(status_code=409, detail="Only the current latest scan can be approved as a trusted baseline.")
         existing = connection.execute(
-            "SELECT 1 FROM trusted_dependency_baselines WHERE project_path = ?", (str(project),),
+            "SELECT fingerprint FROM trusted_dependency_baselines WHERE project_path = ?", (str(project),),
         ).fetchone()
         if existing and not payload.replace:
             raise HTTPException(status_code=409, detail="A trusted dependency baseline already exists. Confirm replacement to continue.")
@@ -459,10 +488,20 @@ def approve_trusted_dependency_baseline(payload: TrustedDependencyBaselineApprov
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 values,
             )
+        if not existing or existing["fingerprint"] != fingerprint:
+            activity_recorded = append_activity_event(
+                connection,
+                project_id=str(project),
+                event_type=EVENT_DEPENDENCY_REVIEW_COMPLETED,
+                occurred_at=now,
+                related_scan_id=scan["id"],
+                details={"status": "approved"},
+                dedupe_key=f"dependency-review-completed:{fingerprint}",
+            ) is not None
         row = connection.execute(
             "SELECT * FROM trusted_dependency_baselines WHERE project_path = ?", (str(project),),
         ).fetchone()
-    return public_baseline(dict(row))
+    return {**public_baseline(dict(row)), "activity_recorded": activity_recorded}
 
 
 @app.patch("/api/trusted-dependency-baseline")
@@ -499,11 +538,18 @@ def list_finding_reviews(project_path: str = Query(min_length=1, max_length=1000
 def update_finding_review(payload: FindingReviewRequest) -> dict[str, object]:
     project = _ensure_project(payload.project_path)
     fingerprint = _validated_fingerprint(payload.fingerprint)
-    if not _project_has_fingerprint(str(project), fingerprint):
-        raise HTTPException(status_code=404, detail="The exact finding is not present in this project's scan history.")
     note = payload.note.strip()
     now = _now()
+    activity_recorded = False
     with get_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        scan_row = _scan_for_finding_review(
+            connection,
+            str(project),
+            fingerprint,
+            payload.scan_id,
+        )
+        before = _scan_review_completion(connection, str(project), scan_row)
         connection.execute(
             "INSERT INTO finding_reviews (project_path, fingerprint, status, note, created_at, updated_at) "
             "VALUES (?, ?, ?, ?, ?, ?) "
@@ -511,12 +557,26 @@ def update_finding_review(payload: FindingReviewRequest) -> dict[str, object]:
             "status = excluded.status, note = excluded.note, updated_at = excluded.updated_at",
             (str(project), fingerprint, payload.status, note, now, now),
         )
+        after = _scan_review_completion(connection, str(project), scan_row)
+        if not before["complete"] and after["complete"]:
+            activity_recorded = append_activity_event(
+                connection,
+                project_id=str(project),
+                event_type=EVENT_FINDING_REVIEW_COMPLETED,
+                occurred_at=now,
+                related_scan_id=scan_row["id"],
+                details={
+                    "reviewedCount": after["reviewed"],
+                    "totalFindingCount": after["total"],
+                },
+                dedupe_key=f"finding-review-completed:{scan_row['id']}",
+            ) is not None
         row = connection.execute(
             "SELECT fingerprint, status, note, created_at, updated_at FROM finding_reviews "
             "WHERE project_path = ? AND fingerprint = ?",
             (str(project), fingerprint),
         ).fetchone()
-    return {"review": dict(row)}
+    return {"review": dict(row), "activity_recorded": activity_recorded}
 
 
 @app.delete("/api/finding-reviews")
@@ -551,18 +611,9 @@ def get_trust_profile(project_path: str = Query(min_length=1, max_length=1000)) 
             (str(project),),
         ).fetchone()
 
-    profile = _empty_trust_profile(str(project))
-    if not row:
-        return profile
-
-    try:
-        stored = json.loads(row["profile_json"])
-    except (TypeError, json.JSONDecodeError):
-        stored = {}
-    if not isinstance(stored, dict):
-        stored = {}
-    profile.update(_normalize_trust_profile(stored, str(project)))
-    profile["updated_at"] = row["updated_at"]
+    profile = _profile_from_row(row, str(project))
+    if row:
+        profile["updated_at"] = row["updated_at"]
     return profile
 
 
@@ -570,14 +621,87 @@ def get_trust_profile(project_path: str = Query(min_length=1, max_length=1000)) 
 def update_trust_profile(payload: TrustProfileRequest) -> dict[str, object]:
     project = _ensure_project(payload.project_path)
     profile = _normalize_trust_profile(_model_data(payload), str(project))
-    now = _now()
+    activity_recorded = False
     with get_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        existing_row = connection.execute(
+            "SELECT profile_json, updated_at FROM project_trust_profiles WHERE project_path = ?",
+            (str(project),),
+        ).fetchone()
+        previous = _profile_from_row(existing_row, str(project))
+        previous_storage = _profile_for_storage(previous)
+        next_storage = _profile_for_storage(profile)
+        if previous_storage == next_storage:
+            return {
+                **previous,
+                "updated_at": existing_row["updated_at"] if existing_row else None,
+                "activity_recorded": False,
+            }
+
+        now = _now()
         connection.execute(
             "INSERT INTO project_trust_profiles (project_path, profile_json, updated_at) VALUES (?, ?, ?) "
             "ON CONFLICT(project_path) DO UPDATE SET profile_json = excluded.profile_json, updated_at = excluded.updated_at",
-            (str(project), json.dumps(_profile_for_storage(profile), sort_keys=True), now),
+            (str(project), json.dumps(next_storage, sort_keys=True), now),
         )
-    return {**profile, "updated_at": now}
+        changed_categories = [
+            field
+            for field in TRUST_PROFILE_FIELDS
+            if previous[field] != profile[field]
+        ]
+        review_context_changed = (
+            previous["riskTolerance"] != profile["riskTolerance"]
+            or previous["notes"] != profile["notes"]
+        )
+        if changed_categories or review_context_changed:
+            context = payload.activity_context
+            adopted = context.adopted_value.strip() if context else ""
+            replaced = context.replaced_value.strip() if context else ""
+            is_valid_adoption = bool(
+                context
+                and context.category in changed_categories
+                and adopted in profile[context.category]
+                and adopted not in previous[context.category]
+                and _latest_reliable_observation_contains(
+                    connection,
+                    str(project),
+                    context.category,
+                    adopted,
+                )
+                and (
+                    not replaced
+                    or (
+                        replaced in previous[context.category]
+                        and replaced not in profile[context.category]
+                    )
+                )
+            )
+            if is_valid_adoption:
+                details = {
+                    "category": context.category,
+                    "adoptedValue": adopted,
+                }
+                if replaced:
+                    details["replacedValue"] = replaced
+                activity_recorded = append_activity_event(
+                    connection,
+                    project_id=str(project),
+                    event_type=EVENT_OBSERVED_DRIFT_ADOPTED,
+                    occurred_at=now,
+                    details=details,
+                ) is not None
+            else:
+                activity_recorded = append_activity_event(
+                    connection,
+                    project_id=str(project),
+                    event_type=EVENT_PROJECT_EXPECTATIONS_UPDATED,
+                    occurred_at=now,
+                    details={
+                        "changedCategories": changed_categories,
+                        "reviewContextChanged": review_context_changed,
+                    },
+                ) is not None
+    return {**profile, "updated_at": now, "activity_recorded": activity_recorded}
 
 
 @app.post("/api/notes")
@@ -662,30 +786,121 @@ def _validated_fingerprint(value: str) -> str:
     return fingerprint
 
 
-def _project_has_fingerprint(project_path: str, fingerprint: str) -> bool:
-    with get_connection() as connection:
-        rows = connection.execute(
-            "SELECT findings_json FROM scans WHERE project_path = ? ORDER BY scan_date DESC, id DESC",
-            (project_path,),
-        )
+def _scan_for_finding_review(
+    connection: object,
+    project_path: str,
+    fingerprint: str,
+    scan_id: int | None,
+) -> object:
+    if scan_id is not None:
+        row = connection.execute("SELECT * FROM scans WHERE id = ?", (scan_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="The selected scan was not found.")
+        if row["project_path"] != project_path:
+            raise HTTPException(status_code=403, detail="The selected scan belongs to another project.")
+        if fingerprint not in _scan_fingerprints(row):
+            raise HTTPException(status_code=404, detail="The exact finding is not present in the selected scan.")
+        return row
+
+    rows = connection.execute(
+        "SELECT * FROM scans WHERE project_path = ? ORDER BY scan_date DESC, id DESC",
+        (project_path,),
+    )
+    try:
+        for row in rows:
+            if fingerprint in _scan_fingerprints(row):
+                return row
+    finally:
+        rows.close()
+    raise HTTPException(status_code=404, detail="The exact finding is not present in this project's scan history.")
+
+
+def _scan_review_completion(
+    connection: object,
+    project_path: str,
+    scan_row: object,
+) -> dict[str, object]:
+    fingerprints = _scan_fingerprints(scan_row)
+    reviewed_rows = connection.execute(
+        "SELECT fingerprint FROM finding_reviews WHERE project_path = ?",
+        (project_path,),
+    ).fetchall()
+    reviewed_fingerprints = {row["fingerprint"] for row in reviewed_rows}
+    reviewed = sum(
+        1
+        for fingerprint in fingerprints
+        if fingerprint is not None and fingerprint in reviewed_fingerprints
+    )
+    total = len(fingerprints)
+    return {
+        "complete": total > 0 and reviewed == total,
+        "reviewed": reviewed,
+        "total": total,
+    }
+
+
+def _scan_fingerprints(scan_row: object) -> list[str | None]:
+    try:
+        findings = json.loads(scan_row["findings_json"])
+    except (TypeError, json.JSONDecodeError):
+        return []
+    if not isinstance(findings, list):
+        return []
+    fingerprints: list[str | None] = []
+    for finding in findings:
+        if not isinstance(finding, dict):
+            fingerprints.append(None)
+            continue
         try:
-            for row in rows:
-                try:
-                    findings = json.loads(row["findings_json"])
-                except (TypeError, json.JSONDecodeError):
-                    continue
-                if not isinstance(findings, list):
-                    continue
-                for finding in findings:
-                    if isinstance(finding, dict):
-                        try:
-                            if finding_fingerprint(finding) == fingerprint:
-                                return True
-                        except ValueError:
-                            continue
-        finally:
-            rows.close()
-    return False
+            fingerprints.append(finding_fingerprint(finding))
+        except ValueError:
+            fingerprints.append(None)
+    return fingerprints
+
+
+def _latest_reliable_observation_contains(
+    connection: object,
+    project_path: str,
+    category: str,
+    value: str,
+) -> bool:
+    row = connection.execute(
+        "SELECT * FROM scans WHERE project_path = ? ORDER BY scan_date DESC, id DESC LIMIT 1",
+        (project_path,),
+    ).fetchone()
+    if not row:
+        return False
+    scan = row_to_scan(row)
+    completeness = scan.get("scanCompleteness")
+    if (
+        not isinstance(completeness, dict)
+        or completeness.get("complete") is not True
+        or scan.get("scanMetadataReliable") is not True
+    ):
+        return False
+
+    if category in {"trustedPackageManagers", "expectedEcosystems"}:
+        dependency = scan.get("dependencyTrust")
+        if not isinstance(dependency, dict) or dependency.get("status") != "complete":
+            return False
+        key = "packageManagers" if category == "trustedPackageManagers" else "ecosystems"
+        observed = dependency.get(key)
+    elif category == "allowedLifecycleScripts":
+        scripts = scan.get("lifecycleScripts")
+        observed = [
+            item.get("script")
+            for item in scripts
+            if isinstance(item, dict) and isinstance(item.get("script"), str)
+        ] if isinstance(scripts, list) else []
+    else:
+        key = {
+            "expectedManifestFiles": "manifests",
+            "expectedLockfiles": "lockfiles",
+            "reviewedPaths": "reviewedFiles",
+            "ignoredPaths": "ignoredFiles",
+        }.get(category)
+        observed = scan.get(key) if key else []
+    return isinstance(observed, list) and value in observed
 
 
 def _trusted_baseline_row(project_path: str) -> dict[str, object] | None:
@@ -742,6 +957,19 @@ def _empty_trust_profile(project_path: str) -> dict[str, object]:
         "notes": "",
         "updated_at": None,
     }
+
+
+def _profile_from_row(row: object | None, project_path: str) -> dict[str, object]:
+    profile = _empty_trust_profile(project_path)
+    if not row:
+        return profile
+    try:
+        stored = json.loads(row["profile_json"])
+    except (TypeError, json.JSONDecodeError):
+        stored = {}
+    if isinstance(stored, dict):
+        profile.update(_normalize_trust_profile(stored, project_path))
+    return profile
 
 
 def _normalize_trust_profile(data: dict[str, object], project_path: str) -> dict[str, object]:

@@ -42,6 +42,14 @@ test("unknown sections and panels fall back or are ignored", () => {
   assert.equal("unknown" in parsed, false);
 });
 
+test("Activity is a valid durable project section", () => {
+  const parsed = parseSessionState(serializeSessionState({
+    ...VALID_STATE,
+    activeSection: "activity",
+  }));
+  assert.equal(parsed.activeSection, "activity");
+});
+
 test("wrong field types are replaced with safe defaults", () => {
   const parsed = parseSessionState(JSON.stringify({
     version: 1,

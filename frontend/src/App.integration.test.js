@@ -212,6 +212,12 @@ test("selectively adopts one reliable observed drift value after explicit previe
   await click([...preview.querySelectorAll("button")].find((button) => button.textContent === "Confirm adoption"));
   const save = await fetchHarness.next("/api/trust-profile", { method: "PUT" });
   assert.deepEqual(save.body.expectedManifestFiles, ["pyproject.toml"]);
+  assert.deepEqual(save.body.activity_context, {
+    type: "observed_drift_adopted",
+    category: "expectedManifestFiles",
+    adopted_value: "pyproject.toml",
+    replaced_value: "package.json",
+  });
   assert.deepEqual(save.body.expectationProvenance.expectedManifestFiles, {
     "pyproject.toml": "accepted-suggestion",
   });
@@ -224,6 +230,80 @@ test("selectively adopts one reliable observed drift value after explicit previe
   await respond(save, save.body);
   assert.equal(document.querySelector(".project-drift-adoption-preview"), null);
   assert.match(expectationCard("Dependency manifests").textContent, /pyproject\.toml/);
+});
+
+test("Activity view renders read-only grouped entries and loads older history", async () => {
+  const current = scan(12, "low", "2026-07-24T14:00:00Z");
+  await renderApp();
+  await resolveDetails(await takeDetailRequests(PROJECT_A_PATH), {
+    scans: [current],
+    activity: {
+      events: [
+        {
+          eventId: "scan:12",
+          projectId: PROJECT_A_PATH,
+          eventType: "scan_completed",
+          timestamp: "2026-07-24T14:00:00Z",
+          relatedScanId: 12,
+          details: {
+            status: "completed",
+            findingCount: 2,
+            reviewedCount: 1,
+            dependencyStatus: "complete",
+            coverageStatus: "complete",
+          },
+          malformed: false,
+        },
+        {
+          eventId: "evt_unknown",
+          projectId: PROJECT_A_PATH,
+          eventType: "future_event",
+          timestamp: "2026-07-24T13:00:00Z",
+          relatedScanId: null,
+          details: {},
+          malformed: true,
+        },
+      ],
+      has_more: true,
+      next_offset: 2,
+    },
+  });
+
+  const activityLink = [...document.querySelectorAll(".sidebar-nav a")]
+    .find((item) => item.textContent.includes("Activity"));
+  await click(activityLink);
+  assert.equal(document.querySelector(".topbar h1").textContent, "Activity");
+  const timeline = document.querySelector(".activity-timeline");
+  assert.ok(timeline);
+  assert.equal(timeline.querySelectorAll(".project-activity-entry").length, 2);
+  assert.match(timeline.textContent, /Scan completed/);
+  assert.match(timeline.textContent, /2 findings/);
+  assert.match(timeline.textContent, /Stored activity details are unavailable/);
+  assert.equal(timeline.querySelectorAll("input, textarea, select").length, 0);
+
+  await click([...timeline.querySelectorAll("button")].find((button) => button.textContent === "Load older activity"));
+  const older = await fetchHarness.next("/api/activity", { projectPath: PROJECT_A_PATH });
+  assert.match(older.url.toString(), /offset=2/);
+  await respond(older, {
+    events: [{
+      eventId: "project:registered",
+      projectId: PROJECT_A_PATH,
+      eventType: "project_registered",
+      timestamp: "2026-07-23T12:00:00Z",
+      relatedScanId: null,
+      details: { projectName: "Project A" },
+      malformed: false,
+    }],
+    has_more: false,
+    next_offset: null,
+  });
+  assert.equal(document.querySelectorAll(".project-activity-entry").length, 3);
+  assert.equal(document.querySelector(".activity-load-older"), null);
+
+  await click([...document.querySelectorAll(".project-activity-entry button")]
+    .find((button) => button.textContent === "Scan #12"));
+  assert.equal(document.querySelector(".topbar h1").textContent, "Reports");
+  assert.ok(document.querySelector(".history-row.selected-history-row"));
 });
 
 test("missing and unavailable stored projects fall back through normal selection", async () => {
@@ -1785,13 +1865,14 @@ async function renderReadyProjectA() {
 
 async function takeDetailRequests(projectPath) {
   const options = { projectPath };
-  const [notes, scanHistory, trustProfile, agentsExists] = await Promise.all([
+  const [notes, scanHistory, trustProfile, activity, agentsExists] = await Promise.all([
     fetchHarness.next("/api/notes", options),
     fetchHarness.next("/api/scans/history", options),
     fetchHarness.next("/api/trust-profile", options),
+    fetchHarness.next("/api/activity", options),
     fetchHarness.next("/api/agents/exists", options),
   ]);
-  return { notes, scanHistory, trustProfile, agentsExists };
+  return { notes, scanHistory, trustProfile, activity, agentsExists };
 }
 
 async function resolveDetails(requests, options = {}) {
@@ -1801,6 +1882,7 @@ async function resolveDetails(requests, options = {}) {
     notes: { notes: options.notes || [] },
     scanHistory: { scans: options.scans || [] },
     trustProfile: options.trustProfile || { project_path: requestProjectPath(requests.trustProfile) },
+    activity: options.activity || { events: [], has_more: false, next_offset: null },
     agentsExists: { exists: Boolean(options.agentsExists) },
   };
   await act(async () => {
@@ -1822,6 +1904,10 @@ async function finishScan(request, result, history) {
     projectPath: PROJECT_A_PATH,
   });
   await respond(historyRequest, { scans: history });
+  const activityRequest = await fetchHarness.next("/api/activity", {
+    projectPath: PROJECT_A_PATH,
+  });
+  await respond(activityRequest, { events: [], has_more: false, next_offset: null });
   const projectsRequest = await fetchHarness.next("/api/projects");
   await respond(projectsRequest, {
     project_root: "C:/workspace",

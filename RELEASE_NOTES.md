@@ -1,6 +1,15 @@
-# Glacial 0.6.3 Selective Project Drift Adoption
+# Glacial 0.6.4 Project Activity Timeline
 
-Glacial 0.6.3 turns reliable expectation drift into a deliberate, per-value update workflow while keeping observations, approvals, and security analysis separate.
+Glacial 0.6.4 adds a compact, read-only history of meaningful persisted activity for the selected project.
+
+## Project activity timeline
+
+- Merges existing project registration and scan rows with append-only activity events instead of duplicating reconstructable history.
+- Records material Project Expectations updates, individual observed drift adoption, the first completed finding-review transition per scan, and meaningful dependency snapshot approval.
+- Orders activity deterministically newest-first, groups it by date, links to locally available related scans, and loads older entries through bounded pagination.
+- Stores only bounded structured details. Unknown event types or malformed historical details remain renderable as generic read-only activity.
+- Does not record navigation, panel state, suggestion dismissal, preview/cancellation, no-op saves, individual finding decisions, transient errors, or development activity.
+- Event insertion shares the primary SQLite transaction wherever practical, so a failed event write cannot leave a successful-looking primary update or vice versa.
 
 ## Selective drift adoption
 

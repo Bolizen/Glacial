@@ -5,6 +5,7 @@ export const VALID_SECTIONS = Object.freeze([
   "workspace",
   "projects",
   "trustProfiles",
+  "activity",
   "reports",
   "changelog",
   "settings",

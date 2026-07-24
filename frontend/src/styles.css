@@ -3073,6 +3073,94 @@ button.secondary-button[type="submit"]:active:not(:disabled) {
   font-weight: 600;
 }
 
+.activity-timeline {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.activity-date-group {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.activity-date-group > h3 {
+  color: var(--color-text-secondary);
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.project-activity-list {
+  border-left: 1px solid var(--color-border);
+  display: grid;
+  margin-left: var(--space-2);
+  min-width: 0;
+}
+
+.project-activity-entry {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: 82px minmax(0, 1fr);
+  min-width: 0;
+  padding: var(--space-3) 0 var(--space-3) var(--space-4);
+  position: relative;
+}
+
+.project-activity-entry::before {
+  background: var(--color-accent);
+  border: 3px solid var(--color-surface-raised);
+  border-radius: 50%;
+  content: "";
+  height: 10px;
+  left: -6px;
+  position: absolute;
+  top: 18px;
+  width: 10px;
+}
+
+.project-activity-entry + .project-activity-entry {
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.project-activity-entry > time {
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  padding-top: 4px;
+}
+
+.project-activity-entry > div,
+.project-activity-heading {
+  min-width: 0;
+}
+
+.project-activity-heading {
+  align-items: flex-start;
+  display: flex;
+  gap: var(--space-2);
+  justify-content: space-between;
+}
+
+.project-activity-heading > span {
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.project-activity-entry p {
+  color: var(--color-text-secondary);
+  font-size: 0.84rem;
+  line-height: 1.45;
+  margin: var(--space-1) 0 0;
+  overflow-wrap: anywhere;
+}
+
+.activity-load-older {
+  justify-self: start;
+}
+
 .project-item {
   background: var(--color-surface-inset);
   border-color: transparent;
@@ -4262,5 +4350,24 @@ label,
   .projects-section .project-metadata-form > button {
     grid-column: 1;
     justify-self: stretch;
+  }
+
+  .project-activity-entry {
+    gap: var(--space-1);
+    grid-template-columns: minmax(0, 1fr);
+    padding-left: var(--space-3);
+  }
+
+  .project-activity-entry > time {
+    padding-top: 0;
+  }
+
+  .project-activity-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .project-activity-heading .history-view-button {
+    align-self: flex-start;
   }
 }

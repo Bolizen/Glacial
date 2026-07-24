@@ -127,12 +127,20 @@ export function ProjectExpectationsPanel({
     if (!adoptionPreview?.eligible) return;
     const observedValue = adoptionPreview.added[0];
     const replacedValue = adoptionPreview.removedOrReplaced[0] || "";
-    onSave(adoptObservedExpectation(
-      normalizedProfile,
-      adoptionPreview.field,
-      observedValue,
-      replacedValue,
-    ));
+    onSave(
+      adoptObservedExpectation(
+        normalizedProfile,
+        adoptionPreview.field,
+        observedValue,
+        replacedValue,
+      ),
+      {
+        type: "observed_drift_adopted",
+        category: adoptionPreview.field,
+        adopted_value: observedValue,
+        replaced_value: replacedValue,
+      },
+    );
     setLocalMessage(`Adopted ${observedValue} into Project Expectations.`);
     setAdoptionPreview(null);
   }

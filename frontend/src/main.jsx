@@ -1,5 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import {
+  activityDetail,
+  activityTimeLabel,
+  activityTitle,
+  groupActivityByDate,
+  normalizeActivityPage,
+} from "./activity.js";
 import { requestApi } from "./apiTransport.js";
 import {
   dependencyStatusDescription,
@@ -55,11 +62,12 @@ const EMPTY_AGENT_FORM = {
 };
 const MAJOR_SECTIONS = ["changelog", "scanReport", "agents", "notes", "history"];
 const OPEN_MAJOR_SECTIONS = Object.fromEntries(MAJOR_SECTIONS.map((section) => [section, true]));
-const PROJECT_REQUIRED_SECTIONS = new Set(["trustProfiles", "reports"]);
+const PROJECT_REQUIRED_SECTIONS = new Set(["trustProfiles", "activity", "reports"]);
 const SECTION_NAV = [
   { id: "workspace", href: "#workspace-overview", label: "Workspace Overview", icon: "#" },
   { id: "projects", href: "#projects", label: "Projects", icon: "[]" },
   { id: "trustProfiles", href: "#project-expectations", label: "Project Expectations", icon: "<>" },
+  { id: "activity", href: "#activity", label: "Activity", icon: "::" },
   { id: "reports", href: "#reports", label: "Reports", icon: "=" },
   { id: "changelog", href: "#changelog", label: "Changelog", icon: "@" },
   { id: "settings", href: "#settings", label: "Settings", icon: "*" },
@@ -74,6 +82,13 @@ const TRUST_PROFILE_FIELDS = [
   "ignoredPaths",
 ];
 const EMPTY_TRUST_PROFILE = EMPTY_PROJECT_EXPECTATIONS;
+const EMPTY_ACTIVITY_STATE = Object.freeze({
+  events: [],
+  hasMore: false,
+  nextOffset: null,
+  loading: false,
+  error: "",
+});
 export function App() {
   const [projectRoot, setProjectRoot] = useState("");
   const [projectRootMessage, setProjectRootMessage] = useState("");
@@ -91,6 +106,7 @@ export function App() {
   const [selectedScanId, setSelectedScanId] = useState(null);
   const [trustProfile, setTrustProfile] = useState(EMPTY_TRUST_PROFILE);
   const [trustProfileMessage, setTrustProfileMessage] = useState("");
+  const [activity, setActivity] = useState(EMPTY_ACTIVITY_STATE);
   const [notes, setNotes] = useState([]);
   const [noteBody, setNoteBody] = useState("");
   const [changelog, setChangelog] = useState([]);
@@ -130,6 +146,7 @@ export function App() {
     notes: 0,
     scanHistory: 0,
     trustProfile: 0,
+    activity: 0,
     agentsExists: 0,
     scanMutation: 0,
     noteMutation: 0,
@@ -203,6 +220,7 @@ export function App() {
       loadNotes(selectedPath, generation, controller.signal),
       loadScanHistory(selectedPath, generation, controller.signal),
       loadTrustProfile(selectedPath, generation, controller.signal),
+      loadActivity(selectedPath, generation, controller.signal),
       checkAgentsExists(selectedPath, generation, controller.signal),
     ]).then(() => {
       if (!controller.signal.aborted && projectRequestIsCurrent(selectedPath, generation)) {
@@ -274,6 +292,7 @@ export function App() {
     setSelectedScanId(null);
     setTrustProfile({ ...EMPTY_TRUST_PROFILE, project_path: path });
     setTrustProfileMessage("");
+    setActivity(EMPTY_ACTIVITY_STATE);
     setNotes([]);
     setNoteBody("");
     setCopyStatus("");
@@ -599,6 +618,9 @@ export function App() {
       } else {
         reloadSelectedProjectAfterStaleMutation(projectPath, generation);
       }
+      if (projectRequestIsCurrent(projectPath, generation)) {
+        await loadActivity(projectPath, generation);
+      }
       if (workspaceGenerationRef.current === workspaceGeneration) {
         await refreshProjects(projectPath, generation);
       }
@@ -666,7 +688,7 @@ export function App() {
     trustedBaselineRequestRef.current = { id: requestId, controller };
     setTrustedBaselineMutation({ saving: true, error: "", success: "" });
     try {
-      await api("/api/trusted-dependency-baseline", {
+      const data = await api("/api/trusted-dependency-baseline", {
         method,
         body: { project_path: projectPath, ...fields },
         signal: controller.signal,
@@ -674,6 +696,10 @@ export function App() {
       if (!scopedProjectRequestIsCurrent("trustedBaselineMutation", requestId, projectPath, generation)) return;
       await loadScanHistory(projectPath, generation, controller.signal);
       if (!scopedProjectRequestIsCurrent("trustedBaselineMutation", requestId, projectPath, generation)) return;
+      if (data.activity_recorded) {
+        await loadActivity(projectPath, generation, controller.signal);
+        if (!scopedProjectRequestIsCurrent("trustedBaselineMutation", requestId, projectPath, generation)) return;
+      }
       setTrustedBaselineMutation({ saving: false, error: "", success });
     } catch (error) {
       if (!isAbortError(error) && scopedProjectRequestIsCurrent("trustedBaselineMutation", requestId, projectPath, generation)) {
@@ -711,7 +737,40 @@ export function App() {
     }
   }
 
-  async function saveTrustProfile(profile) {
+  async function loadActivity(path, generation, signal, offset = 0) {
+    const requestId = beginScopedProjectRequest("activity");
+    setActivity((current) => ({ ...current, loading: true, error: "" }));
+    try {
+      const data = await api(
+        `/api/activity?project_path=${encodeURIComponent(path)}&limit=20&offset=${offset}`,
+        { signal },
+      );
+      if (!scopedProjectRequestIsCurrent("activity", requestId, path, generation)) return;
+      const page = normalizeActivityPage(data);
+      setActivity((current) => ({
+        events: offset > 0
+          ? mergeActivityEvents(current.events, page.events)
+          : page.events,
+        hasMore: page.hasMore,
+        nextOffset: page.nextOffset,
+        loading: false,
+        error: "",
+      }));
+    } catch (error) {
+      if (!isAbortError(error) && scopedProjectRequestIsCurrent("activity", requestId, path, generation)) {
+        setActivity((current) => ({ ...current, loading: false, error: error.message }));
+      }
+    }
+  }
+
+  async function loadOlderActivity() {
+    const projectPath = selectedPathRef.current;
+    const generation = projectGenerationRef.current;
+    if (!projectPath || activity.loading || activity.nextOffset === null) return;
+    await loadActivity(projectPath, generation, undefined, activity.nextOffset);
+  }
+
+  async function saveTrustProfile(profile, activityContext = null) {
     const projectPath = selectedPathRef.current;
     const generation = projectGenerationRef.current;
     if (!projectPath) return;
@@ -720,7 +779,11 @@ export function App() {
     try {
       const data = await api("/api/trust-profile", {
         method: "PUT",
-        body: { ...profile, project_path: projectPath },
+        body: {
+          ...profile,
+          project_path: projectPath,
+          activity_context: activityContext,
+        },
       });
       if (!scopedProjectRequestIsCurrent("trustSave", requestId, projectPath, generation)) {
         reloadSelectedProjectAfterStaleMutation(projectPath, generation);
@@ -728,6 +791,7 @@ export function App() {
       }
       setTrustProfile(normalizeProjectExpectations(data));
       setTrustProfileMessage("Project Expectations saved.");
+      if (data.activity_recorded) await loadActivity(projectPath, generation);
     } catch (error) {
       if (!isAbortError(error) && scopedProjectRequestIsCurrent("trustSave", requestId, projectPath, generation)) {
         setTrustProfileMessage(error.message);
@@ -777,11 +841,18 @@ export function App() {
     try {
       const data = await api("/api/finding-reviews", {
         method: "PUT",
-        body: { project_path: projectPath, fingerprint, status, note },
+        body: {
+          project_path: projectPath,
+          fingerprint,
+          status,
+          note,
+          scan_id: displayedScan?.id || null,
+        },
       });
       if (!findingReviewRequestIsCurrent(fingerprint, requestId, projectPath, generation)) return;
       applyFindingReview(fingerprint, data.review);
       setFindingReviewState((current) => ({ ...current, [fingerprint]: { saving: false, error: "", success: "Review saved." } }));
+      if (data.activity_recorded) await loadActivity(projectPath, generation);
     } catch (error) {
       if (!findingReviewRequestIsCurrent(fingerprint, requestId, projectPath, generation)) return;
       setFindingReviewState((current) => ({ ...current, [fingerprint]: { saving: false, error: error.message, success: "" } }));
@@ -962,6 +1033,13 @@ export function App() {
     setMajorSectionOpen("scanReport", true);
   }
 
+  function openActivityScan(scanId) {
+    if (!scanHistory.some((scan) => scan.id === scanId)) return;
+    setSelectedScanId(scanId);
+    setSelectedSection("reports");
+    setMajorSectionOpen("history", true);
+  }
+
   function dismissSelectedGuidedReview() {
     if (!selectedPath) return;
     setDismissedGuidedReviews((current) => dismissGuidedReview(selectedPath, current));
@@ -975,6 +1053,7 @@ export function App() {
       "#projects": "projects",
       "#project-expectations": "trustProfiles",
       "#trust-profiles": "trustProfiles",
+      "#activity": "activity",
       "#reports": "reports",
       "#changelog": "changelog",
       "#settings": "settings",
@@ -1151,6 +1230,15 @@ export function App() {
               message={trustProfileMessage}
               onSave={saveTrustProfile}
               onOpenReports={openReports}
+            />
+          ) : null}
+
+          {selectedSection === "activity" && selectedProject && !projectDetailsLoading ? (
+            <ActivityTimeline
+              activity={activity}
+              availableScanIds={new Set(scanHistory.map((scan) => scan.id))}
+              onLoadOlder={loadOlderActivity}
+              onOpenScan={openActivityScan}
             />
           ) : null}
 
@@ -1643,6 +1731,65 @@ function RecentActivity({ changelog, scans }) {
           </div>
         ))}
       </div>
+    </section>
+  );
+}
+
+function ActivityTimeline({ activity, availableScanIds, onLoadOlder, onOpenScan }) {
+  const groups = groupActivityByDate(activity.events);
+  return (
+    <section className="panel activity-timeline" id="activity" aria-labelledby="activity-title">
+      <div className="panel-heading">
+        <div>
+          <h2 id="activity-title">Project Activity</h2>
+          <p className="muted">Meaningful persisted project history. Activity is read-only.</p>
+        </div>
+      </div>
+      {groups.map((group) => (
+        <section className="activity-date-group" key={group.label}>
+          <h3>{group.label}</h3>
+          <div className="project-activity-list">
+            {group.events.map((event) => (
+              <article className="project-activity-entry" key={event.eventId}>
+                <time dateTime={event.timestamp || undefined}>{activityTimeLabel(event.timestamp)}</time>
+                <div>
+                  <div className="project-activity-heading">
+                    <strong>{activityTitle(event)}</strong>
+                    {event.relatedScanId ? (
+                      availableScanIds.has(event.relatedScanId) ? (
+                        <button
+                          type="button"
+                          className="history-view-button"
+                          onClick={() => onOpenScan(event.relatedScanId)}
+                        >
+                          Scan #{event.relatedScanId}
+                        </button>
+                      ) : (
+                        <span>Scan #{event.relatedScanId}</span>
+                      )
+                    ) : null}
+                  </div>
+                  <p>{activityDetail(event)}</p>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      ))}
+      {activity.events.length === 0 && !activity.loading && !activity.error ? (
+        <p className="muted">No recorded project activity yet.</p>
+      ) : null}
+      {activity.error ? <p className="notice">{activity.error}</p> : null}
+      {activity.hasMore ? (
+        <button
+          type="button"
+          className="secondary-button compact-action activity-load-older"
+          onClick={onLoadOlder}
+          disabled={activity.loading}
+        >
+          {activity.loading ? "Loading..." : "Load older activity"}
+        </button>
+      ) : activity.loading && activity.events.length === 0 ? <p className="muted">Loading activity...</p> : null}
     </section>
   );
 }
@@ -2578,6 +2725,17 @@ function History({ scans, selectedScanId, onSelectScan, open, onOpenChange }) {
 
 async function api(path, options = {}) {
   return requestApi(path, options);
+}
+
+function mergeActivityEvents(current, next) {
+  const events = [...current];
+  const seen = new Set(current.map((event) => event.eventId));
+  for (const event of next) {
+    if (seen.has(event.eventId)) continue;
+    seen.add(event.eventId);
+    events.push(event);
+  }
+  return events;
 }
 
 function buildScanReport(result) {
