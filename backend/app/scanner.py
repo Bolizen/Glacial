@@ -11,6 +11,7 @@ from .dependency_trust import (
     is_dependency_metadata,
 )
 from .finding_evidence import build_suspicious_text_evidence
+from .finding_explainability import explain_findings
 from .safety import has_multiple_hardlinks, is_reparse_point_or_symlink
 
 
@@ -437,7 +438,7 @@ def scan_project(project_path: Path, previous_dependency_trust: dict[str, Any] |
 
     return {
         "overall_risk": _overall_risk(findings, manifests, lockfiles, lifecycle_scripts, secret_files),
-        "findings": findings,
+        "findings": explain_findings(findings),
         "manifests": sorted(manifests),
         "lockfiles": sorted(lockfiles),
         "lifecycleScripts": sorted(lifecycle_scripts, key=lambda script: (script["path"], script["script"])),

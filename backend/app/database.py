@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .finding_evidence import normalize_suspicious_text_evidence
+from .finding_explainability import normalize_finding_explainability
 
 
 DESKTOP_DATA_DIR_ENV = "GLACIAL_DESKTOP_DATA_DIR"
@@ -266,6 +267,14 @@ def _normalize_finding(finding: dict[str, Any]) -> dict[str, Any]:
             and evidence["pattern"] == finding_pattern
         ):
             normalized["evidence"] = evidence
+    normalized.pop("explainability", None)
+    explainability = normalize_finding_explainability(
+        finding.get("explainability"),
+        finding_type=normalized["type"],
+        path=normalized["path"],
+    )
+    if explainability:
+        normalized["explainability"] = explainability
     return normalized
 
 

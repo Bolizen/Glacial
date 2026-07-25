@@ -2460,6 +2460,15 @@ pre {
   margin-top: 10px;
 }
 
+.finding-explainability {
+  display: grid;
+  gap: 7px;
+}
+
+.finding-explainability > p {
+  margin: 0;
+}
+
 .finding-evidence {
   background: var(--color-surface-inset);
   border: 1px solid var(--color-border);
@@ -2469,6 +2478,29 @@ pre {
   margin-top: 4px;
   max-width: 100%;
   padding: 10px;
+}
+
+.finding-evidence dl {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+
+.finding-evidence dl > div {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(120px, 0.35fr) minmax(0, 1fr);
+}
+
+.finding-evidence dt {
+  color: var(--color-text-secondary);
+  text-transform: capitalize;
+}
+
+.finding-evidence dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .finding-evidence-meta {

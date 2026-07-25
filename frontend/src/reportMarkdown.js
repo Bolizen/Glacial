@@ -78,6 +78,7 @@ const FINDING_STANDARD_FIELDS = new Set([
   "action",
   "category",
   "explanation",
+  "explainability",
   "fingerprint",
   "file_path",
   "finding_type",
@@ -135,21 +136,91 @@ export function normalizeScanCompleteness(result) {
 export function normalizeFinding(finding = {}) {
   const type = presentText(finding.type) || presentText(finding.finding_type) || "unknown";
   const severity = presentText(finding.severity) || "low";
-  const path = presentText(finding.path) || presentText(finding.file_path) || "Unknown path";
+  const rawPath = presentText(finding.path) || presentText(finding.file_path);
+  const path = rawPath || "Unknown path";
   const explanation = presentText(finding.explanation) || presentText(finding.message);
   const mapped = FINDING_DETAILS[type] || {};
+  const explainability = normalizeFindingExplainability(finding.explainability, {
+    type,
+    path: rawPath,
+  });
   return {
-    category: presentText(finding.category) || mapped.category || humanizeFindingType(type),
+    category: explainability?.category || presentText(finding.category) || mapped.category || humanizeFindingType(type),
     severity,
     path,
-    title: presentText(finding.title) || mapped.title || humanizeFindingType(type),
-    why: mapped.why || explanation || "This item may require attention during review.",
-    action: presentText(finding.action)
+    title: explainability?.rule.name || presentText(finding.title) || mapped.title || humanizeFindingType(type),
+    why: explainability?.impact || mapped.why || explanation || "This item may require attention during review.",
+    action: explainability?.manualCheck
+      || presentText(finding.action)
       || presentText(finding.recommended_action)
       || mapped.action
       || "Review this item before running, sharing, or committing the project.",
     evidence: normalizeSuspiciousTextEvidence(finding, type, path),
+    explainability,
   };
+}
+
+function normalizeFindingExplainability(value, { type, path }) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || value.schemaVersion !== 1) return null;
+  const rule = value.rule;
+  const evidence = value.evidence;
+  if (
+    !rule
+    || typeof rule !== "object"
+    || Array.isArray(rule)
+    || rule.id !== `scanner.${type}`
+    || rule.version !== 1
+    || !boundedDisplayText(rule.name, 120)
+    || !evidence
+    || typeof evidence !== "object"
+    || Array.isArray(evidence)
+    || !boundedDisplayText(evidence.kind, 80)
+    || typeof evidence.path !== "string"
+    || evidence.path !== path
+    || (evidence.path && !isSafeProjectRelativePath(evidence.path))
+    || !boundedDisplayText(evidence.location, 200)
+  ) return null;
+  const textFields = ["category", "observation", "impact", "severityReason", "manualCheck", "limitations"];
+  if (textFields.some((field) => !boundedDisplayText(value[field], 500))) return null;
+  if (evidence.excerpt !== undefined && (
+    typeof evidence.excerpt !== "string"
+    || !evidence.excerpt
+    || evidence.excerpt.length > 500
+  )) return null;
+  const detailEntries = normalizeExplainabilityDetails(evidence.details);
+  if (detailEntries === null) return null;
+  return {
+    rule: { id: rule.id, name: rule.name, version: rule.version },
+    category: value.category,
+    observation: value.observation,
+    impact: value.impact,
+    severityReason: value.severityReason,
+    manualCheck: value.manualCheck,
+    limitations: value.limitations,
+    evidence: {
+      kind: evidence.kind,
+      path: evidence.path,
+      location: evidence.location,
+      excerpt: evidence.excerpt || "",
+      details: detailEntries,
+    },
+  };
+}
+
+function normalizeExplainabilityDetails(value) {
+  if (value === undefined) return [];
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const entries = Object.keys(value).sort().slice(0, 21);
+  if (entries.length > 20) return null;
+  const normalized = entries.map((key) => [key, serializeMetadata(value[key])]);
+  return normalized.some(([, item]) => !item) ? null : normalized;
+}
+
+function boundedDisplayText(value, limit) {
+  return typeof value === "string"
+    && value.length > 0
+    && value.length <= limit
+    && [...value].every((character) => character.charCodeAt(0) >= 32);
 }
 
 export function buildScanReportMarkdown(result, report, comparison, trustContext, projectDrift) {
@@ -456,15 +527,40 @@ function formatFindings(findings) {
     appendOptionalListItem(lines, "Type", inlineCode(type));
     appendOptionalListItem(lines, "Category", escapeMarkdownText(category));
     appendOptionalListItem(lines, "Path", inlineCode(path));
-    appendOptionalListItem(lines, "Explanation", escapeMarkdownText(explanation));
-    if (message && message !== explanation) {
-      appendOptionalListItem(lines, "Message", escapeMarkdownText(message));
+    if (detail.explainability) {
+      const canonical = detail.explainability;
+      appendOptionalListItem(lines, "Detector", escapeMarkdownText(canonical.rule.name));
+      appendOptionalListItem(lines, "Rule", inlineCode(`${canonical.rule.id}@${canonical.rule.version}`));
+      appendOptionalListItem(lines, "Observed evidence", escapeMarkdownText(canonical.observation));
+      appendOptionalListItem(lines, "Why this matters", escapeMarkdownText(canonical.impact));
+      appendOptionalListItem(lines, "Severity reason", escapeMarkdownText(canonical.severityReason));
+      appendOptionalListItem(lines, "Manual inspection", escapeMarkdownText(canonical.manualCheck));
+      appendOptionalListItem(lines, "Limitations", escapeMarkdownText(canonical.limitations));
+      appendOptionalListItem(lines, "Evidence kind", inlineCode(canonical.evidence.kind));
+      appendOptionalListItem(lines, "Evidence location", inlineCode(
+        [canonical.evidence.path, canonical.evidence.location].filter(Boolean).join(":"),
+      ));
+      if (canonical.evidence.details.length) {
+        lines.push("- Bounded evidence details:");
+        canonical.evidence.details.forEach(([key, value]) => {
+          lines.push(`  - ${escapeMarkdownText(formatMetadataLabel(key))}: ${inlineCode(value)}`);
+        });
+      }
+      if (canonical.evidence.excerpt) {
+        lines.push("", ...formatCodeBlock(canonical.evidence.excerpt));
+      }
+    } else {
+      lines.push("- Explainability: Legacy persisted finding; exact detector provenance and severity rationale are unavailable.");
+      appendOptionalListItem(lines, "Explanation", escapeMarkdownText(explanation));
+      if (message && message !== explanation) {
+        appendOptionalListItem(lines, "Message", escapeMarkdownText(message));
+      }
+      appendOptionalListItem(lines, "Recommended action", escapeMarkdownText(action));
     }
-    appendOptionalListItem(lines, "Recommended action", escapeMarkdownText(action));
     appendOptionalListItem(lines, "Review status", escapeMarkdownText(findingReviewLabel(finding.review)));
     if (finding.review?.note) appendOptionalListItem(lines, "Review reason", escapeMarkdownText(finding.review.note));
 
-    if (detail.evidence) {
+    if (!detail.explainability && detail.evidence) {
       lines.push(
         "- Scanner context: Context only; not proof of malicious behavior.",
         `  - Location: ${inlineCode(`${detail.path}:${detail.evidence.line}`)}`,

@@ -1,3 +1,15 @@
+# Glacial 0.7.2 Finding Explainability
+
+Glacial 0.7.2 makes newly generated findings self-explanatory using bounded, persisted, scanner-owned evidence.
+
+## Finding explainability
+
+- Adds stable rule identity, display name, rule version, category, observed evidence, impact, severity rationale, manual inspection guidance, and limitations to every newly generated scanner finding.
+- Builds the explanation only after core scanner and dependency findings converge, without adding detectors, changing severity, executing project content, or introducing remediation.
+- Bounds persisted paths, locations, excerpts, and metadata while reusing the existing redacted suspicious-text evidence.
+- Prefers canonical backend explanations in finding cards and Markdown reports.
+- Keeps older persisted findings visible with conservative frontend guidance and an explicit notice that exact detector provenance and severity rationale are unavailable.
+
 # Glacial 0.7.1 Review Context Correctness
 
 Glacial 0.7.1 is a focused correctness patch that keeps latest Review evidence distinct from historical Reports context.

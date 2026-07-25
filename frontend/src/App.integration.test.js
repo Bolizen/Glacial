@@ -2089,6 +2089,64 @@ test("finding review and reopen update the real scan, history, and Markdown work
   assert.doesNotMatch(findingCard("tests/eval_fixture.py").textContent, /Expected scanner regression fixture/);
 });
 
+test("finding cards prefer canonical scanner explainability and label legacy fallback evidence", async () => {
+  const canonical = reviewableFinding("e", {
+    type: "package-lifecycle-script",
+    path: "package.json",
+    explanation: "Stored compatibility explanation.",
+    action: "Stored compatibility action.",
+    script: "postinstall",
+    explainability: {
+      schemaVersion: 1,
+      rule: {
+        id: "scanner.package-lifecycle-script",
+        name: "Package Lifecycle Script",
+        version: 1,
+      },
+      category: "code execution",
+      evidence: {
+        kind: "manifest-field",
+        path: "package.json",
+        location: "scripts.postinstall",
+        details: { script: "postinstall" },
+      },
+      observation: "package.json declares a postinstall lifecycle script.",
+      impact: "Lifecycle scripts may execute implicitly during dependency installation.",
+      severityReason: "High severity is assigned because installation may trigger execution.",
+      manualCheck: "Inspect scripts.postinstall and every command it invokes.",
+      limitations: "Glacial did not execute the script and cannot determine intent or runtime behavior.",
+    },
+  });
+  const legacy = reviewableFinding("f", {
+    path: "src/legacy.js",
+    explanation: "Legacy scanner detail. Pattern: eval(",
+  });
+
+  await renderApp();
+  await resolveDetails(
+    await takeDetailRequests(PROJECT_A_PATH),
+    { scans: [scanWithFindings(143, [canonical, legacy])] },
+  );
+  await openReports();
+
+  const canonicalCard = findingCard("package.json");
+  assert.match(canonicalCard.textContent, /Detector:\s*Package Lifecycle Script/);
+  assert.match(canonicalCard.textContent, /scanner\.package-lifecycle-script/);
+  assert.match(canonicalCard.textContent, /Observed evidence:\s*package\.json declares a postinstall/);
+  assert.match(canonicalCard.textContent, /Why this matters:\s*Lifecycle scripts may execute implicitly/);
+  assert.match(canonicalCard.textContent, /Why high severity:\s*High severity is assigned/);
+  assert.match(canonicalCard.textContent, /Inspect manually:\s*Inspect scripts\.postinstall/);
+  assert.match(canonicalCard.textContent, /Limitations:\s*Glacial did not execute the script/);
+  assert.match(canonicalCard.textContent, /manifest-field/);
+  assert.match(canonicalCard.textContent, /scripts\.postinstall/);
+  assert.doesNotMatch(canonicalCard.textContent, /Legacy finding|Stored compatibility/);
+
+  const legacyCard = findingCard("src/legacy.js");
+  assert.match(legacyCard.textContent, /Legacy finding:/);
+  assert.match(legacyCard.textContent, /Exact detector provenance and severity rationale are unavailable/);
+  assert.doesNotMatch(legacyCard.textContent, /Detector:/);
+});
+
 test("unified finding workbench filters, navigates, reports progress, and reuses review persistence", async () => {
   const reviewed = reviewableFinding("1", {
     path: "src/already-reviewed.js",

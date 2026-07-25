@@ -91,6 +91,55 @@ test("exports every current and future finding with complete detailed evidence",
   assert.match(markdown, /- Risk: LOW to HIGH/);
 });
 
+test("exports canonical scanner-owned finding explainability without frontend inference", () => {
+  const item = finding(
+    "package-lifecycle-script",
+    "package.json",
+    "Legacy explanation should not become the canonical rationale.",
+    {
+      severity: "high",
+      script: "postinstall",
+      explainability: canonicalExplainability({
+        type: "package-lifecycle-script",
+        path: "package.json",
+        name: "Package Lifecycle Script",
+        category: "code execution",
+        observation: "package.json declares a postinstall lifecycle script.",
+        impact: "Lifecycle scripts may execute implicitly during dependency installation.",
+        severityReason: "High severity is assigned because installation may trigger execution.",
+        manualCheck: "Inspect scripts.postinstall and every command it invokes.",
+        limitations: "Glacial did not execute the script and cannot determine intent or runtime behavior.",
+        evidence: {
+          kind: "manifest-field",
+          path: "package.json",
+          location: "scripts.postinstall",
+          details: { script: "postinstall" },
+        },
+      }),
+    },
+  );
+
+  const markdown = buildScanReportMarkdown(
+    scanResult([item]),
+    reportFixture({ totalFindings: 1 }),
+    null,
+    { configured: false },
+  );
+
+  assert.match(markdown, /- Detector: Package Lifecycle Script/);
+  assert.match(markdown, /- Rule: `scanner\.package-lifecycle-script@1`/);
+  assert.match(markdown, /- Observed evidence: package\.json declares a postinstall lifecycle script\./);
+  assert.match(markdown, /- Why this matters: Lifecycle scripts may execute implicitly/);
+  assert.match(markdown, /- Severity reason: High severity is assigned/);
+  assert.match(markdown, /- Manual inspection: Inspect scripts\.postinstall/);
+  assert.match(markdown, /- Limitations: Glacial did not execute the script/);
+  assert.match(markdown, /- Evidence kind: `manifest-field`/);
+  assert.match(markdown, /- Evidence location: `package\.json:scripts\.postinstall`/);
+  assert.match(markdown, /- Script: `postinstall`/);
+  assert.doesNotMatch(markdown, /Legacy explanation should not become the canonical rationale/);
+  assert.doesNotMatch(markdown, /- Explainability: `\{/);
+});
+
 test("project drift Markdown keeps observations, approved expectations, and drift distinct", () => {
   const counts = { unchanged: 1, added: 0, removed: 0, changed: 1, unavailable: 0 };
   const markdown = buildScanReportMarkdown(
@@ -624,6 +673,31 @@ function finding(type, path, explanation, metadata = {}) {
     explanation,
     action: `Action for ${type}.`,
     ...metadata,
+  };
+}
+
+function canonicalExplainability({
+  type,
+  path,
+  name,
+  category,
+  observation,
+  impact,
+  severityReason,
+  manualCheck,
+  limitations,
+  evidence,
+}) {
+  return {
+    schemaVersion: 1,
+    rule: { id: `scanner.${type}`, name, version: 1 },
+    category,
+    observation,
+    impact,
+    severityReason,
+    manualCheck,
+    limitations,
+    evidence: { ...evidence, path },
   };
 }
 

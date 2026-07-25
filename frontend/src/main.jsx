@@ -3358,10 +3358,17 @@ function FindingItem({ finding, onReviewFinding, onReopenFinding, requestState =
         <code>{detail.path}</code>
       </div>
       <div className="finding-detail">
-        <p><strong>Why:</strong> {detail.why}</p>
-        <p><strong>Action:</strong> {detail.action}</p>
-        {rawExplanation ? <p><strong>Raw detail:</strong> {rawExplanation}</p> : null}
-        {detail.evidence ? (
+        {detail.explainability ? (
+          <FindingExplainability value={detail.explainability} severity={detail.severity} />
+        ) : (
+          <>
+            <p><strong>Legacy finding:</strong> This persisted finding predates canonical detector explainability. Exact detector provenance and severity rationale are unavailable.</p>
+            <p><strong>Why:</strong> {detail.why}</p>
+            <p><strong>Action:</strong> {detail.action}</p>
+            {rawExplanation ? <p><strong>Stored detail:</strong> {rawExplanation}</p> : null}
+          </>
+        )}
+        {!detail.explainability && detail.evidence ? (
           <div className="finding-evidence">
             <p><strong>Scanner context</strong> Context only; not proof of malicious behavior.</p>
             <div className="finding-evidence-meta">
@@ -3411,6 +3418,39 @@ function FindingItem({ finding, onReviewFinding, onReopenFinding, requestState =
           </div>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+function FindingExplainability({ value, severity }) {
+  return (
+    <div className="finding-explainability">
+      <p>
+        <strong>Detector:</strong> {value.rule.name} <code>{value.rule.id}</code> v{value.rule.version}
+      </p>
+      <p><strong>Observed evidence:</strong> {value.observation}</p>
+      <div className="finding-evidence">
+        <div className="finding-evidence-meta">
+          <span>Kind {value.evidence.kind}</span>
+          <span>Path <code>{value.evidence.path || "Not recorded"}</code></span>
+          <span>Location {value.evidence.location}</span>
+        </div>
+        {value.evidence.details.length ? (
+          <dl>
+            {value.evidence.details.map(([key, item]) => (
+              <div key={key}>
+                <dt>{key.replace(/([a-z])([A-Z])/g, "$1 $2")}</dt>
+                <dd><code>{item}</code></dd>
+              </div>
+            ))}
+          </dl>
+        ) : null}
+        {value.evidence.excerpt ? <pre><code>{value.evidence.excerpt}</code></pre> : null}
+      </div>
+      <p><strong>Why this matters:</strong> {value.impact}</p>
+      <p><strong>Why {severity} severity:</strong> {value.severityReason}</p>
+      <p><strong>Inspect manually:</strong> {value.manualCheck}</p>
+      <p><strong>Limitations:</strong> {value.limitations}</p>
     </div>
   );
 }

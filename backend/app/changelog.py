@@ -2,6 +2,15 @@ from __future__ import annotations
 
 CHANGELOG_ENTRIES = [
     {
+        "version": "0.7.2",
+        "title": "Finding Explainability",
+        "changes": [
+            "Added a bounded scanner-owned explanation envelope to every newly generated finding with stable rule provenance, observed evidence, impact, severity rationale, manual inspection guidance, and limitations.",
+            "Persisted finding explanations in the existing scan JSON without relational migrations or detector, severity, execution, or remediation changes.",
+            "Preferred canonical backend explanations in finding cards and Markdown while retaining explicit conservative fallback presentation for older scans.",
+        ],
+    },
+    {
         "version": "0.7.1",
         "title": "Review context correctness",
         "changes": [
