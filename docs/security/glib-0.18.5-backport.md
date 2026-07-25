@@ -23,6 +23,12 @@ The corresponding `Cargo.lock` package has version `0.18.5` and no registry
 path-resolved package. Run `node scripts/security/verify-glib-backport.mjs` to
 check these invariants.
 
+The same command runs automatically in
+`.github/workflows/glib-backport.yml` when relevant files change in a pull
+request or a push to `main`. The local command remains available for
+pre-commit verification. This CI check validates the documented repository
+invariants; it does not compile or execute the Linux/BSD application.
+
 ## Defect and correction
 
 `VariantStrIter::impl_get` initializes a `*mut libc::c_char` to null and passes
