@@ -146,6 +146,8 @@ def init_db() -> None:
                 dependency_approval_fingerprint TEXT NOT NULL DEFAULT '',
                 dependency_approval_state TEXT NOT NULL,
                 finding_reviews_fingerprint TEXT NOT NULL,
+                baseline_findings_fingerprint TEXT NOT NULL DEFAULT '',
+                new_critical_high_count INTEGER NOT NULL DEFAULT 0,
                 finding_review_complete INTEGER NOT NULL CHECK (finding_review_complete IN (0, 1)),
                 unresolved_critical_count INTEGER NOT NULL,
                 unresolved_high_count INTEGER NOT NULL,
@@ -170,6 +172,7 @@ def init_db() -> None:
             (WORKSPACE_ROOT_SETTING, DEFAULT_WORKSPACE_ROOT),
         )
         _ensure_scan_history_columns(connection)
+        _ensure_review_checkpoint_columns(connection)
 
 
 def get_setting(key: str) -> str | None:
@@ -278,6 +281,24 @@ def _ensure_scan_history_columns(connection: sqlite3.Connection) -> None:
     for name, definition in additions.items():
         if name not in columns:
             connection.execute(f"ALTER TABLE scans ADD COLUMN {name} {definition}")
+
+
+def _ensure_review_checkpoint_columns(connection: sqlite3.Connection) -> None:
+    columns = {
+        row["name"]
+        for row in connection.execute(
+            "PRAGMA table_info(project_review_checkpoints)"
+        ).fetchall()
+    }
+    additions = {
+        "baseline_findings_fingerprint": "TEXT NOT NULL DEFAULT ''",
+        "new_critical_high_count": "INTEGER NOT NULL DEFAULT 0",
+    }
+    for name, definition in additions.items():
+        if name not in columns:
+            connection.execute(
+                f"ALTER TABLE project_review_checkpoints ADD COLUMN {name} {definition}"
+            )
 
 
 def _row_value(row: sqlite3.Row, key: str, default: Any) -> Any:

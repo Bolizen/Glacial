@@ -1756,7 +1756,7 @@ test("review checkpoint renders eligible evidence, confirms explicitly, and beco
   assert.ok(dialog);
   assert.match(dialog.textContent, /Latest scan/);
   assert.match(dialog.textContent, /Project Expectations/);
-  assert.match(dialog.textContent, /Dependency approval/);
+  assert.match(dialog.textContent, /Dependency review/);
   assert.match(dialog.textContent, /Finding review/);
   assert.match(dialog.textContent, /Coverage and metadata/);
   await click([...dialog.querySelectorAll("button")].find((button) => button.textContent === "Cancel"));
@@ -1771,7 +1771,7 @@ test("review checkpoint renders eligible evidence, confirms explicitly, and beco
     scan_id: current.id,
     expected_evidence_fingerprint: checkpoints.currentEvidence.evidenceFingerprint,
     security_status: "ready",
-    evaluator_version: 1,
+    evaluator_version: 2,
     provenance: "manual",
   });
   const recorded = {
@@ -1790,7 +1790,7 @@ test("review checkpoint renders eligible evidence, confirms explicitly, and beco
       createdAt: "2026-08-01T12:30:00Z",
       provenance: "manual",
       checkpointSchemaVersion: 1,
-      evaluatorVersion: 1,
+      evaluatorVersion: 2,
       evidenceFingerprint: checkpoints.currentEvidence.evidenceFingerprint,
       malformed: false,
     }],
@@ -1829,7 +1829,7 @@ test("review checkpoint shows bounded stale and malformed reasons without an ove
       baselineProvenance: "none",
       createdAt: "2026-08-01T12:30:00Z",
       provenance: "manual",
-      evaluatorVersion: 1,
+      evaluatorVersion: 2,
       malformed: false,
     }],
   });
@@ -2504,6 +2504,8 @@ function checkpointPageFixture(currentScan = null, overrides = {}) {
       dependencyApprovalFingerprint: "",
       dependencyApprovalState: "not-configured",
       findingReviewsFingerprint: `cpfr1_${hex}`,
+      baselineFindingsFingerprint: "",
+      newCriticalHighCount: 0,
       findingReviewComplete: false,
       findingCount: currentScan.findings?.length || 0,
       reviewedFindingCount: 0,
@@ -2514,13 +2516,13 @@ function checkpointPageFixture(currentScan = null, overrides = {}) {
       coverageIssueCount: currentScan.scanCompleteness?.issueCount || 0,
       metadataReliable: currentScan.scanMetadataReliable === true,
       checkpointSchemaVersion: 1,
-      evaluatorVersion: 1,
+      evaluatorVersion: 2,
       evidenceFingerprint: `cpr1_${hex}`,
       reasons: [],
     } : {
       reliable: false,
       readyForCheckpoint: false,
-      evaluatorVersion: 1,
+      evaluatorVersion: 2,
       evidenceFingerprint: "",
       reasons: ["No current scan is available."],
     },

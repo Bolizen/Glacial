@@ -84,13 +84,12 @@ export function dependencyStatusDescription(trust) {
 }
 
 export function dependencyTrustHasNoSupportedMetadata(trust) {
-  return Boolean(trust?.available)
+  return Boolean(trust)
+    && trust.available !== false
+    && trust.schemaVersion === DEPENDENCY_TRUST_SCHEMA_VERSION
     && trust.status === "unsupported"
-    && (trust.ecosystems?.length || 0) === 0
-    && (trust.manifests?.length || 0) === 0
-    && (trust.lockfiles?.length || 0) === 0
-    && (trust.packageManagers?.length || 0) === 0
-    && (trust.entries?.length || 0) === 0;
+    && ["ecosystems", "manifests", "lockfiles", "packageManagers", "entries"]
+      .every((field) => Array.isArray(trust[field]) && trust[field].length === 0);
 }
 
 function unavailableDependencyTrust(trustedBaselineFallback) {

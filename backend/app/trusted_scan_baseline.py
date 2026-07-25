@@ -3,6 +3,8 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
+from .database import row_to_scan
+from .finding_reviews import enrich_scan
 from .scan_comparison import trusted_scan_summary
 
 
@@ -60,6 +62,28 @@ def trusted_scan_baseline_state(
     summary = trusted_scan_summary(scan_row, include_metadata=True)
     baseline.update(summary)
     eligible = summary["eligibility"]["eligible"] is True
+    if eligible:
+        try:
+            full_scan = enrich_scan(row_to_scan(scan_row), [])
+        except (TypeError, ValueError):
+            eligible = False
+        else:
+            finding_keys = [
+                finding.get("fingerprint")
+                for finding in full_scan["findings"]
+                if isinstance(finding, dict)
+            ]
+            if (
+                len(finding_keys) != full_scan["findingCount"]
+                or any(not isinstance(key, str) or not key for key in finding_keys)
+            ):
+                eligible = False
+            else:
+                baseline["scan"]["findings"] = [
+                    {"fingerprint": key}
+                    for key in finding_keys
+                ]
+                baseline["scan"]["findingCount"] = len(finding_keys)
     return {
         "configured": True,
         "status": "valid" if eligible else "invalid",

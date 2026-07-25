@@ -2,6 +2,7 @@ import {
   normalizeProjectExpectations,
   PROJECT_EXPECTATION_FIELDS,
 } from "./projectExpectations.js";
+import { dependencyTrustHasNoSupportedMetadata } from "./dependencyTrust.js";
 
 const SCAN_COUNT_FIELDS = [
   "traversalFailureCount",
@@ -266,6 +267,9 @@ function snapshotForScan(scan) {
 function observedValues(scan, field) {
   if (CATEGORY_SOURCES[field] === "dependency") {
     const trust = scan.dependencyTrust;
+    if (dependencyTrustHasNoSupportedMetadata(trust)) {
+      return { reliable: true, values: [] };
+    }
     if (
       !trust
       || typeof trust !== "object"

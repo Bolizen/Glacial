@@ -83,6 +83,8 @@ export function buildReviewCheckpointPreview(project, page) {
     dependencyAnalysisFingerprint: evidence.dependencyAnalysisFingerprint,
     dependencyApprovalFingerprint: evidence.dependencyApprovalFingerprint,
     dependencyApprovalState: evidence.dependencyApprovalState,
+    baselineFindingsFingerprint: evidence.baselineFindingsFingerprint,
+    newCriticalHighCount: evidence.newCriticalHighCount,
     findingCount: evidence.findingCount,
     reviewedFindingCount: evidence.reviewedFindingCount,
     unresolvedCriticalCount: evidence.unresolvedCriticalCount,
@@ -115,13 +117,28 @@ function normalizeEvidence(value) {
     && positiveInteger(source.scanId) !== null
     && /^cpr1_[0-9a-f]{64}$/.test(text(source.evidenceFingerprint, 100))
     && /^cpex1_[0-9a-f]{64}$/.test(text(source.expectationsFingerprint, 100))
-    && /^cfdb2_[0-9a-f]{64}$/.test(text(source.dependencyAnalysisFingerprint, 100))
+    && (
+      /^cfdb2_[0-9a-f]{64}$/.test(text(source.dependencyAnalysisFingerprint, 100))
+      || /^cpda1_[0-9a-f]{64}$/.test(text(source.dependencyAnalysisFingerprint, 100))
+    )
     && /^cpfr1_[0-9a-f]{64}$/.test(text(source.findingReviewsFingerprint, 100))
     && /^cpcov1_[0-9a-f]{64}$/.test(text(source.coverageFingerprint, 100))
     && (
-      source.dependencyApprovalState === "not-configured"
+      ["not-applicable", "not-configured"].includes(source.dependencyApprovalState)
       || /^cfdb2_[0-9a-f]{64}$/.test(text(source.dependencyApprovalFingerprint, 100))
     )
+    && (
+      source.dependencyApprovalState === "not-applicable"
+        ? /^cpda1_[0-9a-f]{64}$/.test(text(source.dependencyAnalysisFingerprint, 100))
+          && !text(source.dependencyApprovalFingerprint, 100)
+        : /^cfdb2_[0-9a-f]{64}$/.test(text(source.dependencyAnalysisFingerprint, 100))
+    )
+    && (
+      positiveInteger(source.baselineScanId) === null
+        ? !text(source.baselineFindingsFingerprint, 100)
+        : /^cpbf1_[0-9a-f]{64}$/.test(text(source.baselineFindingsFingerprint, 100))
+    )
+    && count(source.newCriticalHighCount) !== null
     && source.evaluatorVersion === REVIEW_CHECKPOINT_EVALUATOR_VERSION;
   return {
     reliable,
@@ -135,14 +152,21 @@ function normalizeEvidence(value) {
       : "none",
     baselineComparisonState: text(source.baselineComparisonState, 80),
     expectationsFingerprint: fingerprint(source.expectationsFingerprint, "cpex1_"),
-    dependencyAnalysisFingerprint: fingerprint(source.dependencyAnalysisFingerprint, "cfdb2_"),
+    dependencyAnalysisFingerprint: fingerprint(
+      source.dependencyAnalysisFingerprint,
+      source.dependencyApprovalState === "not-applicable" ? "cpda1_" : "cfdb2_",
+    ),
     dependencyApprovalFingerprint: source.dependencyApprovalFingerprint
       ? fingerprint(source.dependencyApprovalFingerprint, "cfdb2_")
       : "",
-    dependencyApprovalState: ["approved", "changed", "not-configured"].includes(source.dependencyApprovalState)
+    dependencyApprovalState: ["approved", "changed", "significant-change", "not-applicable", "not-configured"].includes(source.dependencyApprovalState)
       ? source.dependencyApprovalState
       : "indeterminate",
     findingReviewsFingerprint: fingerprint(source.findingReviewsFingerprint, "cpfr1_"),
+    baselineFindingsFingerprint: source.baselineFindingsFingerprint
+      ? fingerprint(source.baselineFindingsFingerprint, "cpbf1_")
+      : "",
+    newCriticalHighCount: count(source.newCriticalHighCount),
     findingReviewComplete: source.findingReviewComplete === true,
     findingCount: count(source.findingCount),
     reviewedFindingCount: count(source.reviewedFindingCount),

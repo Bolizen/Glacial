@@ -1910,8 +1910,9 @@ function ReviewCheckpointConfirmation({ value, saving, onConfirm, onCancel }) {
           <PreviewFact label="Baseline" value={checkpointBaselineLabel(value)} />
           <PreviewFact label="Project Expectations" value={abbreviateCheckpointFingerprint(value.expectationsFingerprint)} />
           <PreviewFact label="Dependency analysis" value={abbreviateCheckpointFingerprint(value.dependencyAnalysisFingerprint)} />
-          <PreviewFact label="Dependency approval" value={`${value.dependencyApprovalState} · ${abbreviateCheckpointFingerprint(value.dependencyApprovalFingerprint)}`} />
-          <PreviewFact label="Finding review" value={`${value.reviewedFindingCount}/${value.findingCount} reviewed · ${value.unresolvedCriticalCount} critical · ${value.unresolvedHighCount} high requiring action`} />
+          <PreviewFact label="Dependency review" value={checkpointDependencyLabel(value)} />
+          <PreviewFact label="Finding review" value={`${value.reviewedFindingCount}/${value.findingCount} reviewed · ${value.unresolvedCriticalCount} critical · ${value.unresolvedHighCount} high requiring action · ${value.newCriticalHighCount} new critical/high`} />
+          <PreviewFact label="Baseline findings" value={abbreviateCheckpointFingerprint(value.baselineFindingsFingerprint)} />
           <PreviewFact label="Coverage and metadata" value={`${value.coverageComplete ? "Complete" : "Incomplete"} · ${value.coverageIssueCount} gaps · metadata ${value.metadataReliable ? "reliable" : "indeterminate"}`} />
           <PreviewFact label="Evaluator" value={`Security status evaluator v${value.evaluatorVersion}`} />
           <PreviewFact label="Evidence identity" value={abbreviateCheckpointFingerprint(value.evidenceFingerprint)} />
@@ -1930,6 +1931,13 @@ function ReviewCheckpointConfirmation({ value, saving, onConfirm, onCancel }) {
 function checkpointBaselineLabel(value) {
   if (!value.baselineScanId) return "No baseline · change-over-time evidence remains limited";
   return `${value.baselineProvenance} · Scan #${value.baselineScanId}`;
+}
+
+function checkpointDependencyLabel(value) {
+  if (value.dependencyApprovalState === "not-applicable") {
+    return `Not applicable · ${abbreviateCheckpointFingerprint(value.dependencyAnalysisFingerprint)} · no approval fingerprint`;
+  }
+  return `${value.dependencyApprovalState} · ${abbreviateCheckpointFingerprint(value.dependencyApprovalFingerprint)}`;
 }
 
 function abbreviateCheckpointFingerprint(value) {

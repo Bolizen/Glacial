@@ -2,6 +2,16 @@ from __future__ import annotations
 
 CHANGELOG_ENTRIES = [
     {
+        "version": "0.6.9",
+        "title": "Review checkpoint eligibility correction",
+        "changes": [
+            "Aligned backend checkpoint eligibility with canonical Project Security Status boundaries for dependency applicability and new critical/high findings.",
+            "Represented no supported dependency metadata explicitly without fabricating an approval fingerprint.",
+            "Added bounded baseline-finding identities and fail-closed handling for malformed historical finding evidence.",
+            "Made client-supplied Ready status non-authoritative; persisted normalized evidence now determines eligibility.",
+        ],
+    },
+    {
         "version": "0.6.8",
         "title": "Project review checkpoints",
         "changes": [

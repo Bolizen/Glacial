@@ -138,6 +138,77 @@ class ReviewCheckpointTests(unittest.TestCase):
             ))
         self.assertEqual(ownership_error.exception.status_code, 403)
 
+    def test_no_supported_dependency_metadata_is_explicitly_not_applicable_and_eligible(self) -> None:
+        (self.project / "README.md").write_text("Project documentation.", encoding="utf-8")
+        scan = main.run_scan(ProjectPathRequest(project_path=str(self.project)))
+        self.assertEqual(scan["dependencyTrust"]["status"], "unsupported")
+        main.update_trust_profile(TrustProfileRequest(
+            project_path=str(self.project),
+            reviewedPaths=scan["reviewedFiles"],
+        ))
+
+        page = self._page()
+        evidence = page["currentEvidence"]
+        self.assertTrue(evidence["reliable"], evidence)
+        self.assertTrue(evidence["readyForCheckpoint"], evidence)
+        self.assertEqual(evidence["dependencyApprovalState"], "not-applicable")
+        self.assertRegex(evidence["dependencyAnalysisFingerprint"], r"^cpda1_")
+        self.assertEqual(evidence["dependencyApprovalFingerprint"], "")
+
+        created = main.record_review_checkpoint(self._request(scan["id"], page))
+        self.assertTrue(created["created"])
+        self.assertEqual(created["state"]["id"], "current")
+
+    def test_new_reviewed_high_finding_and_malformed_baseline_cannot_be_bypassed_by_ready_request(self) -> None:
+        baseline = self._ready_scan()
+        current = self._insert_scan_after(
+            baseline,
+            findings=[{
+                "type": "test-high",
+                "path": "src/high.js",
+                "severity": "high",
+                "explanation": "Focused parity fixture.",
+            }],
+        )
+        current_scan = main.scan_history(str(self.project))["scans"][0]
+        main.update_finding_review(FindingReviewRequest(
+            project_path=str(self.project),
+            scan_id=current,
+            fingerprint=current_scan["findings"][0]["fingerprint"],
+            status="expected",
+        ))
+
+        blocked = self._page()
+        evidence = blocked["currentEvidence"]
+        self.assertTrue(evidence["reliable"], evidence)
+        self.assertFalse(evidence["readyForCheckpoint"])
+        self.assertEqual(evidence["newCriticalHighCount"], 1)
+        with self.assertRaises(HTTPException) as bypass_error:
+            main.record_review_checkpoint(self._request(current, blocked))
+        self.assertEqual(bypass_error.exception.status_code, 409)
+        with database.get_connection() as connection:
+            self.assertEqual(connection.execute(
+                "SELECT COUNT(*) FROM project_review_checkpoints WHERE project_id = ?",
+                (str(self.project),),
+            ).fetchone()[0], 0)
+            self.assertEqual(connection.execute(
+                "SELECT COUNT(*) FROM project_activity_events "
+                "WHERE project_id = ? AND event_type = 'review_checkpoint_created'",
+                (str(self.project),),
+            ).fetchone()[0], 0)
+
+        with database.get_connection() as connection:
+            connection.execute(
+                "UPDATE scans SET finding_count = finding_count + 1 WHERE id = ?",
+                (baseline["id"],),
+            )
+        malformed = self._page()
+        self.assertFalse(malformed["currentEvidence"]["reliable"])
+        self.assertRegex(
+            " ".join(malformed["currentEvidence"]["reasons"]),
+            r"baseline evidence",
+        )
+
     def test_newer_scan_requires_review_and_malformed_current_or_historical_evidence_is_indeterminate(self) -> None:
         scan = self._ready_scan()
         created = main.record_review_checkpoint(self._request(scan["id"], self._page()))
@@ -170,6 +241,27 @@ class ReviewCheckpointTests(unittest.TestCase):
         stale = self._page()
         self.assertEqual(stale["state"]["id"], "review-required")
         self.assertRegex(stale["state"]["reasons"][0], r"different latest scan")
+
+        with database.get_connection() as connection:
+            original_count = connection.execute(
+                "SELECT finding_count FROM scans WHERE id = ?",
+                (scan["id"],),
+            ).fetchone()["finding_count"]
+            connection.execute(
+                "UPDATE scans SET finding_count = ? WHERE id = ?",
+                (original_count + 1, scan["id"]),
+            )
+        malformed_baseline = self._page()
+        self.assertEqual(malformed_baseline["state"]["id"], "indeterminate")
+        self.assertRegex(
+            " ".join(malformed_baseline["state"]["reasons"]),
+            r"baseline evidence",
+        )
+        with database.get_connection() as connection:
+            connection.execute(
+                "UPDATE scans SET finding_count = ? WHERE id = ?",
+                (original_count, scan["id"]),
+            )
 
         with database.get_connection() as connection:
             latest = connection.execute(
@@ -258,6 +350,36 @@ class ReviewCheckpointTests(unittest.TestCase):
 
     def _page(self) -> dict[str, object]:
         return main.review_checkpoints(str(self.project), limit=5, offset=0)
+
+    def _insert_scan_after(
+        self,
+        source: dict[str, object],
+        *,
+        findings: list[dict[str, object]],
+    ) -> int:
+        with database.get_connection() as connection:
+            row = connection.execute(
+                "SELECT * FROM scans WHERE id = ?",
+                (source["id"],),
+            ).fetchone()
+            cursor = connection.execute(
+                "INSERT INTO scans ("
+                "project_path, scan_date, overall_risk, findings_json, finding_count, "
+                "reviewed_file_count, ignored_file_count, finding_summary_json, scan_metadata_json"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    str(self.project),
+                    "2026-08-02T12:00:00+00:00",
+                    "high" if findings else "low",
+                    json.dumps(findings),
+                    len(findings),
+                    row["reviewed_file_count"],
+                    row["ignored_file_count"],
+                    json.dumps({"test-high": len(findings)} if findings else {}),
+                    row["scan_metadata_json"],
+                ),
+            )
+            return int(cursor.lastrowid)
 
     def _request(
         self,

@@ -9,7 +9,7 @@ export const SECURITY_STATUS_LABELS = Object.freeze({
   insufficient: "Insufficient evidence",
   blocked: "Blocked by incomplete scan",
 });
-export const SECURITY_STATUS_EVALUATOR_VERSION = 1;
+export const SECURITY_STATUS_EVALUATOR_VERSION = 2;
 
 const SECTION_LABELS = {
   coverage: "Scan coverage",
@@ -176,14 +176,10 @@ function findingsEvidence(scan, scans, drift, trustedBaseline, coverage) {
     && item.finding.review?.status !== "expected"
   ));
   const baselineScan = applicableBaselineScan(scans, drift, trustedBaseline);
-  const newHigh = baselineScan && Array.isArray(baselineScan.findings)
-    ? newFindings(normalized, baselineScan.findings).filter((item) => ["critical", "high"].includes(item.severity))
-    : [];
   const counts = severityCounts(normalized);
   counts.total = normalized.length;
   counts.reviewed = reviewed;
   counts.needsReview = unresolved;
-  counts.newHigh = baselineScan ? newHigh.length : null;
   if (coverage.blocking) {
     return section(
       "findings",
@@ -194,6 +190,22 @@ function findingsEvidence(scan, scans, drift, trustedBaseline, coverage) {
       { insufficient: true },
     );
   }
+  const baselineFindings = baselineFindingEvidence(baselineScan);
+  if (!baselineFindings.reliable) {
+    return section(
+      "findings",
+      "Indeterminate",
+      baselineFindings.reason,
+      counts,
+      [],
+      { insufficient: true },
+    );
+  }
+  const newHigh = baselineScan
+    ? newFindings(normalized, baselineFindings.findings)
+      .filter((item) => ["critical", "high"].includes(item.severity))
+    : [];
+  counts.newHigh = baselineScan ? newHigh.length : null;
   const unresolvedCritical = highUnresolved.filter((item) => item.severity === "critical");
   if (newHigh.length || unresolvedCritical.length) {
     const findingCount = newHigh.length || unresolvedCritical.length;
@@ -455,7 +467,26 @@ function applicableBaselineScan(scans, drift, trustedBaseline) {
   const id = trustedBaseline?.configured
     ? trustedBaseline.status === "valid" ? trustedBaseline.baseline?.scanId : null
     : drift?.scanToScan?.baselineScan?.id;
-  return Number.isSafeInteger(id) ? scans.find((scan) => scan?.id === id) || null : null;
+  if (!Number.isSafeInteger(id)) return null;
+  return scans.find((scan) => scan?.id === id)
+    || (trustedBaseline?.configured && trustedBaseline.baseline?.scan?.id === id
+      ? trustedBaseline.baseline.scan
+      : null);
+}
+
+function baselineFindingEvidence(scan) {
+  if (!scan) return { reliable: true, findings: [], reason: "" };
+  if (
+    !Array.isArray(scan.findings)
+    || scan.findings.some((finding) => !finding || typeof finding !== "object" || Array.isArray(finding))
+  ) {
+    return {
+      reliable: false,
+      findings: [],
+      reason: "Applicable baseline finding evidence is missing or malformed.",
+    };
+  }
+  return { reliable: true, findings: scan.findings, reason: "" };
 }
 
 function newFindings(current, baselineFindings) {

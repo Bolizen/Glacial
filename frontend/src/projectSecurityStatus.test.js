@@ -122,6 +122,59 @@ test("a fully reviewed reliable project can be Ready for reviewed work", () => {
   assert.match(result.disclaimer, /not a guarantee/i);
 });
 
+test("checkpoint parity boundaries keep not-applicable dependencies ready and new reviewed high findings blocked", () => {
+  const noDependencies = dependencyTrust({
+    status: "unsupported",
+    ecosystems: [],
+    manifests: [],
+    lockfiles: [],
+    packageManagers: [],
+    entries: [],
+    trustedBaseline: {
+      configured: false,
+      valid: false,
+      comparison: { status: "not-configured" },
+    },
+  });
+  const ordinary = completeScan(10, {
+    manifests: [],
+    dependencyTrust: { ...noDependencies, available: undefined },
+  });
+  const ready = statusFor(ordinary, {
+    scans: [ordinary],
+    report: reportFor(ordinary, noDependencies),
+    profile: { reviewedPaths: ["src/index.js"] },
+  });
+  assert.equal(ready.label, "Ready for reviewed work");
+  assert.equal(ready.sections.find((item) => item.id === "dependencies").status, "Not applicable");
+
+  const baseline = completeScan(11);
+  const reviewedHigh = completeScan(12, {
+    findings: [finding("new-reviewed-high", "high", "expected")],
+  });
+  const significant = statusFor(reviewedHigh, { scans: [reviewedHigh, baseline] });
+  assert.equal(significant.label, "Significant changes detected");
+  assert.equal(significant.sections.find((item) => item.id === "findings").counts.newHigh, 1);
+
+  const trusted = statusFor(reviewedHigh, {
+    scans: [reviewedHigh],
+    trustedBaseline: {
+      configured: true,
+      status: "valid",
+      baseline: { scanId: baseline.id, scan: baseline },
+    },
+  });
+  assert.equal(trusted.label, "Significant changes detected");
+  assert.equal(trusted.sections.find((item) => item.id === "findings").counts.newHigh, 1);
+
+  const malformedBaseline = { ...baseline, findings: "malformed" };
+  const indeterminate = statusFor(reviewedHigh, {
+    scans: [reviewedHigh, malformedBaseline],
+  });
+  assert.equal(indeterminate.label, "Insufficient evidence");
+  assert.equal(indeterminate.sections.find((item) => item.id === "findings").status, "Indeterminate");
+});
+
 test("section-level indeterminate state remains visible and actions are conservatively ordered and capped", () => {
   const baseline = completeScan(1);
   const latest = completeScan(2, {

@@ -1,3 +1,14 @@
+# Glacial 0.6.9 Review Checkpoint Eligibility Correction
+
+Glacial 0.6.9 aligns backend review-checkpoint eligibility with the canonical Project Security Status evaluator.
+
+## Checkpoint eligibility parity
+
+- Represents complete scans with no supported dependency metadata as explicitly not applicable, without fabricating a dependency approval fingerprint.
+- Detects new critical/high findings relative to the applicable trusted or bounded automatic baseline even after those findings are reviewed or marked expected.
+- Treats malformed applicable baseline finding evidence as indeterminate and derives eligibility entirely from persisted evidence.
+- Advances the checkpoint evaluator version so earlier checkpoints cannot be mistaken for current under the corrected semantics.
+
 # Glacial 0.6.8 Project Review Checkpoints
 
 Glacial 0.6.8 adds immutable, project-scoped audit records for explicitly recording manual review of the exact current security evidence.

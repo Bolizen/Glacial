@@ -9,13 +9,21 @@ import {
 
 test("checkpoint eligibility requires the canonical ready status and exact reliable evidence", () => {
   const page = normalizeReviewCheckpointPage(checkpointPage());
-  assert.equal(reviewCheckpointEligibility({ status: "review", label: "Review required", evaluatorVersion: 1 }, page).eligible, false);
-  assert.equal(reviewCheckpointEligibility({ status: "ready", label: "Ready for reviewed work", evaluatorVersion: 1 }, page).eligible, true);
+  assert.equal(reviewCheckpointEligibility({ status: "review", label: "Review required", evaluatorVersion: 2 }, page).eligible, false);
+  assert.equal(reviewCheckpointEligibility({ status: "ready", label: "Ready for reviewed work", evaluatorVersion: 2 }, page).eligible, true);
 
   const current = normalizeReviewCheckpointPage(checkpointPage({
     state: { id: "current", reasons: ["Exact evidence match."] },
   }));
-  assert.equal(reviewCheckpointEligibility({ status: "ready", evaluatorVersion: 1 }, current).eligible, false);
+  assert.equal(reviewCheckpointEligibility({ status: "ready", evaluatorVersion: 2 }, current).eligible, false);
+
+  const notApplicableValue = checkpointPage();
+  notApplicableValue.currentEvidence.dependencyAnalysisFingerprint = `cpda1_${"b".repeat(64)}`;
+  notApplicableValue.currentEvidence.dependencyApprovalFingerprint = "";
+  notApplicableValue.currentEvidence.dependencyApprovalState = "not-applicable";
+  const notApplicable = normalizeReviewCheckpointPage(notApplicableValue);
+  assert.equal(notApplicable.currentEvidence.reliable, true);
+  assert.equal(reviewCheckpointEligibility({ status: "ready", evaluatorVersion: 2 }, notApplicable).eligible, true);
 });
 
 test("checkpoint malformed evidence and stale reasons remain conservative and bounded", () => {
@@ -36,7 +44,7 @@ test("checkpoint malformed evidence and stale reasons remain conservative and bo
   assert.equal(malformed.state.id, "indeterminate");
   assert.equal(malformed.state.reasons.length, 3);
   assert.equal(malformed.currentEvidence.reliable, false);
-  assert.equal(reviewCheckpointEligibility({ status: "ready", evaluatorVersion: 1 }, malformed).eligible, false);
+  assert.equal(reviewCheckpointEligibility({ status: "ready", evaluatorVersion: 2 }, malformed).eligible, false);
   assert.equal(malformed.history[0].malformed, true);
 });
 
@@ -75,6 +83,8 @@ function checkpointPage(overrides = {}) {
       dependencyApprovalFingerprint: `cfdb2_${hex}`,
       dependencyApprovalState: "approved",
       findingReviewsFingerprint: `cpfr1_${hex}`,
+      baselineFindingsFingerprint: `cpbf1_${hex}`,
+      newCriticalHighCount: 0,
       findingReviewComplete: true,
       findingCount: 2,
       reviewedFindingCount: 2,
@@ -85,7 +95,7 @@ function checkpointPage(overrides = {}) {
       coverageIssueCount: 0,
       metadataReliable: true,
       checkpointSchemaVersion: 1,
-      evaluatorVersion: 1,
+      evaluatorVersion: 2,
       evidenceFingerprint: `cpr1_${hex}`,
       reasons: [],
     },

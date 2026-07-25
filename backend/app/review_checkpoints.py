@@ -12,8 +12,10 @@ from fastapi import HTTPException
 
 from .activity import EVENT_REVIEW_CHECKPOINT_CREATED, append_activity_event
 from .database import row_to_scan
-from .finding_reviews import enrich_scan as enrich_finding_reviews
-from .scan_comparison import trusted_scan_eligibility
+from .finding_reviews import (
+    enrich_scan as enrich_finding_reviews,
+    finding_fingerprint,
+)
 from .trusted_dependency_baseline import (
     approval_for_analysis,
     compare_with_baseline,
@@ -23,7 +25,7 @@ from .trusted_scan_baseline import trusted_scan_baseline_state
 
 
 CHECKPOINT_SCHEMA_VERSION = 1
-SECURITY_STATUS_EVALUATOR_VERSION = 1
+SECURITY_STATUS_EVALUATOR_VERSION = 2
 PROVENANCE_MANUAL = "manual"
 MAX_CHECKPOINT_PAGE_SIZE = 20
 MAX_CHECKPOINT_OFFSET = 200
@@ -108,13 +110,12 @@ def create_checkpoint(
     if requested_scan["project_path"] != project_id:
         raise HTTPException(status_code=403, detail="The selected scan belongs to another project.")
     if (
-        security_status != "ready"
-        or evaluator_version != SECURITY_STATUS_EVALUATOR_VERSION
+        evaluator_version != SECURITY_STATUS_EVALUATOR_VERSION
         or provenance != PROVENANCE_MANUAL
     ):
         raise HTTPException(
             status_code=409,
-            detail="A review checkpoint requires the current Ready for reviewed work status.",
+            detail="The checkpoint preview uses unsupported evaluator or provenance metadata.",
         )
 
     evidence = current_checkpoint_evidence(connection, project_id=project_id)
@@ -141,6 +142,11 @@ def create_checkpoint(
             status_code=409,
             detail="The current evidence does not satisfy Ready for reviewed work requirements.",
         )
+    if security_status != "ready":
+        raise HTTPException(
+            status_code=409,
+            detail="The checkpoint preview no longer identifies Ready for reviewed work.",
+        )
 
     latest = connection.execute(
         "SELECT * FROM project_review_checkpoints WHERE project_id = ? "
@@ -161,11 +167,12 @@ def create_checkpoint(
         "checkpoint_id, project_id, scan_id, baseline_scan_id, baseline_provenance, "
         "expectations_fingerprint, dependency_analysis_fingerprint, "
         "dependency_approval_fingerprint, dependency_approval_state, "
-        "finding_reviews_fingerprint, finding_review_complete, "
+        "finding_reviews_fingerprint, baseline_findings_fingerprint, "
+        "new_critical_high_count, finding_review_complete, "
         "unresolved_critical_count, unresolved_high_count, coverage_fingerprint, "
         "metadata_reliable, checkpoint_schema_version, evaluator_version, "
         "evidence_fingerprint, created_at, provenance"
-        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             checkpoint_id,
             project_id,
@@ -177,6 +184,8 @@ def create_checkpoint(
             evidence["dependencyApprovalFingerprint"],
             evidence["dependencyApprovalState"],
             evidence["findingReviewsFingerprint"],
+            evidence["baselineFindingsFingerprint"],
+            evidence["newCriticalHighCount"],
             1 if evidence["findingReviewComplete"] else 0,
             evidence["unresolvedCriticalCount"],
             evidence["unresolvedHighCount"],
@@ -264,7 +273,17 @@ def current_checkpoint_evidence(
     if dependency is None:
         reasons.append("Dependency analysis or approval evidence is malformed or unsupported.")
 
-    baseline = _baseline_identity(connection, project_id, scan_row, scan)
+    baseline = (
+        _baseline_identity(
+            connection,
+            project_id,
+            scan_row,
+            scan,
+            current_findings=findings,
+        )
+        if findings is not None
+        else None
+    )
     if baseline is None:
         reasons.append("Trusted or automatic baseline evidence cannot be compared reliably.")
 
@@ -286,6 +305,8 @@ def current_checkpoint_evidence(
         "dependencyApprovalFingerprint": dependency["approvalFingerprint"],
         "dependencyApprovalState": dependency["approvalState"],
         "findingReviewsFingerprint": findings["fingerprint"],
+        "baselineFindingsFingerprint": baseline["findingsFingerprint"],
+        "newCriticalHighCount": baseline["newCriticalHighCount"],
         "findingReviewComplete": findings["complete"],
         "unresolvedCriticalCount": findings["unresolvedCritical"],
         "unresolvedHighCount": findings["unresolvedHigh"],
@@ -298,7 +319,8 @@ def current_checkpoint_evidence(
         and findings["complete"]
         and findings["unresolvedCritical"] == 0
         and findings["unresolvedHigh"] == 0
-        and dependency["approvalState"] == "approved"
+        and baseline["newCriticalHighCount"] == 0
+        and dependency["approvalState"] in {"approved", "not-applicable"}
         and expectations["configured"]
         and expectations["matches"]
         and baseline["comparisonState"] in {"unchanged", "no-baseline", "baseline-is-latest"}
@@ -374,6 +396,8 @@ def checkpoint_state(
         differences.append("Dependency analysis or approval evidence changed.")
     if (
         checkpoint_row["finding_reviews_fingerprint"] != evidence["findingReviewsFingerprint"]
+        or checkpoint_row["baseline_findings_fingerprint"] != evidence["baselineFindingsFingerprint"]
+        or checkpoint_row["new_critical_high_count"] != evidence["newCriticalHighCount"]
         or bool(checkpoint_row["finding_review_complete"]) != evidence["findingReviewComplete"]
         or checkpoint_row["unresolved_critical_count"] != evidence["unresolvedCriticalCount"]
         or checkpoint_row["unresolved_high_count"] != evidence["unresolvedHighCount"]
@@ -436,17 +460,22 @@ def _expectations_identity(
 
 def _observed_expectations(scan: Mapping[str, Any]) -> dict[str, list[str]] | None:
     dependency = scan.get("dependencyTrust")
-    if (
+    dependency_not_applicable = _dependency_not_applicable(dependency)
+    if not dependency_not_applicable and (
         not isinstance(dependency, Mapping)
         or dependency.get("schemaVersion") != 1
         or dependency.get("status") != "complete"
     ):
         return None
     source = {
-        "trustedPackageManagers": dependency.get("packageManagers"),
+        "trustedPackageManagers": []
+        if dependency_not_applicable
+        else dependency.get("packageManagers"),
         "expectedManifestFiles": scan.get("manifests"),
         "expectedLockfiles": scan.get("lockfiles"),
-        "expectedEcosystems": dependency.get("ecosystems"),
+        "expectedEcosystems": []
+        if dependency_not_applicable
+        else dependency.get("ecosystems"),
         "reviewedPaths": scan.get("reviewedFiles"),
         "ignoredPaths": scan.get("ignoredFiles"),
     }
@@ -493,6 +522,19 @@ def _dependency_identity(
     scan: Mapping[str, Any],
 ) -> dict[str, Any] | None:
     analysis = scan.get("dependencyTrust")
+    if _dependency_not_applicable(analysis):
+        return {
+            "analysisFingerprint": _fingerprint(
+                "cpda1_",
+                {
+                    "applicability": "not-applicable",
+                    "schemaVersion": 1,
+                    "status": "unsupported",
+                },
+            ),
+            "approvalFingerprint": "",
+            "approvalState": "not-applicable",
+        }
     approval = approval_for_analysis(analysis)
     if approval.get("eligible") is not True:
         return None
@@ -514,11 +556,55 @@ def _dependency_identity(
     comparison_status = comparison.get("status")
     if comparison_status not in {"identical", "drift"}:
         return None
+    significant_change = _dependency_comparison_is_significant(analysis)
     return {
         "analysisFingerprint": approval["fingerprint"],
         "approvalFingerprint": baseline["fingerprint"],
-        "approvalState": "approved" if comparison_status == "identical" else "changed",
+        "approvalState": (
+            "significant-change"
+            if significant_change
+            else "approved"
+            if comparison_status == "identical"
+            else "changed"
+        ),
     }
+
+
+def _dependency_comparison_is_significant(value: Any) -> bool:
+    comparison = value.get("comparison") if isinstance(value, Mapping) else None
+    comparison = comparison if isinstance(comparison, Mapping) else {}
+    change_count = comparison.get("changeCount")
+    if (
+        isinstance(change_count, int)
+        and not isinstance(change_count, bool)
+        and change_count >= 3
+    ):
+        return True
+    changes = comparison.get("changes")
+    if not isinstance(changes, list):
+        return False
+    significant_types = {
+        "version-changed",
+        "source-changed",
+        "integrity-changed",
+        "install-script-changed",
+    }
+    return any(
+        isinstance(change, Mapping)
+        and change.get("changeType") in significant_types
+        for change in changes
+    )
+
+
+def _dependency_not_applicable(value: Any) -> bool:
+    if (
+        not isinstance(value, Mapping)
+        or value.get("schemaVersion") != 1
+        or value.get("status") != "unsupported"
+    ):
+        return False
+    fields = ("ecosystems", "manifests", "lockfiles", "packageManagers", "entries")
+    return all(isinstance(value.get(field), list) and not value[field] for field in fields)
 
 
 def _finding_identity(value: Any) -> dict[str, Any] | None:
@@ -528,6 +614,7 @@ def _finding_identity(value: Any) -> dict[str, Any] | None:
     unresolved_critical = 0
     unresolved_high = 0
     reviewed = 0
+    critical_high_keys: list[str] = []
     for finding in value:
         if not isinstance(finding, Mapping):
             return None
@@ -547,6 +634,8 @@ def _finding_identity(value: Any) -> dict[str, Any] | None:
             unresolved_critical += 1
         if severity == "high" and status != "expected":
             unresolved_high += 1
+        if severity in {"critical", "high"}:
+            critical_high_keys.append(fingerprint)
         entries.append({"fingerprint": fingerprint, "status": status})
     entries.sort(key=lambda item: item["fingerprint"])
     return {
@@ -556,6 +645,7 @@ def _finding_identity(value: Any) -> dict[str, Any] | None:
         "reviewed": reviewed,
         "unresolvedCritical": unresolved_critical,
         "unresolvedHigh": unresolved_high,
+        "criticalHighKeys": sorted(set(critical_high_keys)),
     }
 
 
@@ -609,6 +699,8 @@ def _baseline_identity(
     project_id: str,
     current_row: Any,
     current_scan: Mapping[str, Any],
+    *,
+    current_findings: Mapping[str, Any],
 ) -> dict[str, Any] | None:
     state = trusted_scan_baseline_state(connection, project_id=project_id)
     if state.get("configured") is True:
@@ -624,13 +716,24 @@ def _baseline_identity(
         ).fetchone()
         if not baseline_row:
             return None
+        try:
+            baseline_scan = row_to_scan(baseline_row)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+        baseline_findings = _baseline_findings_identity(
+            baseline_row,
+            baseline_scan,
+            current_findings,
+        )
+        if baseline_findings is None:
+            return None
         if scan_id == current_row["id"]:
             return {
                 "scanId": scan_id,
                 "provenance": PROVENANCE_MANUAL,
                 "comparisonState": "baseline-is-latest",
+                **baseline_findings,
             }
-        baseline_scan = row_to_scan(baseline_row)
         baseline_observed = _observed_expectations(baseline_scan)
         current_observed = _observed_expectations(current_scan)
         if baseline_observed is None or current_observed is None:
@@ -639,6 +742,7 @@ def _baseline_identity(
             "scanId": scan_id,
             "provenance": PROVENANCE_MANUAL,
             "comparisonState": "unchanged" if baseline_observed == current_observed else "drift",
+            **baseline_findings,
         }
 
     rows = connection.execute(
@@ -650,19 +754,40 @@ def _baseline_identity(
             MAX_AUTOMATIC_BASELINE_CANDIDATES,
         ),
     )
+    current_observed = _observed_expectations(current_scan)
+    if current_observed is None:
+        rows.close()
+        return None
     try:
         for row in rows:
-            if trusted_scan_eligibility(row).get("eligible") is not True:
+            baseline_coverage = _coverage_identity(row)
+            if (
+                baseline_coverage is None
+                or baseline_coverage["complete"] is not True
+            ):
                 continue
-            baseline_scan = row_to_scan(row)
-            baseline_observed = _observed_expectations(baseline_scan)
-            current_observed = _observed_expectations(current_scan)
-            if baseline_observed is None or current_observed is None:
+            baseline_metadata = _baseline_metadata_snapshot(row)
+            if baseline_metadata is None:
                 continue
+            baseline_observed = _observed_expectations(baseline_metadata)
+            if baseline_observed is None:
+                continue
+            try:
+                baseline_scan = row_to_scan(row)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                return None
+            baseline_findings = _baseline_findings_identity(
+                row,
+                baseline_scan,
+                current_findings,
+            )
+            if baseline_findings is None:
+                return None
             return {
                 "scanId": int(row["id"]),
                 "provenance": "automatic",
                 "comparisonState": "unchanged" if baseline_observed == current_observed else "drift",
+                **baseline_findings,
             }
     finally:
         rows.close()
@@ -670,6 +795,78 @@ def _baseline_identity(
         "scanId": None,
         "provenance": "none",
         "comparisonState": "no-baseline",
+        "findingsFingerprint": "",
+        "newCriticalHighCount": 0,
+    }
+
+
+def _baseline_metadata_snapshot(row: Any) -> dict[str, Any] | None:
+    try:
+        metadata = json.loads(row["scan_metadata_json"])
+    except (KeyError, TypeError, json.JSONDecodeError):
+        return None
+    if not isinstance(metadata, Mapping):
+        return None
+    string_fields = ("manifests", "lockfiles", "ignoredFiles", "reviewedFiles")
+    if any(
+        not isinstance(metadata.get(field), list)
+        or any(not isinstance(item, str) for item in metadata[field])
+        for field in string_fields
+    ):
+        return None
+    scripts = metadata.get("lifecycleScripts")
+    if (
+        not isinstance(scripts, list)
+        or any(
+            not isinstance(item, Mapping)
+            or not isinstance(item.get("path"), str)
+            or not isinstance(item.get("script"), str)
+            for item in scripts
+        )
+    ):
+        return None
+    return {
+        **{field: metadata[field] for field in string_fields},
+        "lifecycleScripts": scripts,
+        "dependencyTrust": metadata.get("dependencyTrust"),
+        "scanMetadataReliable": True,
+    }
+
+
+def _baseline_findings_identity(
+    row: Any,
+    scan: Mapping[str, Any],
+    current_findings: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    findings = scan.get("findings")
+    if not isinstance(findings, list):
+        return None
+    try:
+        stored_count = row["finding_count"]
+    except (KeyError, IndexError):
+        return None
+    if (
+        not isinstance(stored_count, int)
+        or isinstance(stored_count, bool)
+        or stored_count != len(findings)
+    ):
+        return None
+    keys: list[str] = []
+    for finding in findings:
+        if not isinstance(finding, Mapping):
+            return None
+        try:
+            key = finding_fingerprint(dict(finding))
+        except (TypeError, ValueError):
+            return None
+        if not key:
+            return None
+        keys.append(key)
+    normalized_keys = sorted(set(keys))
+    current_high = set(current_findings.get("criticalHighKeys") or [])
+    return {
+        "findingsFingerprint": _fingerprint("cpbf1_", normalized_keys),
+        "newCriticalHighCount": len(current_high.difference(normalized_keys)),
     }
 
 
@@ -709,17 +906,57 @@ def _checkpoint_row_problem(
         or not _utc_timestamp(row["created_at"])
         or not FINGERPRINT_PATTERN.fullmatch(str(row["evidence_fingerprint"] or ""))
         or not _stored_fingerprint(row["expectations_fingerprint"], "cpex1_")
-        or not _stored_fingerprint(row["dependency_analysis_fingerprint"], "cfdb2_")
+        or not (
+            _stored_fingerprint(row["dependency_analysis_fingerprint"], "cfdb2_")
+            or _stored_fingerprint(row["dependency_analysis_fingerprint"], "cpda1_")
+        )
         or not _stored_fingerprint(row["finding_reviews_fingerprint"], "cpfr1_")
         or not _stored_fingerprint(row["coverage_fingerprint"], "cpcov1_")
-        or row["dependency_approval_state"] not in {"approved", "changed", "not-configured"}
+        or row["dependency_approval_state"] not in {
+            "approved",
+            "changed",
+            "significant-change",
+            "not-applicable",
+            "not-configured",
+        }
         or (
-            row["dependency_approval_state"] in {"approved", "changed"}
+            row["dependency_approval_state"] in {
+                "approved",
+                "changed",
+                "significant-change",
+            }
             and not _stored_fingerprint(row["dependency_approval_fingerprint"], "cfdb2_")
         )
         or (
-            row["dependency_approval_state"] == "not-configured"
+            row["dependency_approval_state"] in {"not-applicable", "not-configured"}
             and row["dependency_approval_fingerprint"] != ""
+        )
+        or (
+            row["dependency_approval_state"] == "not-applicable"
+            and not _stored_fingerprint(row["dependency_analysis_fingerprint"], "cpda1_")
+        )
+        or (
+            row["dependency_approval_state"] != "not-applicable"
+            and not _stored_fingerprint(row["dependency_analysis_fingerprint"], "cfdb2_")
+        )
+        or (
+            row["evaluator_version"] == SECURITY_STATUS_EVALUATOR_VERSION
+            and (
+                (
+                    row["baseline_scan_id"] is None
+                    and row["baseline_findings_fingerprint"] != ""
+                )
+                or (
+                    row["baseline_scan_id"] is not None
+                    and not _stored_fingerprint(
+                        row["baseline_findings_fingerprint"],
+                        "cpbf1_",
+                    )
+                )
+                or not isinstance(row["new_critical_high_count"], int)
+                or isinstance(row["new_critical_high_count"], bool)
+                or row["new_critical_high_count"] < 0
+            )
         )
         or row["finding_review_complete"] not in {0, 1}
         or row["metadata_reliable"] not in {0, 1}
@@ -772,6 +1009,8 @@ def _public_evidence(value: Mapping[str, Any]) -> dict[str, Any]:
         "dependencyApprovalFingerprint",
         "dependencyApprovalState",
         "findingReviewsFingerprint",
+        "baselineFindingsFingerprint",
+        "newCriticalHighCount",
         "findingReviewComplete",
         "findingCount",
         "reviewedFindingCount",

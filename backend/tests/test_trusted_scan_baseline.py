@@ -206,15 +206,23 @@ class TrustedScanBaselineTests(unittest.TestCase):
         self.assertEqual(state["latestScan"]["id"], 2)
         self.assertIn("no automatic baseline was substituted", state["message"])
 
-    def test_read_response_contains_only_bounded_expectation_metadata(self) -> None:
+    def test_read_response_contains_bounded_metadata_and_finding_identities(self) -> None:
         self.add_scan(1)
         with database.get_connection() as connection:
             row = connection.execute("SELECT scan_metadata_json FROM scans WHERE id = 1").fetchone()
             metadata = json.loads(row["scan_metadata_json"])
             metadata["manifests"] = ["x" * 800]
             connection.execute(
-                "UPDATE scans SET scan_metadata_json = ? WHERE id = 1",
-                (json.dumps(metadata),),
+                "UPDATE scans SET scan_metadata_json = ?, findings_json = ?, "
+                "finding_count = 1 WHERE id = 1",
+                (
+                    json.dumps(metadata),
+                    json.dumps([{
+                        "type": "test-finding",
+                        "path": "src/index.js",
+                        "severity": "low",
+                    }]),
+                ),
             )
         self.set_baseline(1)
 
@@ -226,6 +234,9 @@ class TrustedScanBaselineTests(unittest.TestCase):
             {"schemaVersion", "status", "packageManagers", "ecosystems"},
         )
         self.assertNotIn("entries", baseline_scan["dependencyTrust"])
+        self.assertEqual(baseline_scan["findingCount"], 1)
+        self.assertEqual(set(baseline_scan["findings"][0]), {"fingerprint"})
+        self.assertRegex(baseline_scan["findings"][0]["fingerprint"], r"^cf1_")
 
     def test_baseline_management_mutates_only_reference_and_activity_tables(self) -> None:
         self.add_scan(1)
