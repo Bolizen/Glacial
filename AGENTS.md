@@ -83,19 +83,31 @@ Validation levels are `targeted` for directly relevant checks (the default), `br
 
 ## Numbered Google Drive handoffs
 
-A task prompt may begin with a zero-padded three-digit handoff ID, such as `001`.
+Glacial handoff IDs use the Glacial-specific `G###` namespace. `G030` is the first
+namespaced handoff and the current transition handoff. Every subsequent Glacial
+handoff ID must be exactly `G` followed by three digits, beginning at `G030`
+(for example, `G031`). Reject malformed or out-of-sequence identifiers such as
+`G30`, `GG030`, `030G`, bare `030`, or `G001`.
 
-When a handoff ID is present:
+Legacy bare identifiers `001` through `029` remain valid only as immutable
+historical records. Never rename, move, modify, recreate, or reinterpret those
+handoffs as `G001` through `G029`.
+
+Each Glacial handoff ID is unique and must never be reused. Unrelated Icefields
+repositories may use separate prefixes and numbering sequences; do not apply the
+Glacial namespace or sequence to them.
+
+When a valid Glacial handoff ID is present:
 
 1. Complete the task according to the task-specific prompt.
 2. Compose the normal final response that will be shown to the user.
 3. Before submitting that final response, create:
    `My Drive/Icefields/Glacial/<HANDOFF_ID>/`
-4. Write the exact final-response Markdown, verbatim, to:
+4. Write the exact final-response Markdown, verbatim, as the machine-readable handoff at:
    `My Drive/Icefields/Glacial/<HANDOFF_ID>/result.md`
 5. The contents of `result.md` and the final response shown to the user must be identical. Do not summarize, expand, omit, or reformat either version.
 6. Write to `result.tmp` first, then atomically rename it to `result.md`.
-7. Never overwrite or reuse an existing handoff ID.
+7. Never overwrite or reuse an existing handoff ID or handoff folder.
 8. Never include credentials, tokens, private keys, signing secrets, or other sensitive values.
 
 These requirements are additive only. They must not alter, broaden, reinterpret, or override the task-specific prompt.
