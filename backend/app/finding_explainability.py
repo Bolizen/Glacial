@@ -81,46 +81,17 @@ def build_finding_explainability(finding: dict[str, Any]) -> dict[str, Any]:
 def normalize_finding_explainability(
     value: Any,
     *,
-    finding_type: str,
-    path: str,
+    finding: dict[str, Any],
 ) -> dict[str, Any] | None:
-    if not isinstance(value, dict) or value.get("schemaVersion") != FINDING_EXPLAINABILITY_SCHEMA_VERSION:
+    if not isinstance(value, dict):
         return None
-    normalized_type = _finding_type({"type": finding_type})
-    rule = value.get("rule")
-    evidence = value.get("evidence")
-    if (
-        not isinstance(rule, dict)
-        or rule.get("id") != f"scanner.{normalized_type}"
-        or rule.get("version") != FINDING_RULE_VERSION
-        or not _valid_text(rule.get("name"), 120)
-        or not isinstance(evidence, dict)
-    ):
+    finding_path = finding.get("path") or finding.get("file_path") or ""
+    if finding_path and not _path(finding_path):
         return None
-    expected_path = _path(path)
-    if path and not expected_path:
+    expected = build_finding_explainability(finding)
+    if value != expected:
         return None
-    normalized_evidence = _normalize_evidence(evidence, expected_path=expected_path)
-    if normalized_evidence is None:
-        return None
-    text_fields = ("category", "observation", "impact", "severityReason", "manualCheck", "limitations")
-    if any(not _valid_text(value.get(field), MAX_EXPLANATION_TEXT) for field in text_fields):
-        return None
-    return {
-        "schemaVersion": FINDING_EXPLAINABILITY_SCHEMA_VERSION,
-        "rule": {
-            "id": rule["id"],
-            "name": _text(rule["name"], 120),
-            "version": FINDING_RULE_VERSION,
-        },
-        "category": _text(value["category"], 80),
-        "evidence": normalized_evidence,
-        **{
-            field: _text(value[field], MAX_EXPLANATION_TEXT)
-            for field in text_fields
-            if field != "category"
-        },
-    }
+    return expected
 
 
 def _evidence(finding: dict[str, Any], finding_type: str) -> dict[str, Any]:
@@ -147,50 +118,6 @@ def _evidence(finding: dict[str, Any], finding_type: str) -> dict[str, Any]:
     if details:
         evidence["details"] = dict(sorted(details.items())[:MAX_EVIDENCE_DETAILS])
     return evidence
-
-
-def _normalize_evidence(value: dict[str, Any], *, expected_path: str) -> dict[str, Any] | None:
-    normalized_path = _path(value.get("path"))
-    if (
-        not _valid_text(value.get("kind"), 80)
-        or not isinstance(value.get("path"), str)
-        or (value.get("path") and not normalized_path)
-        or normalized_path != expected_path
-        or not _valid_text(value.get("location"), MAX_EVIDENCE_LOCATION)
-    ):
-        return None
-    normalized: dict[str, Any] = {
-        "kind": _text(value["kind"], 80),
-        "path": expected_path,
-        "location": _text(value["location"], MAX_EVIDENCE_LOCATION),
-    }
-    details = value.get("details")
-    if details is not None:
-        if not isinstance(details, dict) or len(details) > MAX_EVIDENCE_DETAILS:
-            return None
-        normalized_details = {
-            str(key)[:80]: _bounded_value(item)
-            for key, item in details.items()
-            if _bounded_value(item) not in (None, "", [], {})
-        }
-        if len(normalized_details) != len(details):
-            return None
-        normalized["details"] = dict(sorted(normalized_details.items()))
-    excerpt = value.get("excerpt")
-    if excerpt is not None:
-        line_match = re.fullmatch(r"line ([1-9][0-9]*)", normalized["location"])
-        normalized_details = normalized.get("details", {})
-        suspicious = normalize_suspicious_text_evidence({
-            "line": int(line_match.group(1)) if line_match else 0,
-            "matchCount": normalized_details.get("matchCount"),
-            "pattern": normalized_details.get("pattern"),
-            "excerpt": excerpt,
-            "additionalMatchesOmitted": normalized_details.get("additionalMatchesOmitted"),
-        })
-        if normalized["kind"] != "text-match" or suspicious is None:
-            return None
-        normalized["excerpt"] = suspicious["excerpt"]
-    return normalized
 
 
 def _finding_type(finding: dict[str, Any]) -> str:
@@ -336,10 +263,6 @@ def _text(value: Any, limit: int) -> str:
         for character in str(value or "")
     )
     return " ".join(clean.split())[:limit]
-
-
-def _valid_text(value: Any, limit: int) -> bool:
-    return isinstance(value, str) and bool(value) and len(value) <= limit and all(ord(character) >= 32 for character in value)
 
 
 def _bounded_value(value: Any, depth: int = 0) -> Any:

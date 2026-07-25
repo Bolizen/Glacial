@@ -270,8 +270,7 @@ def _normalize_finding(finding: dict[str, Any]) -> dict[str, Any]:
     normalized.pop("explainability", None)
     explainability = normalize_finding_explainability(
         finding.get("explainability"),
-        finding_type=normalized["type"],
-        path=normalized["path"],
+        finding=normalized,
     )
     if explainability:
         normalized["explainability"] = explainability

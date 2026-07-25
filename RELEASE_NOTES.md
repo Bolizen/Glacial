@@ -1,3 +1,15 @@
+# Glacial 0.7.3 Finding Explainability Correction
+
+Glacial 0.7.3 keeps finding review controls immediately available while hardening persisted scanner explanations.
+
+## Finding explainability correction
+
+- Collapses canonical and legacy explanation content behind an accessible native disclosure labelled `Why Glacial flagged this`.
+- Keeps finding identity, review state, and review controls visible and usable without expanding the explanation.
+- Reconstructs accepted canonical explanation prose from the backend scanner-owned builder instead of trusting persisted descriptive strings.
+- Drops malformed or altered explainability metadata conservatively while keeping the finding readable through the legacy fallback.
+- Preserves finding fingerprints, review decisions, detector coverage, severity classifications, scan risk, and completeness behavior.
+
 # Glacial 0.7.2 Finding Explainability
 
 Glacial 0.7.2 makes newly generated findings self-explanatory using bounded, persisted, scanner-owned evidence.

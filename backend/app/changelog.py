@@ -2,6 +2,15 @@ from __future__ import annotations
 
 CHANGELOG_ENTRIES = [
     {
+        "version": "0.7.3",
+        "title": "Finding Explainability correction",
+        "changes": [
+            "Collapsed canonical and legacy explanation content behind an accessible native disclosure while keeping review controls immediately available.",
+            "Reconstructed accepted canonical explanation prose from backend scanner-owned metadata and rejected semantically altered persisted envelopes.",
+            "Preserved conservative legacy fallback, finding fingerprints, review linkage, detector coverage, severity, risk, and completeness behavior.",
+        ],
+    },
+    {
         "version": "0.7.2",
         "title": "Finding Explainability",
         "changes": [

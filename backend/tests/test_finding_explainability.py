@@ -14,6 +14,7 @@ from app.finding_explainability import (
     build_finding_explainability,
     normalize_finding_explainability,
 )
+from app.finding_reviews import enrich_scan, finding_fingerprint
 from app.scanner import scan_project
 
 
@@ -122,7 +123,7 @@ class FindingExplainabilityTests(unittest.TestCase):
         self.assertIn("did not open the file", secret["explainability"]["limitations"])
         self.assertNotIn("excerpt", secret["explainability"]["evidence"])
 
-    def test_persisted_read_accepts_valid_current_metadata_and_drops_malformed_or_legacy_metadata(self) -> None:
+    def test_persisted_read_reconstructs_valid_current_metadata_and_keeps_legacy_readable(self) -> None:
         finding = {
             "path": "scripts/setup.ps1",
             "type": "executable-or-script-file",
@@ -142,17 +143,140 @@ class FindingExplainabilityTests(unittest.TestCase):
         legacy = _normalize_finding(finding)
 
         self.assertEqual(current["explainability"], explainability)
+        self.assertIsNot(current["explainability"], explainability)
         self.assertNotIn("explainability", malformed)
         self.assertNotIn("explainability", legacy)
+
+    def test_persisted_descriptive_prose_must_match_backend_canonical_metadata(self) -> None:
+        finding = {
+            "path": "package.json",
+            "type": "package-lifecycle-script",
+            "severity": "high",
+            "explanation": "package.json defines a 'postinstall' lifecycle script.",
+            "action": "Inspect the exact script before installing dependencies.",
+            "script": "postinstall",
+        }
+        canonical = build_finding_explainability(finding)
+        mutations = {
+            "rule name": ("rule", "name", "Trusted package hook"),
+            "category": (None, "category", "safe metadata"),
+            "observation": (None, "observation", "Nothing was observed."),
+            "impact": (None, "impact", "This cannot matter."),
+            "severity rationale": (None, "severityReason", "Low impact."),
+            "manual guidance": (None, "manualCheck", "Run it immediately."),
+            "limitations": (None, "limitations", "Glacial guarantees this is safe."),
+        }
+
+        for label, (container, field, replacement) in mutations.items():
+            with self.subTest(label=label):
+                altered = json.loads(json.dumps(canonical))
+                target = altered[container] if container else altered
+                target[field] = replacement
+                normalized = _normalize_finding({**finding, "explainability": altered})
+                self.assertNotIn("explainability", normalized)
+
+    def test_mismatched_evidence_identity_fails_closed(self) -> None:
+        finding = {
+            "path": "package.json",
+            "type": "package-lifecycle-script",
+            "severity": "high",
+            "explanation": "package.json defines a 'postinstall' lifecycle script.",
+            "script": "postinstall",
+        }
+        canonical = build_finding_explainability(finding)
+        mutations = {
+            "path": "../escape",
+            "kind": "text-match",
+            "location": "scripts.preinstall",
+            "details": {"script": "preinstall"},
+        }
+        for field, replacement in mutations.items():
+            with self.subTest(field=field):
+                altered = json.loads(json.dumps(canonical))
+                altered["evidence"][field] = replacement
+                normalized = _normalize_finding({**finding, "explainability": altered})
+                self.assertNotIn("explainability", normalized)
+
+    def test_valid_suspicious_text_metadata_uses_existing_redaction_and_rejects_altered_excerpt(self) -> None:
+        finding = {
+            "path": "src/evaluate.js",
+            "type": "suspicious-text-pattern",
+            "severity": "high",
+            "explanation": "Dynamic code evaluation pattern found. Pattern: eval(",
+            "pattern": "eval(",
+            "evidence": {
+                "line": 8,
+                "matchCount": 2,
+                "pattern": "eval(",
+                "excerpt": "const output = eval(exampleInput);",
+                "additionalMatchesOmitted": True,
+            },
+        }
+        canonical = build_finding_explainability(finding)
+        accepted = _normalize_finding({**finding, "explainability": canonical})
+        altered = json.loads(json.dumps(canonical))
+        altered["evidence"]["excerpt"] = "const output = eval(attackerControlled);"
+        rejected = _normalize_finding({**finding, "explainability": altered})
+
+        self.assertEqual(accepted["explainability"], canonical)
+        self.assertEqual(
+            accepted["explainability"]["evidence"]["excerpt"],
+            "const output = eval(exampleInput);",
+        )
+        self.assertNotIn("explainability", rejected)
+
+    def test_unknown_finding_type_uses_generic_fail_closed_canonical_metadata(self) -> None:
+        finding = {
+            "path": "future.data",
+            "type": "future-detector",
+            "severity": "medium",
+            "explanation": "A future scanner recorded bounded metadata.",
+        }
+        canonical = build_finding_explainability(finding)
+        normalized = _normalize_finding({**finding, "explainability": canonical})
+
+        self.assertEqual(normalized["explainability"]["rule"]["id"], "scanner.future-detector")
+        self.assertEqual(normalized["explainability"]["category"], "project metadata")
+        self.assertIn("may affect", normalized["explainability"]["impact"])
+        self.assertIn("did not execute", normalized["explainability"]["limitations"])
+
+    def test_explainability_does_not_change_fingerprint_or_review_linkage(self) -> None:
+        finding = {
+            "path": "package.json",
+            "type": "package-lifecycle-script",
+            "severity": "high",
+            "explanation": "package.json defines a 'postinstall' lifecycle script.",
+            "script": "postinstall",
+        }
+        fingerprint = finding_fingerprint(finding)
+        canonical = build_finding_explainability(finding)
+        normalized = _normalize_finding({**finding, "explainability": canonical})
+        linked = enrich_scan(
+            {"findings": [normalized]},
+            [{"fingerprint": fingerprint, "status": "expected", "note": "Reviewed exact hook."}],
+        )["findings"][0]
+
+        self.assertEqual(finding_fingerprint({**finding, "explainability": canonical}), fingerprint)
+        self.assertEqual(finding_fingerprint(normalized), fingerprint)
+        self.assertEqual(linked["fingerprint"], fingerprint)
+        self.assertEqual(linked["review"]["status"], "expected")
+        self.assertEqual(linked["review"]["note"], "Reviewed exact hook.")
+
+    def test_direct_normalizer_rejects_path_mismatch(self) -> None:
+        finding = {
+            "path": "scripts/setup.ps1",
+            "type": "executable-or-script-file",
+            "severity": "high",
+            "explanation": "PowerShell script found.",
+        }
+        explainability = build_finding_explainability(finding)
         self.assertIsNone(normalize_finding_explainability(
             {**explainability, "evidence": {**explainability["evidence"], "path": "../escape"}},
-            finding_type=finding["type"],
-            path=finding["path"],
+            finding=finding,
         ))
         self.assertIsNone(normalize_finding_explainability(
             explainability,
-            finding_type=finding["type"],
-            path="C:/outside-project/setup.ps1",
+            finding={**finding, "path": "C:/outside-project/setup.ps1"},
         ))
 
 

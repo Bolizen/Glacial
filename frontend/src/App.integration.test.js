@@ -2058,6 +2058,7 @@ test("finding review and reopen update the real scan, history, and Markdown work
     fingerprint: finding.fingerprint,
     status: "expected",
     note: "Expected scanner regression fixture.",
+    scan_id: current.id,
   });
   await respond(save, { review: findingReview(finding.fingerprint) });
 
@@ -2089,7 +2090,7 @@ test("finding review and reopen update the real scan, history, and Markdown work
   assert.doesNotMatch(findingCard("tests/eval_fixture.py").textContent, /Expected scanner regression fixture/);
 });
 
-test("finding cards prefer canonical scanner explainability and label legacy fallback evidence", async () => {
+test("finding explanations use one collapsed native disclosure without blocking review controls", async () => {
   const canonical = reviewableFinding("e", {
     type: "package-lifecycle-script",
     path: "package.json",
@@ -2120,16 +2121,44 @@ test("finding cards prefer canonical scanner explainability and label legacy fal
   const legacy = reviewableFinding("f", {
     path: "src/legacy.js",
     explanation: "Legacy scanner detail. Pattern: eval(",
+    evidence: {
+      line: 4,
+      matchCount: 1,
+      pattern: "eval(",
+      excerpt: "const legacy = eval(exampleInput);",
+      additionalMatchesOmitted: false,
+    },
+  });
+  const malformed = reviewableFinding("0", {
+    path: "src/malformed.js",
+    explainability: {
+      ...canonical.explainability,
+      rule: { ...canonical.explainability.rule, id: "scanner.different-rule" },
+      evidence: { ...canonical.explainability.evidence, path: "src/malformed.js" },
+    },
   });
 
   await renderApp();
   await resolveDetails(
     await takeDetailRequests(PROJECT_A_PATH),
-    { scans: [scanWithFindings(143, [canonical, legacy])] },
+    { scans: [scanWithFindings(143, [canonical, legacy, malformed])] },
   );
   await openReports();
 
   const canonicalCard = findingCard("package.json");
+  const canonicalDisclosure = canonicalCard.querySelector("details.finding-explanation");
+  const canonicalSummary = canonicalDisclosure.querySelector("summary");
+  assert.equal(canonicalDisclosure.open, false);
+  assert.equal(canonicalSummary.textContent, "Why Glacial flagged this");
+  assert.equal(canonicalSummary.tagName, "SUMMARY");
+  canonicalSummary.focus();
+  assert.equal(document.activeElement, canonicalSummary);
+  assert.ok([...canonicalCard.querySelectorAll("button")].some((button) => button.textContent.includes("Mark reviewed")));
+  await click([...canonicalCard.querySelectorAll("button")].find((button) => button.textContent.includes("Mark reviewed")));
+  assert.equal(canonicalDisclosure.open, false);
+  assert.ok(canonicalCard.querySelector(".finding-review-form"));
+  await click(canonicalSummary);
+  assert.equal(canonicalDisclosure.open, true);
   assert.match(canonicalCard.textContent, /Detector:\s*Package Lifecycle Script/);
   assert.match(canonicalCard.textContent, /scanner\.package-lifecycle-script/);
   assert.match(canonicalCard.textContent, /Observed evidence:\s*package\.json declares a postinstall/);
@@ -2142,9 +2171,19 @@ test("finding cards prefer canonical scanner explainability and label legacy fal
   assert.doesNotMatch(canonicalCard.textContent, /Legacy finding|Stored compatibility/);
 
   const legacyCard = findingCard("src/legacy.js");
+  const legacyDisclosure = legacyCard.querySelector("details.finding-explanation");
+  assert.equal(legacyDisclosure.open, false);
+  assert.equal(legacyDisclosure.querySelector("summary").textContent, "Why Glacial flagged this");
   assert.match(legacyCard.textContent, /Legacy finding:/);
-  assert.match(legacyCard.textContent, /Exact detector provenance and severity rationale are unavailable/);
+  assert.match(legacyCard.textContent, /Canonical detector provenance was not persisted/);
+  assert.match(legacyCard.textContent, /const legacy = eval\(exampleInput\)/);
   assert.doesNotMatch(legacyCard.textContent, /Detector:/);
+
+  const malformedCard = findingCard("src/malformed.js");
+  assert.equal(malformedCard.querySelector("details.finding-explanation").open, false);
+  assert.match(malformedCard.textContent, /Canonical detector provenance was not persisted/);
+  assert.ok([...malformedCard.querySelectorAll("button")].some((button) => button.textContent.includes("Mark reviewed")));
+  assert.doesNotMatch(malformedCard.textContent, /Package Lifecycle Script|scanner\.different-rule/);
 });
 
 test("unified finding workbench filters, navigates, reports progress, and reuses review persistence", async () => {

@@ -3358,28 +3358,6 @@ function FindingItem({ finding, onReviewFinding, onReopenFinding, requestState =
         <code>{detail.path}</code>
       </div>
       <div className="finding-detail">
-        {detail.explainability ? (
-          <FindingExplainability value={detail.explainability} severity={detail.severity} />
-        ) : (
-          <>
-            <p><strong>Legacy finding:</strong> This persisted finding predates canonical detector explainability. Exact detector provenance and severity rationale are unavailable.</p>
-            <p><strong>Why:</strong> {detail.why}</p>
-            <p><strong>Action:</strong> {detail.action}</p>
-            {rawExplanation ? <p><strong>Stored detail:</strong> {rawExplanation}</p> : null}
-          </>
-        )}
-        {!detail.explainability && detail.evidence ? (
-          <div className="finding-evidence">
-            <p><strong>Scanner context</strong> Context only; not proof of malicious behavior.</p>
-            <div className="finding-evidence-meta">
-              <span>Line {detail.evidence.line}</span>
-              <span>Rule/pattern <code>{detail.evidence.pattern}</code></span>
-              {detail.evidence.matchCount > 1 ? <span>{detail.evidence.matchCount} matches</span> : null}
-              {detail.evidence.additionalMatchesOmitted ? <span>Additional matches omitted</span> : null}
-            </div>
-            <pre><code>{detail.evidence.excerpt}</code></pre>
-          </div>
-        ) : null}
         {finding.review?.note ? <p className="finding-review-note"><strong>Review reason:</strong> {finding.review.note}</p> : null}
         {reviewable ? (
           <div className="finding-review-controls">
@@ -3417,6 +3395,33 @@ function FindingItem({ finding, onReviewFinding, onReopenFinding, requestState =
             {requestState.success ? <p className="finding-review-message success">{requestState.success}</p> : null}
           </div>
         ) : null}
+        <details className="finding-explanation">
+          <summary>Why Glacial flagged this</summary>
+          <div className="finding-explanation-content">
+            {detail.explainability ? (
+              <FindingExplainability value={detail.explainability} severity={detail.severity} />
+            ) : (
+              <>
+                <p><strong>Legacy finding:</strong> Canonical detector provenance was not persisted. Exact detector identity and severity rationale are unavailable.</p>
+                <p><strong>Why:</strong> {detail.why}</p>
+                <p><strong>Action:</strong> {detail.action}</p>
+                {rawExplanation ? <p><strong>Stored detail:</strong> {rawExplanation}</p> : null}
+              </>
+            )}
+            {!detail.explainability && detail.evidence ? (
+              <div className="finding-evidence">
+                <p><strong>Scanner context</strong> Context only; not proof of malicious behavior.</p>
+                <div className="finding-evidence-meta">
+                  <span>Line {detail.evidence.line}</span>
+                  <span>Rule/pattern <code>{detail.evidence.pattern}</code></span>
+                  {detail.evidence.matchCount > 1 ? <span>{detail.evidence.matchCount} matches</span> : null}
+                  {detail.evidence.additionalMatchesOmitted ? <span>Additional matches omitted</span> : null}
+                </div>
+                <pre><code>{detail.evidence.excerpt}</code></pre>
+              </div>
+            ) : null}
+          </div>
+        </details>
       </div>
     </div>
   );

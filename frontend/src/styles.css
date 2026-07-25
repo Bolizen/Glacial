@@ -2460,6 +2460,35 @@ pre {
   margin-top: 10px;
 }
 
+.finding-explanation {
+  border-top: 1px solid var(--color-border);
+  margin-top: 2px;
+  padding-top: 8px;
+}
+
+.finding-explanation > summary {
+  color: var(--color-accent);
+  cursor: pointer;
+  font-weight: 700;
+  width: fit-content;
+}
+
+.finding-explanation > summary:focus-visible {
+  border-radius: var(--radius-sm);
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 3px;
+}
+
+.finding-explanation-content {
+  display: grid;
+  gap: 7px;
+  padding-top: 9px;
+}
+
+.finding-explanation-content > p {
+  margin: 0;
+}
+
 .finding-explainability {
   display: grid;
   gap: 7px;
