@@ -2,6 +2,15 @@ from __future__ import annotations
 
 CHANGELOG_ENTRIES = [
     {
+        "version": "0.7.1",
+        "title": "Review context correctness",
+        "changes": [
+            "Determined Review scan presence from the actual latest scan rather than timestamp metadata.",
+            "Kept scans with missing or malformed timestamps in a started, fail-closed Review state with indeterminate timestamp presentation.",
+            "Separated latest Review evidence from historical Reports export and copy controls while preserving the historical Reports selection.",
+        ],
+    },
+    {
         "version": "0.7.0",
         "title": "Guided Review Workspace",
         "changes": [

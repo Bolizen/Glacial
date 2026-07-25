@@ -249,8 +249,10 @@ export function App() {
   }), [selectedProject, displayedScan, displayedReport]);
   const selectedSectionInfo = SECTION_NAV.find((section) => section.id === selectedSection) || SECTION_NAV[0];
   const reviewWorkspace = useMemo(
-    () => buildReviewWorkspaceModel(latestSecurityStatus),
-    [latestSecurityStatus],
+    () => buildReviewWorkspaceModel(latestSecurityStatus, {
+      hasScan: Boolean(latestProjectScan),
+    }),
+    [latestSecurityStatus, latestProjectScan],
   );
 
   useEffect(() => {
@@ -1534,12 +1536,16 @@ export function App() {
           </div>
           {selectedSection !== "workspace" ? (
             <div className="topbar-actions">
-              <button type="button" className="secondary-button" onClick={() => exportScanReport(displayedReportMarkdown)} disabled={!displayedReportMarkdown}>
-                Export Report
-              </button>
-              <button type="button" className="secondary-button" onClick={copyReportMarkdown} disabled={!displayedReportMarkdown}>
-                Copy Markdown
-              </button>
+              {selectedSection !== "review" ? (
+                <>
+                  <button type="button" className="secondary-button" onClick={() => exportScanReport(displayedReportMarkdown)} disabled={!displayedReportMarkdown}>
+                    Export Report
+                  </button>
+                  <button type="button" className="secondary-button" onClick={copyReportMarkdown} disabled={!displayedReportMarkdown}>
+                    Copy Markdown
+                  </button>
+                </>
+              ) : null}
               <button type="button" className="run-scan-button" onClick={runScan} disabled={!selectedPath || isScanning || selectedProject?.available === false}>
                 {isScanning ? "Scanning..." : "Run Scan"}
               </button>
@@ -1783,7 +1789,7 @@ function ReviewWorkspace({
         <dl>
           <div>
             <dt>Evidence timestamp</dt>
-            <dd>{formatDate(value.evidenceTimestamp)}</dd>
+            <dd>{formatReviewEvidenceTimestamp(value.evidenceTimestamp)}</dd>
           </div>
           <div>
             <dt>Baseline source</dt>
@@ -4202,6 +4208,13 @@ function exportScanReport(content) {
 function formatDate(value) {
   if (!value) return "Never";
   return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+}
+
+function formatReviewEvidenceTimestamp(value) {
+  if (!value) return "Indeterminate";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Indeterminate";
+  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
 
 function formatFindingSummary(summary) {

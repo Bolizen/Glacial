@@ -1,3 +1,14 @@
+# Glacial 0.7.1 Review Context Correctness
+
+Glacial 0.7.1 is a focused correctness patch that keeps latest Review evidence distinct from historical Reports context.
+
+## Review context correctness
+
+- Determines whether Review has started from the actual latest scan rather than timestamp metadata.
+- Keeps existing scans with missing or malformed timestamps in Review with fail-closed status and an indeterminate evidence timestamp.
+- Hides the global report export and copy controls in Review while retaining Run Scan.
+- Preserves historical Reports selection and its existing export and copy behavior when moving between Reports and Review.
+
 # Glacial 0.7.0 Guided Review Workspace
 
 Glacial 0.7.0 brings the existing scan, investigation, review, and checkpoint capabilities into one canonical Review destination.

@@ -20,6 +20,8 @@ test("builds one primary action, two secondary actions, and the canonical eviden
       { id: "baseline" },
       { id: "completion" },
     ],
+  }, {
+    hasScan: true,
   });
 
   assert.equal(model.hasScan, true);
@@ -44,6 +46,28 @@ test("builds one primary action, two secondary actions, and the canonical eviden
     "scan-comparison",
     "finding-workbench",
   ]);
+});
+
+test("uses explicit scan presence instead of timestamp metadata", async (t) => {
+  await t.test("no scan with no timestamp has not started", () => {
+    const model = buildReviewWorkspaceModel({ evidenceTimestamp: "" }, { hasScan: false });
+    assert.equal(model.hasScan, false);
+  });
+
+  await t.test("an existing scan with a valid timestamp has started", () => {
+    const model = buildReviewWorkspaceModel(
+      { evidenceTimestamp: "2026-07-25T12:00:00Z" },
+      { hasScan: true },
+    );
+    assert.equal(model.hasScan, true);
+  });
+
+  for (const evidenceTimestamp of ["", "not-a-date"]) {
+    await t.test(`an existing scan with ${evidenceTimestamp ? "malformed" : "empty"} timestamp has started`, () => {
+      const model = buildReviewWorkspaceModel({ evidenceTimestamp }, { hasScan: true });
+      assert.equal(model.hasScan, true);
+    });
+  }
 });
 
 test("maps review actions to stable sections and focused containers without executing mutations", () => {

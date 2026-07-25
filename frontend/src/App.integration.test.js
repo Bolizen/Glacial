@@ -667,6 +667,80 @@ test("Review uses latest evidence and focuses unresolved critical/high findings 
   assert.deepEqual(workbenchPaths(), ["src/latest-high.js"]);
 });
 
+test("Review separates latest evidence controls from a preserved historical Reports selection", async (t) => {
+  const current = {
+    ...scanWithFindings(142, [reviewableFinding("review-context", { path: "src/latest-context.js", severity: "high" })]),
+    scanMetadataReliable: true,
+    dependencyTrust: emptyDependencyTrustFixture(),
+  };
+  const historical = {
+    ...withCompleteness(scan(141, "low", "2026-07-10T12:00:00Z"), { complete: true }),
+    scanMetadataReliable: true,
+    dependencyTrust: emptyDependencyTrustFixture(),
+  };
+  let copiedMarkdown = "";
+  let exportedBlob = null;
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText: async (value) => { copiedMarkdown = value; } },
+  });
+  const originalCreateObjectURL = URL.createObjectURL;
+  const originalRevokeObjectURL = URL.revokeObjectURL;
+  const anchorPrototype = dom.window.HTMLAnchorElement.prototype;
+  const originalAnchorClick = anchorPrototype.click;
+  URL.createObjectURL = (blob) => {
+    exportedBlob = blob;
+    return "blob:glacial-report";
+  };
+  URL.revokeObjectURL = () => {};
+  anchorPrototype.click = () => {};
+  t.after(() => {
+    URL.createObjectURL = originalCreateObjectURL;
+    URL.revokeObjectURL = originalRevokeObjectURL;
+    anchorPrototype.click = originalAnchorClick;
+  });
+
+  await renderApp();
+  await resolveDetails(await takeDetailRequests(PROJECT_A_PATH), { scans: [current, historical] });
+  await openReports();
+  const historicalRow = [...document.querySelectorAll(".history-row")]
+    .find((row) => row.textContent.includes("Jul 10"));
+  assert.ok(historicalRow, "Expected historical scan row");
+  await click(historicalRow.querySelector(".history-view-button"));
+  assert.ok(historicalRow.classList.contains("selected-history-row"));
+
+  await openReview();
+  const review = document.querySelector(".review-workspace");
+  assert.match(review.textContent, /Latest project review/);
+  assert.match(review.textContent, /src\/latest-context\.js/);
+  const reviewTopbarButtons = [...document.querySelectorAll(".topbar-actions button")];
+  assert.equal(reviewTopbarButtons.some((button) => button.textContent.includes("Export Report")), false);
+  assert.equal(reviewTopbarButtons.some((button) => button.textContent.includes("Copy Markdown")), false);
+  assert.equal(reviewTopbarButtons.some((button) => button.textContent.includes("Run Scan")), true);
+
+  await openReports();
+  assert.ok(document.querySelector(".history-row.selected-history-row")?.textContent.includes("Jul 10"));
+  const reportTopbarButtons = [...document.querySelectorAll(".topbar-actions button")];
+  const exportButton = reportTopbarButtons.find((button) => button.textContent.includes("Export Report"));
+  const copyButton = reportTopbarButtons.find((button) => button.textContent.includes("Copy Markdown"));
+  assert.ok(exportButton);
+  assert.ok(copyButton);
+  assert.equal(exportButton.disabled, false);
+  assert.equal(copyButton.disabled, false);
+
+  await click(copyButton);
+  assert.match(copiedMarkdown, /^Scan date: Jul 10, 2026/m);
+  assert.match(copiedMarkdown, /^## Raw risk\nLOW$/m);
+  assert.doesNotMatch(copiedMarkdown, /src\/latest-context\.js/);
+
+  await click(exportButton);
+  assert.ok(exportedBlob);
+  const exportedMarkdown = await exportedBlob.text();
+  assert.match(exportedMarkdown, /^Scan date: Jul 10, 2026/m);
+  assert.match(exportedMarkdown, /^## Raw risk\nLOW$/m);
+  assert.doesNotMatch(exportedMarkdown, /src\/latest-context\.js/);
+});
+
 test("Review routes significant dependency change to Dependency Trust without approving it", async () => {
   const current = {
     ...withCompleteness(scan(133, "low", "2026-07-25T12:00:00Z"), { complete: true }),

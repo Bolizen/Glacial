@@ -27,7 +27,7 @@ const EVIDENCE_ACTIONS = Object.freeze({
   completion: { id: "review-completion", label: "Review details", destination: "reports", targetId: "finding-workbench" },
 });
 
-export function buildReviewWorkspaceModel(securityStatus) {
+export function buildReviewWorkspaceModel(securityStatus, { hasScan = false } = {}) {
   const value = securityStatus && typeof securityStatus === "object" ? securityStatus : {};
   const actions = Array.isArray(value.actions) ? value.actions.slice(0, 3) : [];
   const sections = Array.isArray(value.sections)
@@ -37,7 +37,7 @@ export function buildReviewWorkspaceModel(securityStatus) {
     }))
     : [];
   return {
-    hasScan: Boolean(value.evidenceTimestamp),
+    hasScan: Boolean(hasScan),
     primaryAction: actions[0] || null,
     secondaryActions: actions.slice(1, 3),
     sections,
