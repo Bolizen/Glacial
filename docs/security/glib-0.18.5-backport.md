@@ -23,11 +23,26 @@ The corresponding `Cargo.lock` package has version `0.18.5` and no registry
 path-resolved package. Run `node scripts/security/verify-glib-backport.mjs` to
 check these invariants.
 
-The same command runs automatically in
-`.github/workflows/glib-backport.yml` when relevant files change in a pull
-request or a push to `main`. The local command remains available for
-pre-commit verification. This CI check validates the documented repository
-invariants; it does not compile or execute the Linux/BSD application.
+The verifier runs automatically in `.github/workflows/glib-backport.yml` when
+relevant files change in a pull request targeting `main` or a push to `main`.
+Pushes run the verifier from the trusted pushed commit. Pull requests use
+`pull_request_target` so the workflow checks out the trusted base commit and
+the exact proposed head commit into separate directories, then runs:
+
+```text
+node trusted/scripts/security/verify-glib-backport.mjs --repo-root candidate
+```
+
+The candidate checkout is data only. The base-owned verifier reads its
+repository invariants through the `--repo-root` interface; the workflow must
+never execute, import, source, install, build, or otherwise evaluate candidate
+content. It must not add candidate-controlled actions, package or build
+commands, caches, secrets, write permissions, or artifacts.
+
+The no-argument local command remains available for pre-commit verification,
+and `--repo-root <path>` can select another repository tree explicitly. Both
+forms validate the same documented invariants. This CI check does not compile
+or execute the Linux/BSD application.
 
 ## Defect and correction
 

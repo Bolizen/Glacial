@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { lstatSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const defaultRepoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const repoRoot = parseRepoRoot(process.argv.slice(2));
 const tauriRoot = resolve(repoRoot, "frontend", "src-tauri");
 const vendoredRoot = resolve(repoRoot, "third_party", "rust", "glib-0.18.5-patched");
 
@@ -21,9 +22,52 @@ function fail(message) {
   throw new Error(`glib backport verification failed: ${message}`);
 }
 
-function requireText(path) {
-  if (!existsSync(path) || !statSync(path).isFile()) {
-    fail(`required file is absent: ${path}`);
+function parseRepoRoot(args) {
+  if (args.length === 0) {
+    return requireRepoRoot(defaultRepoRoot);
+  }
+  if (
+    args.length !== 2 ||
+    args[0] !== "--repo-root" ||
+    args[1].length === 0 ||
+    args[1].startsWith("--")
+  ) {
+    fail("usage: node verify-glib-backport.mjs [--repo-root <path>]");
+  }
+  return requireRepoRoot(resolve(args[1]));
+}
+
+function requireRepoRoot(path) {
+  let metadata;
+  try {
+    metadata = lstatSync(path);
+  } catch {
+    fail("selected repository root does not exist");
+  }
+  if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
+    fail("selected repository root must be a real directory, not a symbolic link");
+  }
+  return path;
+}
+
+function requireText(...parts) {
+  let path = repoRoot;
+  for (let index = 0; index < parts.length; index += 1) {
+    path = resolve(path, parts[index]);
+    const displayPath = parts.slice(0, index + 1).join("/");
+    let metadata;
+    try {
+      metadata = lstatSync(path);
+    } catch {
+      fail(`required path is absent: ${displayPath}`);
+    }
+    if (metadata.isSymbolicLink()) {
+      fail(`required path must not be a symbolic link: ${displayPath}`);
+    }
+    const isFinalPart = index === parts.length - 1;
+    if (isFinalPart ? !metadata.isFile() : !metadata.isDirectory()) {
+      fail(`required path has the wrong type: ${displayPath}`);
+    }
   }
   return readFileSync(path, "utf8").replaceAll("\r\n", "\n");
 }
@@ -47,7 +91,7 @@ function section(text, name) {
   return lines.slice(start + 1, end).join("\n");
 }
 
-const tauriManifest = requireText(resolve(tauriRoot, "Cargo.toml"));
+const tauriManifest = requireText("frontend", "src-tauri", "Cargo.toml");
 const patchSection = section(tauriManifest, "patch.crates-io");
 const glibOverrides = [
   ...patchSection.matchAll(
@@ -64,7 +108,12 @@ assert(
   "glib override does not resolve to the documented vendored directory",
 );
 
-const vendoredManifest = requireText(resolve(vendoredRoot, "Cargo.toml"));
+const vendoredManifest = requireText(
+  "third_party",
+  "rust",
+  "glib-0.18.5-patched",
+  "Cargo.toml",
+);
 const packageSection = section(vendoredManifest, "package");
 assert(/^name\s*=\s*"glib"\s*$/m.test(packageSection), "vendored package name changed");
 assert(
@@ -74,7 +123,7 @@ assert(
   `vendored package version must remain ${expected.version}`,
 );
 
-const lockfile = requireText(resolve(tauriRoot, "Cargo.lock"));
+const lockfile = requireText("frontend", "src-tauri", "Cargo.lock");
 const glibLockPackages = lockfile
   .split("[[package]]")
   .slice(1)
@@ -91,7 +140,13 @@ assert(
   "Cargo.lock glib entry unexpectedly resolves to a registry source",
 );
 
-const variantIter = requireText(resolve(vendoredRoot, "src", "variant_iter.rs"));
+const variantIter = requireText(
+  "third_party",
+  "rust",
+  "glib-0.18.5-patched",
+  "src",
+  "variant_iter.rs",
+);
 assert(
   variantIter.includes("let mut p: *mut libc::c_char = std::ptr::null_mut();"),
   "the mutable pointer binding correction is missing",
@@ -110,15 +165,25 @@ assert(
   "src/variant_iter.rs differs from the documented patched baseline",
 );
 
-const patch = requireText(resolve(vendoredRoot, "GHSA-wrw7-89jp-8q8g.patch"));
+const patch = requireText(
+  "third_party",
+  "rust",
+  "glib-0.18.5-patched",
+  "GHSA-wrw7-89jp-8q8g.patch",
+);
 assert(sha256(patch) === expected.patchSha256, "the recorded upstream patch changed");
 
-const license = requireText(resolve(vendoredRoot, "LICENSE"));
-const copyright = requireText(resolve(vendoredRoot, "COPYRIGHT"));
+const license = requireText("third_party", "rust", "glib-0.18.5-patched", "LICENSE");
+const copyright = requireText("third_party", "rust", "glib-0.18.5-patched", "COPYRIGHT");
 assert(sha256(license) === expected.licenseSha256, "the preserved MIT LICENSE changed");
 assert(sha256(copyright) === expected.copyrightSha256, "the preserved COPYRIGHT changed");
 
-const provenance = requireText(resolve(vendoredRoot, "PROVENANCE.md"));
+const provenance = requireText(
+  "third_party",
+  "rust",
+  "glib-0.18.5-patched",
+  "PROVENANCE.md",
+);
 for (const required of [
   "glib",
   expected.version,
