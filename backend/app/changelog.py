@@ -2,6 +2,17 @@ from __future__ import annotations
 
 CHANGELOG_ENTRIES = [
     {
+        "version": "0.7.0",
+        "title": "Guided Review Workspace",
+        "changes": [
+            "Added a canonical Review destination summarizing the latest Project Security Status, prioritized next action, and six-section evidence path.",
+            "Linked Review actions to existing finding, dependency, Project Expectations, drift, baseline, comparison, and scan surfaces without automatic mutations.",
+            "Integrated checkpoint state, explicit eligible checkpoint creation, bounded ineligible reasons, and compact recent history into Review.",
+            "Opened Review after successful scans and reduced the older guided checklist to a compact, locally dismissible Review link.",
+            "Kept readiness and checkpoints conservative review records rather than certifications or security guarantees.",
+        ],
+    },
+    {
         "version": "0.6.9",
         "title": "Review checkpoint eligibility correction",
         "changes": [

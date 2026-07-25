@@ -1,3 +1,17 @@
+# Glacial 0.7.0 Guided Review Workspace
+
+Glacial 0.7.0 brings the existing scan, investigation, review, and checkpoint capabilities into one canonical Review destination.
+
+## Guided Review Workspace
+
+- Summarizes the latest canonical Project Security Status with its interpretation, evidence timestamp, baseline source, and existing security disclaimer.
+- Presents one prioritized next action and up to two additional actions, then navigates into the existing detailed review tools without running or approving anything automatically.
+- Shows the six canonical evidence sections in order without hiding indeterminate, not-applicable, significant-change, or fail-closed states.
+- Integrates current checkpoint state, explicit eligible checkpoint creation, bounded ineligible reasons, and the newest three immutable checkpoint records.
+- Keeps Review pinned to the latest project scan even when Reports displays historical evidence, and opens Review after each successful scan.
+- Replaces the older five-step workflow authority with a compact, locally dismissible link to Review.
+- Treats readiness and checkpoints as records of available evidence and manual review, never as certification or a security guarantee.
+
 # Glacial 0.6.9 Review Checkpoint Eligibility Correction
 
 Glacial 0.6.9 aligns backend review-checkpoint eligibility with the canonical Project Security Status evaluator.

@@ -157,7 +157,7 @@ export function ProjectExpectationsPanel({
   }
 
   return (
-    <section className="panel project-expectations-panel" id="project-expectations">
+    <section className="panel project-expectations-panel" id="project-expectations" tabIndex="-1">
       <div className="panel-heading project-expectations-heading">
         <div>
           <h2>Project Expectations</h2>
@@ -363,7 +363,7 @@ function ProjectDriftSummary({
   onCancelAdoption,
 }) {
   return (
-    <section className="project-drift-summary" aria-labelledby="project-drift-title">
+    <section className="project-drift-summary" id="project-drift-summary" tabIndex="-1" aria-labelledby="project-drift-title">
       <div className="project-drift-heading">
         <div>
           <h3 id="project-drift-title">Project drift summary</h3>
@@ -406,7 +406,7 @@ function TrustedScanBaselinePanel({ project, scan, state, mutation, onRequestBas
   const baseline = state?.baseline;
   const latestEligible = trustedScanEligibility(scan).eligible;
   return (
-    <section className={`trusted-scan-baseline trusted-scan-baseline-${state?.status || "not-configured"}`}>
+    <section className={`trusted-scan-baseline trusted-scan-baseline-${state?.status || "not-configured"}`} id="trusted-scan-baseline" tabIndex="-1">
       <div className="trusted-scan-baseline-heading">
         <div>
           <h3>Trusted scan baseline</h3>

@@ -40,6 +40,7 @@ import {
   normalizeReviewCheckpointPage,
   reviewCheckpointEligibility,
 } from "./reviewCheckpoints.js";
+import { buildReviewWorkspaceModel, reviewActionDestination } from "./reviewWorkspace.js";
 import {
   comparisonCountLabel,
   comparisonExampleLabel,
@@ -85,10 +86,11 @@ const EMPTY_AGENT_FORM = {
 };
 const MAJOR_SECTIONS = ["changelog", "scanReport", "agents", "notes", "history"];
 const OPEN_MAJOR_SECTIONS = Object.fromEntries(MAJOR_SECTIONS.map((section) => [section, true]));
-const PROJECT_REQUIRED_SECTIONS = new Set(["trustProfiles", "activity", "scanComparison", "reports"]);
+const PROJECT_REQUIRED_SECTIONS = new Set(["review", "trustProfiles", "activity", "scanComparison", "reports"]);
 const SECTION_NAV = [
   { id: "workspace", href: "#workspace-overview", label: "Workspace Overview", icon: "#" },
   { id: "projects", href: "#projects", label: "Projects", icon: "[]" },
+  { id: "review", href: "#review", label: "Review", icon: ">" },
   { id: "trustProfiles", href: "#project-expectations", label: "Project Expectations", icon: "<>" },
   { id: "activity", href: "#activity", label: "Activity", icon: "::" },
   { id: "scanComparison", href: "#scan-comparison", label: "Scan Comparison", icon: "<=>" },
@@ -156,6 +158,7 @@ export function App() {
   const [trustedBaselineMutation, setTrustedBaselineMutation] = useState({ saving: false, error: "", success: "" });
   const [sessionStateReady, setSessionStateReady] = useState(false);
   const [dismissedGuidedReviews, setDismissedGuidedReviews] = useState(() => readGuidedReviewDismissals());
+  const [reviewNavigation, setReviewNavigation] = useState({ targetId: "", findingFilter: "", nonce: 0 });
   const [toastTop, setToastTop] = useState(112);
   const topbarRef = useRef(null);
   const selectedPathRef = useRef("");
@@ -223,12 +226,6 @@ export function App() {
   );
   const latestProjectScan = scanResult || scanHistory[0] || null;
   const latestProjectReport = useMemo(() => buildScanReport(latestProjectScan), [latestProjectScan]);
-  const latestGuidedReview = useMemo(() => buildGuidedReviewState({
-    project: selectedProject,
-    scan: latestProjectScan,
-    completeness: latestProjectReport.completeness,
-    dependencyTrust: latestProjectReport.dependencyTrust,
-  }), [selectedProject, latestProjectScan, latestProjectReport]);
   const latestSecurityStatus = useMemo(() => buildProjectSecurityStatus({
     project: selectedProject,
     scan: latestProjectScan,
@@ -251,6 +248,10 @@ export function App() {
     dependencyTrust: displayedReport.dependencyTrust,
   }), [selectedProject, displayedScan, displayedReport]);
   const selectedSectionInfo = SECTION_NAV.find((section) => section.id === selectedSection) || SECTION_NAV[0];
+  const reviewWorkspace = useMemo(
+    () => buildReviewWorkspaceModel(latestSecurityStatus),
+    [latestSecurityStatus],
+  );
 
   useEffect(() => {
     refreshProjects();
@@ -288,6 +289,14 @@ export function App() {
   useEffect(() => {
     setCopyStatus("");
   }, [displayedScan?.id]);
+
+  useEffect(() => {
+    if (!reviewNavigation.targetId) return;
+    const target = document.getElementById(reviewNavigation.targetId);
+    if (!target) return;
+    target.focus?.({ preventScroll: true });
+    target.scrollIntoView?.({ block: "start" });
+  }, [selectedSection, reviewNavigation]);
 
   useEffect(() => {
     if (!copyStatus) return undefined;
@@ -363,6 +372,7 @@ export function App() {
     setMetadataSaving(false);
     findingReviewRequestsRef.current.clear();
     setFindingReviewState({});
+    setReviewNavigation({ targetId: "", findingFilter: "", nonce: 0 });
     trustedBaselineRequestRef.current.controller?.abort();
     trustedBaselineRequestRef.current = { id: trustedBaselineRequestRef.current.id + 1, controller: null };
     setTrustedBaselineMutation({ saving: false, error: "", success: "" });
@@ -665,9 +675,13 @@ export function App() {
       if (scopedProjectRequestIsCurrent("scanMutation", requestId, projectPath, generation)) {
         setScanResult(data);
         setSelectedScanId(null);
-        setSelectedSection("reports");
-        setMajorSectionOpen("scanReport", true);
-        setMessage("Scan complete. Continue with the guided review.");
+        setSelectedSection("review");
+        setReviewNavigation((current) => ({
+          targetId: "review-workspace",
+          findingFilter: "",
+          nonce: current.nonce + 1,
+        }));
+        setMessage("Scan complete. Review the latest project evidence.");
         await loadScanHistory(projectPath, generation);
         if (!projectRequestIsCurrent(projectPath, generation)) {
           reloadSelectedProjectAfterStaleMutation(projectPath, generation);
@@ -1374,19 +1388,30 @@ export function App() {
     setMajorSectionOpen("scanReport", true);
   }
 
-  function handleSecurityStatusAction(value) {
-    if (!value) return;
-    if (value.destination === "workspace" && value.id === "run-scan") {
-      runScan();
-      return;
+  function openReview() {
+    setSelectedSection("review");
+    setReviewNavigation((current) => ({
+      targetId: "review-workspace",
+      findingFilter: "",
+      nonce: current.nonce + 1,
+    }));
+  }
+
+  function handleReviewAction(value) {
+    const destination = reviewActionDestination(value);
+    if (!destination) return;
+    if (value.id === "compare-baseline" && trustedScanBaseline.status === "valid") {
+      compareLatestToTrustedBaseline();
+    } else {
+      setSelectedSection(destination.section);
     }
-    if (value.destination === "reports") {
-      openReports();
-      return;
-    }
-    if (["trustProfiles", "scanComparison", "activity", "workspace"].includes(value.destination)) {
-      setSelectedSection(value.destination);
-    }
+    if (["reports", "workspace"].includes(destination.section)) setSelectedScanId(null);
+    if (destination.section === "reports") setMajorSectionOpen("scanReport", true);
+    setReviewNavigation((current) => ({
+      targetId: destination.targetId,
+      findingFilter: destination.findingFilter || "",
+      nonce: current.nonce + 1,
+    }));
   }
 
   function openActivityScan(scanId) {
@@ -1407,6 +1432,7 @@ export function App() {
     const section = {
       "#workspace-overview": "workspace",
       "#projects": "projects",
+      "#review": "review",
       "#project-expectations": "trustProfiles",
       "#trust-profiles": "trustProfiles",
       "#activity": "activity",
@@ -1418,6 +1444,7 @@ export function App() {
     if (!section) return;
     event.preventDefault();
     setMessage((current) => current.startsWith("Saved UI state reset.") ? "" : current);
+    setReviewNavigation((current) => ({ targetId: "", findingFilter: "", nonce: current.nonce + 1 }));
     setSelectedSection(section);
   }
 
@@ -1539,39 +1566,31 @@ export function App() {
         <section className="content">
           {selectedSection === "workspace" && selectedProject && !projectDetailsLoading ? (
             <>
-              <ProjectSecurityStatus
-                value={latestSecurityStatus}
-                checkpoints={reviewCheckpoints}
-                checkpointMutation={reviewCheckpointMutation}
-                onRecordCheckpoint={requestReviewCheckpoint}
-                onAction={handleSecurityStatusAction}
-              />
               {!dismissedGuidedReviews.includes(selectedPath) ? (
-                <GuidedReviewChecklist
-                  state={latestGuidedReview}
+                <GuidedReviewShortcut
                   securityStatus={latestSecurityStatus}
-                  isScanning={isScanning}
-                  onRunScan={runScan}
-                  onOpenReports={openReports}
+                  onOpenReview={openReview}
                   onDismiss={dismissSelectedGuidedReview}
                 />
               ) : null}
-              {displayedScan ? (
-                <RiskSummaryHero
-                  report={displayedReport}
-                  result={displayedScan}
-                  comparison={displayedComparison}
-                  trustProfile={trustProfile}
-                  isScanning={isScanning}
-                  reportActionsDisabled={!displayedReportMarkdown}
-                  runScanDisabled={!selectedPath || isScanning || selectedProject?.available === false}
-                  onExport={() => exportScanReport(displayedReportMarkdown)}
-                  onCopy={copyReportMarkdown}
-                  onRunScan={runScan}
-                />
-              ) : (
-                <FirstScanPrompt isScanning={isScanning} onRunScan={runScan} />
-              )}
+              <div id="workspace-scan-area" className="workspace-scan-area" tabIndex="-1">
+                {displayedScan ? (
+                  <RiskSummaryHero
+                    report={displayedReport}
+                    result={displayedScan}
+                    comparison={displayedComparison}
+                    trustProfile={trustProfile}
+                    isScanning={isScanning}
+                    reportActionsDisabled={!displayedReportMarkdown}
+                    runScanDisabled={!selectedPath || isScanning || selectedProject?.available === false}
+                    onExport={() => exportScanReport(displayedReportMarkdown)}
+                    onCopy={copyReportMarkdown}
+                    onRunScan={runScan}
+                  />
+                ) : (
+                  <FirstScanPrompt isScanning={isScanning} onRunScan={runScan} />
+                )}
+              </div>
               <OverviewSecondarySummary projects={projects} report={displayedReport} result={displayedScan} />
               <section className="dashboard-grid">
                 {displayedScan ? <FindingsOverview report={displayedReport} result={displayedScan} /> : null}
@@ -1580,6 +1599,17 @@ export function App() {
                 <RecentActivity changelog={changelog} scans={scanHistory} />
               </section>
             </>
+          ) : null}
+
+          {selectedSection === "review" && selectedProject && !projectDetailsLoading ? (
+            <ReviewWorkspace
+              value={latestSecurityStatus}
+              model={reviewWorkspace}
+              checkpoints={reviewCheckpoints}
+              checkpointMutation={reviewCheckpointMutation}
+              onRecordCheckpoint={requestReviewCheckpoint}
+              onAction={handleReviewAction}
+            />
           ) : null}
 
           {selectedSection === "projects" ? (
@@ -1639,6 +1669,7 @@ export function App() {
                 onReopenFinding={reopenFindingReview}
                 findingReviewState={findingReviewState}
                 trustedBaselineMutation={trustedBaselineMutation}
+                reviewNavigation={reviewNavigation}
                 onApproveTrustedBaseline={approveTrustedBaseline}
                 onUpdateTrustedBaselineNote={updateTrustedBaselineNote}
                 onClearTrustedBaseline={clearTrustedBaseline}
@@ -1713,58 +1744,41 @@ export function App() {
   );
 }
 
-function GuidedReviewChecklist({ state, securityStatus, isScanning, onRunScan, onOpenReports, onDismiss }) {
-  const nextAction = !state.hasScan
-    ? { label: isScanning ? "Scanning..." : "Run first scan", onClick: onRunScan, disabled: isScanning }
-    : state.workflowComplete
-      ? { label: "View review summary", onClick: onOpenReports, disabled: false }
-      : { label: "Continue review", onClick: onOpenReports, disabled: false };
-
+function GuidedReviewShortcut({ securityStatus, onOpenReview, onDismiss }) {
   return (
-    <section className={`guided-review guided-review-${state.status}`} aria-labelledby="guided-review-title">
+    <section className="guided-review guided-review-shortcut" aria-labelledby="guided-review-title">
       <div className="guided-review-heading">
         <div>
-          <span className="guided-review-eyebrow">First-project review</span>
-          <h2 id="guided-review-title">Guided review checklist</h2>
-          <p>{state.completedStepCount} of {state.steps.length} steps complete. Completion records review work; it does not prove the project safe.</p>
-          <p className="guided-security-status">Current security status: <strong>{securityStatus.label}</strong>. {securityStatus.interpretation}</p>
+          <span className="guided-review-eyebrow">Guided review</span>
+          <h2 id="guided-review-title">{securityStatus.label}</h2>
+          <p>{securityStatus.interpretation}</p>
         </div>
         <button type="button" className="tertiary-button guided-review-dismiss" onClick={onDismiss}>Dismiss</button>
       </div>
-      <ol className="guided-review-steps">
-        {state.steps.map((step) => (
-          <li className={step.complete ? "complete" : "pending"} key={step.id}>
-            <span className="guided-review-marker" aria-hidden="true">{step.complete ? "✓" : "·"}</span>
-            <span>
-              <strong>{step.label}</strong>
-              <small>{step.detail}</small>
-            </span>
-          </li>
-        ))}
-      </ol>
       <div className="guided-review-actions">
-        <button type="button" className="run-scan-button" onClick={nextAction.onClick} disabled={nextAction.disabled}>{nextAction.label}</button>
-        {state.hasScan && !state.workflowComplete ? <span>{state.remaining[0]}</span> : null}
-        {state.workflowComplete ? <span>Available review steps are complete for the latest scan.</span> : null}
+        <button type="button" className="secondary-button" onClick={onOpenReview}>Open Review</button>
+        <span>Review is the canonical workspace for current evidence, next actions, and checkpoints.</span>
       </div>
     </section>
   );
 }
 
-function ProjectSecurityStatus({
+function ReviewWorkspace({
   value,
+  model,
   checkpoints,
   checkpointMutation,
   onRecordCheckpoint,
   onAction,
 }) {
   return (
-    <section className={`project-security-status security-status-${value.status}`} aria-labelledby="project-security-status-title">
+    <section className={`project-security-status review-workspace security-status-${value.status}`} id="review-workspace" tabIndex="-1" aria-labelledby="project-security-status-title">
       <div className="project-security-status-heading">
         <div>
-          <span className="guided-review-eyebrow">Project security status</span>
+          <span className="guided-review-eyebrow">{model.hasScan ? "Latest project review" : "Review not started"}</span>
           <h2 id="project-security-status-title">{value.label}</h2>
           <p>{value.interpretation}</p>
+          {!model.hasScan ? <p>A scan is required to establish current project evidence.</p> : null}
         </div>
         <dl>
           <div>
@@ -1777,47 +1791,73 @@ function ProjectSecurityStatus({
           </div>
         </dl>
       </div>
+      {model.primaryAction ? (
+        <section className="review-next-action" aria-labelledby="review-next-action-title">
+          <div>
+            <span className="guided-review-eyebrow">Next action</span>
+            <h3 id="review-next-action-title">{model.primaryAction.label}</h3>
+            <p>Open the existing workspace for this action. Nothing is approved, adopted, replaced, or recorded automatically.</p>
+          </div>
+          <button type="button" className="run-scan-button" onClick={() => onAction(model.primaryAction)}>
+            {model.primaryAction.label}
+          </button>
+          {model.secondaryActions.length ? (
+            <div className="review-secondary-actions">
+              <strong>Additional actions</strong>
+              {model.secondaryActions.map((action) => (
+                <button type="button" className="secondary-button compact-action" onClick={() => onAction(action)} key={action.id}>
+                  {action.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </section>
+      ) : (
+        <section className="review-next-action review-next-action-complete">
+          <span className="guided-review-eyebrow">Next action</span>
+          <h3>No additional canonical action is recommended.</h3>
+          <p>Review the evidence path and checkpoint state below before proceeding cautiously.</p>
+        </section>
+      )}
+      <section className="review-evidence-path" aria-labelledby="review-evidence-title">
+        <div className="review-evidence-heading">
+          <div>
+            <span className="guided-review-eyebrow">Evidence path</span>
+            <h3 id="review-evidence-title">Current review evidence</h3>
+          </div>
+          <span>Latest scan only</span>
+        </div>
+        <div className="project-security-evidence">
+          {model.sections.map((item) => (
+            <article className={`security-evidence security-evidence-${statusClass(item.status)}`} key={item.id}>
+              <header>
+                <h3>{item.label}</h3>
+                <span>{item.status}</span>
+              </header>
+              <p>{item.explanation}</p>
+              {Object.keys(item.counts).length ? (
+                <div className="security-evidence-counts">
+                  {Object.entries(item.counts).map(([label, count]) => (
+                    <span key={label}><strong>{count === null ? "Indeterminate" : count}</strong> {securityCountLabel(label)}</span>
+                  ))}
+                </div>
+              ) : null}
+              {item.examples.length ? <ul>{item.examples.map((example) => <li key={example}>{example}</li>)}</ul> : null}
+              {item.action ? (
+                <button type="button" className="tertiary-button compact-action" onClick={() => onAction(item.action)}>
+                  {item.action.label}
+                </button>
+              ) : null}
+            </article>
+          ))}
+        </div>
+      </section>
       <ReviewCheckpointSection
         securityStatus={value}
         value={checkpoints}
         mutation={checkpointMutation}
         onRecord={onRecordCheckpoint}
-        onOpenReview={() => onAction({ destination: "reports" })}
       />
-      <div className="project-security-evidence">
-        {value.sections.map((item) => (
-          <article className={`security-evidence security-evidence-${statusClass(item.status)}`} key={item.id}>
-            <header>
-              <h3>{item.label}</h3>
-              <span>{item.status}</span>
-            </header>
-            <p>{item.explanation}</p>
-            {Object.keys(item.counts).length ? (
-              <div className="security-evidence-counts">
-                {Object.entries(item.counts).map(([label, count]) => (
-                  <span key={label}><strong>{count === null ? "Indeterminate" : count}</strong> {securityCountLabel(label)}</span>
-                ))}
-              </div>
-            ) : null}
-            {item.examples.length ? <ul>{item.examples.map((example) => <li key={example}>{example}</li>)}</ul> : null}
-            <button type="button" className="tertiary-button compact-action" onClick={() => onAction({ destination: item.destination })}>
-              Open {item.label}
-            </button>
-          </article>
-        ))}
-      </div>
-      {value.actions.length ? (
-        <div className="project-security-actions">
-          <strong>Next useful actions</strong>
-          <div>
-            {value.actions.map((item) => (
-              <button type="button" className="secondary-button compact-action" onClick={() => onAction(item)} key={item.id}>
-                {item.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      ) : null}
       <p className="project-security-disclaimer">{value.disclaimer}</p>
     </section>
   );
@@ -1828,7 +1868,6 @@ function ReviewCheckpointSection({
   value,
   mutation,
   onRecord,
-  onOpenReview,
 }) {
   const eligibility = reviewCheckpointEligibility(securityStatus, value);
   const latest = value.history[0] || null;
@@ -1861,7 +1900,7 @@ function ReviewCheckpointSection({
         <div className="review-checkpoint-history">
           <strong>Recent checkpoint history</strong>
           <ol>
-            {value.history.map((checkpoint) => (
+            {value.history.slice(0, 3).map((checkpoint) => (
               <li key={checkpoint.checkpointId}>
                 <span>{formatDate(checkpoint.createdAt)}</span>
                 <span>{checkpoint.scanId ? `Scan #${checkpoint.scanId}` : "Scan indeterminate"}</span>
@@ -1869,18 +1908,13 @@ function ReviewCheckpointSection({
               </li>
             ))}
           </ol>
-          {value.hasMore ? <small>Showing the newest {value.history.length} checkpoints.</small> : null}
+          {value.history.length > 3 || value.hasMore ? <small>Showing the newest {Math.min(value.history.length, 3)} checkpoints.</small> : null}
         </div>
       ) : null}
       <div className="review-checkpoint-actions">
         {eligibility.eligible ? (
           <button type="button" className="secondary-button compact-action" onClick={onRecord}>
             Record reviewed checkpoint
-          </button>
-        ) : null}
-        {value.state.id === "review-required" ? (
-          <button type="button" className="tertiary-button compact-action" onClick={onOpenReview}>
-            Review current evidence
           </button>
         ) : null}
         {!eligibility.eligible && value.state.id !== "current" ? <small>{eligibility.reason}</small> : null}
@@ -2470,7 +2504,7 @@ function ScanComparisonView({
   const selectedBase = state.options.find((scan) => scan.id === state.baseScanId) || null;
   const selectedTarget = state.options.find((scan) => scan.id === state.targetScanId) || null;
   return (
-    <section className="scan-comparison" id="scan-comparison" aria-labelledby="scan-comparison-title">
+    <section className="scan-comparison" id="scan-comparison" tabIndex="-1" aria-labelledby="scan-comparison-title">
       <section className="panel scan-comparison-picker">
         <div className="panel-heading">
           <div>
@@ -2760,7 +2794,7 @@ function Changelog({ entries, open, onOpenChange }) {
   );
 }
 
-function ScanReport({ result, report, completionState, comparison, trustContext, viewMode, isScanning, onRunScan, onReviewFinding, onReopenFinding, findingReviewState, trustedBaselineMutation, onApproveTrustedBaseline, onUpdateTrustedBaselineNote, onClearTrustedBaseline, open, onOpenChange }) {
+function ScanReport({ result, report, completionState, comparison, trustContext, viewMode, isScanning, onRunScan, onReviewFinding, onReopenFinding, findingReviewState, trustedBaselineMutation, reviewNavigation, onApproveTrustedBaseline, onUpdateTrustedBaselineNote, onClearTrustedBaseline, open, onOpenChange }) {
   return (
     <details className={`panel section-toggle${completionState.allFindingsReviewed ? " reviewed-findings" : ""}`} id="reports" open={open} onToggle={(event) => onOpenChange(event.currentTarget.open)}>
       <summary className="section-summary">
@@ -2779,6 +2813,7 @@ function ScanReport({ result, report, completionState, comparison, trustContext,
           <FindingWorkbench
             findings={result.findings}
             scanIdentity={result.id ?? result.scan_date}
+            navigation={reviewNavigation}
             onReviewFinding={onReviewFinding}
             onReopenFinding={onReopenFinding}
             findingReviewState={findingReviewState}
@@ -2923,7 +2958,7 @@ function ScanCompletenessSummary({ completeness, viewMode, isScanning, onRunScan
   const needsRescan = !completeness.known || !completeness.complete;
   const completenessState = !completeness.known ? "unknown" : completeness.complete ? "complete" : "incomplete";
   return (
-    <section className={`scan-completeness ${completenessState}`}>
+    <section className={`scan-completeness ${completenessState}`} id="scan-completeness" tabIndex="-1">
       <h3>{coverageLabel(completeness)}</h3>
       {!completeness.known ? <p>Completeness metadata is unavailable for this older scan. Do not assume full coverage. Run a new scan to verify current coverage.</p> : (
         <div className="scan-completeness-counts">
@@ -2959,7 +2994,11 @@ function DependencyTrustPanel({ trust, findings, trustContext, scan, viewMode = 
     expected: expectedManagers.some((expected) => String(expected).toLowerCase() === manager.toLowerCase()),
   }));
   return (
-    <section className={`dependency-trust dependency-status-${trust.status}${compact ? " dependency-trust-overview" : ""}${attention ? " dependency-review-attention" : ""}`}>
+    <section
+      className={`dependency-trust dependency-status-${trust.status}${compact ? " dependency-trust-overview" : ""}${attention ? " dependency-review-attention" : ""}`}
+      id={compact ? undefined : "dependency-trust"}
+      tabIndex={compact ? undefined : "-1"}
+    >
       <div className="panel-heading">
         <div>
           <h3>Dependency Trust</h3>
@@ -3371,7 +3410,7 @@ function FindingItem({ finding, onReviewFinding, onReopenFinding, requestState =
 }
 
 
-function FindingWorkbench({ findings = [], scanIdentity, onReviewFinding, onReopenFinding, findingReviewState = {} }) {
+function FindingWorkbench({ findings = [], scanIdentity, navigation, onReviewFinding, onReopenFinding, findingReviewState = {} }) {
   const [reviewStatus, setReviewStatus] = useState("all");
   const [severity, setSeverity] = useState("all");
   const [category, setCategory] = useState("all");
@@ -3393,6 +3432,15 @@ function FindingWorkbench({ findings = [], scanIdentity, onReviewFinding, onReop
     setActiveKey("");
   }, [scanIdentity]);
 
+  useEffect(() => {
+    if (!navigation?.findingFilter) return;
+    setReviewStatus("unresolved");
+    setSeverity(navigation.findingFilter === "unresolved-high" ? "critical-high" : "all");
+    setCategory("all");
+    setQuery("");
+    setActiveKey("");
+  }, [navigation?.nonce, navigation?.findingFilter]);
+
   function goToNextUnresolved() {
     const nextKey = nextUnresolvedFindingKey(visibleItems, activeKey);
     if (!nextKey) return;
@@ -3405,7 +3453,7 @@ function FindingWorkbench({ findings = [], scanIdentity, onReviewFinding, onReop
   }
 
   return (
-    <section className="finding-workbench" aria-labelledby="finding-workbench-title">
+    <section className="finding-workbench" id="finding-workbench" tabIndex="-1" aria-labelledby="finding-workbench-title">
       <div className="finding-workbench-heading">
         <div>
           <h3 id="finding-workbench-title">Finding review workbench</h3>
@@ -3431,6 +3479,9 @@ function FindingWorkbench({ findings = [], scanIdentity, onReviewFinding, onReop
           Severity
           <select value={severity} onChange={(event) => setSeverity(event.target.value)}>
             <option value="all">All</option>
+            {options.severities.some((value) => ["critical", "high"].includes(value)) ? (
+              <option value="critical-high">Critical / high</option>
+            ) : null}
             {options.severities.map((value) => <option value={value} key={value}>{value}</option>)}
           </select>
         </label>

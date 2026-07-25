@@ -4,6 +4,7 @@ export const SESSION_STATE_VERSION = 1;
 export const VALID_SECTIONS = Object.freeze([
   "workspace",
   "projects",
+  "review",
   "trustProfiles",
   "activity",
   "scanComparison",

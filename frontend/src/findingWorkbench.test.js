@@ -33,14 +33,16 @@ test("orders unresolved findings first, then severity, then existing order", () 
 
 test("filters by review status, severity, category, title, and path", () => {
   const items = buildFindingWorkbenchItems([
+    finding("critical", "critical", "src/critical.js"),
     finding("script", "high", "scripts/setup.ps1", null, "executable-or-script-file"),
     finding("pattern", "medium", "src/network.js", { status: "reviewed" }, "suspicious-text-pattern"),
     finding("secret", "high", ".env.local", null, "secret-looking-file"),
   ]);
 
-  assert.deepEqual(filterFindingWorkbenchItems(items, { reviewStatus: "unresolved" }).map(id), ["script", "secret"]);
+  assert.deepEqual(filterFindingWorkbenchItems(items, { reviewStatus: "unresolved" }).map(id), ["critical", "script", "secret"]);
   assert.deepEqual(filterFindingWorkbenchItems(items, { reviewStatus: "reviewed" }).map(id), ["pattern"]);
   assert.deepEqual(filterFindingWorkbenchItems(items, { severity: "medium" }).map(id), ["pattern"]);
+  assert.deepEqual(filterFindingWorkbenchItems(items, { severity: "critical-high" }).map(id), ["critical", "script", "secret"]);
   assert.deepEqual(filterFindingWorkbenchItems(items, { category: "secret-looking file" }).map(id), ["secret"]);
   assert.deepEqual(filterFindingWorkbenchItems(items, { query: "EXECUTABLE" }).map(id), ["script"]);
   assert.deepEqual(filterFindingWorkbenchItems(items, { query: "NETWORK.JS" }).map(id), ["pattern"]);

@@ -105,9 +105,9 @@ export function verifyReleaseSource(gitPath) {
     cargo: cargoVersion(join(FRONTEND, "src-tauri", "Cargo.toml")),
     cargoLock: lockVersion(join(FRONTEND, "src-tauri", "Cargo.lock")),
   };
-  for (const [name, version] of Object.entries(versions)) if (version !== "0.6.9") throw new Error(`${name} identifies version ${version ?? "unknown"}; expected 0.6.9.`);
-  if (!readFileSync(join(REPOSITORY, "backend", "app", "changelog.py"), "utf8").includes('"version": "0.6.9"')) throw new Error("Backend release metadata does not identify 0.6.9.");
-  return { root, branch, commit, originMain, version: "0.6.9", versions, status: "" };
+  for (const [name, version] of Object.entries(versions)) if (version !== "0.7.0") throw new Error(`${name} identifies version ${version ?? "unknown"}; expected 0.7.0.`);
+  if (!readFileSync(join(REPOSITORY, "backend", "app", "changelog.py"), "utf8").includes('"version": "0.7.0"')) throw new Error("Backend release metadata does not identify 0.7.0.");
+  return { root, branch, commit, originMain, version: "0.7.0", versions, status: "" };
 }
 
 export function assertSameReleaseSource(before, after) {

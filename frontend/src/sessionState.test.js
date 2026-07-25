@@ -50,6 +50,14 @@ test("Activity is a valid durable project section", () => {
   assert.equal(parsed.activeSection, "activity");
 });
 
+test("Review is a valid durable project section", () => {
+  const parsed = parseSessionState(serializeSessionState({
+    ...VALID_STATE,
+    activeSection: "review",
+  }));
+  assert.equal(parsed.activeSection, "review");
+});
+
 test("wrong field types are replaced with safe defaults", () => {
   const parsed = parseSessionState(JSON.stringify({
     version: 1,

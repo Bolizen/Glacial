@@ -2,10 +2,11 @@ import { normalizeFinding } from "./reportMarkdown.js";
 
 
 const SEVERITY_RANK = new Map([
-  ["high", 0],
-  ["medium", 1],
-  ["low", 2],
-  ["none", 3],
+  ["critical", 0],
+  ["high", 1],
+  ["medium", 2],
+  ["low", 3],
+  ["none", 4],
 ]);
 
 
@@ -36,7 +37,8 @@ export function filterFindingWorkbenchItems(items, filters = {}) {
   return items.filter((item) => {
     if (reviewStatus === "unresolved" && item.reviewed) return false;
     if (reviewStatus === "reviewed" && !item.reviewed) return false;
-    if (severity !== "all" && item.detail.severity !== severity) return false;
+    if (severity === "critical-high" && !["critical", "high"].includes(item.detail.severity)) return false;
+    if (!["all", "critical-high"].includes(severity) && item.detail.severity !== severity) return false;
     if (category !== "all" && item.detail.category !== category) return false;
     if (!query) return true;
     return item.detail.title.toLocaleLowerCase().includes(query)

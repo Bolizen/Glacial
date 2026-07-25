@@ -348,11 +348,19 @@ test("Activity view renders read-only grouped entries and loads older history", 
 });
 
 test("missing and unavailable stored projects fall back through normal selection", async () => {
-  storeSession({ selectedProjectPath: "C:/workspace/missing", activeSection: "reports" });
+  storeSession({ selectedProjectPath: "C:/workspace/missing", activeSection: "review" });
   await renderApp();
   await resolveDetails(await takeDetailRequests(PROJECT_A_PATH));
   assert.match(selectedProjectText(), /Project A/);
   assert.equal(document.querySelector(".topbar h1").textContent, "Workspace Overview");
+});
+
+test("Review restores as a selected-project section", async () => {
+  storeSession({ selectedProjectPath: PROJECT_A_PATH, activeSection: "review" });
+  await renderApp();
+  await resolveDetails(await takeDetailRequests(PROJECT_A_PATH), { scans: [] });
+  assert.equal(document.querySelector(".topbar h1").textContent, "Review");
+  assert.ok(document.querySelector(".review-workspace"));
 });
 
 test("an unavailable stored registration is not restored", async () => {
@@ -593,27 +601,98 @@ test("complete scan with no findings retains verified clean presentation", async
   assertHistorySummary("0 findings", "Coverage: Complete");
 });
 
-test("new project guidance leads to the first scan and dismissal changes only local UI state", async () => {
+test("Review remains available with no scan and the compact legacy CTA only links to it", async () => {
   await renderApp();
   await resolveDetails(await takeDetailRequests(PROJECT_A_PATH), { scans: [] });
 
-  const checklist = document.querySelector(".guided-review");
-  assert.ok(checklist, "Expected the guided review checklist");
-  assert.match(checklist.textContent, /1 of 5 steps complete/);
-  assert.match(checklist.textContent, /Project registered/);
-  assert.match(checklist.textContent, /Run first scan/);
+  const shortcut = document.querySelector(".guided-review-shortcut");
+  assert.ok(shortcut, "Expected the compact Review shortcut");
+  assert.doesNotMatch(shortcut.textContent, /steps complete|checklist/i);
+  assert.match(shortcut.textContent, /Open Review/);
   assert.ok(document.querySelector(".first-scan-prompt"));
   assert.match(document.querySelector(".first-scan-prompt").textContent, /Run this project’s first scan/);
 
   const scanPostsBefore = fetchHarness.count("/api/scans", "POST");
   const reviewPutsBefore = fetchHarness.count("/api/finding-reviews", "PUT");
-  await click([...checklist.querySelectorAll("button")].find((button) => button.textContent === "Dismiss"));
+  await click(buttonWithText("Open Review"));
+  assert.equal(document.querySelector(".topbar h1").textContent, "Review");
+  const review = document.querySelector(".review-workspace");
+  assert.match(review.textContent, /Review not started/);
+  assert.match(review.textContent, /Insufficient evidence/);
+  assert.match(review.textContent, /scan is required to establish current project evidence/i);
+  assert.equal(review.querySelectorAll(".security-evidence").length, 6);
+  await click(review.querySelector(".review-next-action > button"));
+  assert.equal(document.querySelector(".topbar h1").textContent, "Workspace Overview");
+  assert.equal(fetchHarness.count("/api/scans", "POST"), scanPostsBefore);
 
+  await click([...document.querySelectorAll(".guided-review-shortcut button")].find((button) => button.textContent === "Dismiss"));
   assert.equal(document.querySelector(".guided-review"), null);
   assert.ok(document.querySelector(".first-scan-prompt"));
   assert.equal(fetchHarness.count("/api/scans", "POST"), scanPostsBefore);
   assert.equal(fetchHarness.count("/api/finding-reviews", "PUT"), reviewPutsBefore);
   assert.deepEqual(JSON.parse(window.localStorage.getItem(GUIDED_REVIEW_DISMISSALS_KEY)), [PROJECT_A_PATH]);
+});
+
+test("Review uses latest evidence and focuses unresolved critical/high findings after historical viewing", async () => {
+  const current = {
+    ...scanWithFindings(132, [reviewableFinding("review-high", { path: "src/latest-high.js", severity: "high" })]),
+    scanMetadataReliable: true,
+    dependencyTrust: emptyDependencyTrustFixture(),
+  };
+  const historical = {
+    ...withCompleteness(scan(131, "none", "2026-07-10T12:00:00Z"), { complete: true }),
+    scanMetadataReliable: true,
+    dependencyTrust: emptyDependencyTrustFixture(),
+  };
+  await renderApp();
+  await resolveDetails(await takeDetailRequests(PROJECT_A_PATH), { scans: [current, historical] });
+  await openReports();
+  const historicalRow = [...document.querySelectorAll(".history-row")]
+    .find((row) => row.textContent.includes("Jul 10"));
+  assert.ok(historicalRow, "Expected historical scan row");
+  await click(historicalRow.querySelector(".history-view-button"));
+
+  await openReview();
+  const review = document.querySelector(".review-workspace");
+  assert.match(review.textContent, /Significant changes detected/);
+  assert.match(review.textContent, /src\/latest-high\.js/);
+  const action = review.querySelector(".review-next-action > button");
+  assert.match(action.textContent, /high-severity/i);
+  await click(action);
+
+  assert.equal(document.querySelector(".topbar h1").textContent, "Reports");
+  const workbench = document.querySelector(".finding-workbench");
+  assert.equal(controlWithLabel(workbench, "Review status").value, "unresolved");
+  assert.equal(controlWithLabel(workbench, "Severity").value, "critical-high");
+  assert.deepEqual(workbenchPaths(), ["src/latest-high.js"]);
+});
+
+test("Review routes significant dependency change to Dependency Trust without approving it", async () => {
+  const current = {
+    ...withCompleteness(scan(133, "low", "2026-07-25T12:00:00Z"), { complete: true }),
+    scanMetadataReliable: true,
+    dependencyTrust: dependencyTrustFixture({
+      comparison: {
+        baselineStatus: "available",
+        changeCount: 1,
+        hiddenChangeCount: 0,
+        changes: [{ changeType: "version-changed", name: "alpha" }],
+        fileChanges: {},
+      },
+      trustedBaseline: configuredTrustedBaseline("drift"),
+    }),
+  };
+  await renderApp();
+  await resolveDetails(await takeDetailRequests(PROJECT_A_PATH), { scans: [current] });
+  await openReview();
+
+  const action = document.querySelector(".review-next-action > button");
+  assert.match(action.textContent, /Review dependency changes/);
+  const approvalsBefore = fetchHarness.count("/api/dependency-trust-baseline", "PUT");
+  await click(action);
+  assert.equal(document.querySelector(".topbar h1").textContent, "Reports");
+  assert.equal(document.activeElement.id, "dependency-trust");
+  assert.equal(fetchHarness.count("/api/dependency-trust-baseline", "PUT"), approvalsBefore);
 });
 
 test("Reports completion summary keeps unresolved findings and the workbench primary", async () => {
@@ -788,6 +867,8 @@ test("contextual and primary scan controls share one guarded request and synchro
   const request = await fetchHarness.next("/api/scans", { method: "POST" });
   const complete = withCompleteness(scan(21, "none", "2026-07-11T12:21:00Z"), { complete: true });
   await finishScan(request, complete, [complete, legacy]);
+  assert.equal(document.querySelector(".topbar h1").textContent, "Review");
+  assert.match(document.querySelector(".review-workspace").textContent, /Latest project review/);
   assert.equal(runScanButton().disabled, false);
   assert.equal(document.querySelector(".contextual-scan-button"), null);
 });
@@ -1744,6 +1825,7 @@ test("review checkpoint renders eligible evidence, confirms explicitly, and beco
     trustProfile: profile,
     reviewCheckpoints: checkpoints,
   });
+  await openReview();
 
   const section = document.querySelector(".review-checkpoint");
   assert.ok(section);
@@ -1839,11 +1921,11 @@ test("review checkpoint shows bounded stale and malformed reasons without an ove
     scans: [current],
     reviewCheckpoints: stale,
   });
+  await openReview();
   const section = document.querySelector(".review-checkpoint");
   assert.match(section.textContent, /Review required/);
   assert.match(section.textContent, /different latest scan/);
   assert.match(section.textContent, /Project Expectations changed/);
-  assert.ok(buttonWithText("Review current evidence"));
   assert.equal([...section.querySelectorAll("button")].some((button) => button.textContent.includes("Record")), false);
 
   await selectProject("Project B");
@@ -2198,6 +2280,12 @@ async function openReports() {
   const link = [...document.querySelectorAll(".sidebar-nav a")]
     .find((item) => item.textContent.includes("Reports"));
   assert.ok(link, "Expected Reports navigation link");
+  await click(link);
+}
+
+async function openReview() {
+  const link = document.querySelector('.sidebar-nav a[href="#review"]');
+  assert.ok(link, "Expected Review navigation link");
   await click(link);
 }
 
