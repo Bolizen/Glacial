@@ -38,21 +38,26 @@ import {
   signingEnvironment,
 } from "./windows-signing.mjs";
 import {
+  assertReleaseProfileTrust,
   assertExpectedTauriRestoration,
   assertExactPackageSet,
   assertFileIdentity,
   assertInterpreterIdentity,
   assertNsisApplicationSource,
   assertSameReleaseSource,
+  buildDryRunPlan,
   canonicalizePackageName,
   copyCapturedApplication,
   createPortableZip,
   normalizeInstalledPackages,
   packageSetDifference,
   parseRequirementsLock,
+  parseReleaseArguments,
   publishCandidate,
+  releaseProfileManifestFields,
   requireApplicationCapture,
   requireSigningEvents,
+  runAfterSignerPreflight,
   runReleaseSteps,
   validatePortableZipEntryNames,
   verifyPortableArchiveCompatibility,
@@ -66,7 +71,7 @@ const TEST_ROOT = join(DESKTOP_BUILD_ROOT, "release-signing-tests");
 const PORTABLE_ZIP_TEST_ROOT = join(DESKTOP_BUILD_ROOT, "portable-zip-tests", String(process.pid));
 const FAILED_RC = join(DESKTOP_BUILD_ROOT, "release-candidates", "Glacial-0.4.0-fbf96d568350-20260719T065059Z");
 const THUMBPRINT = "A".repeat(40);
-const RELEASE_ID = "Glacial-0.8.1-ffffffffffff-20260720T120000Z";
+const RELEASE_ID = "Glacial-0.8.2-ffffffffffff-20260720T120000Z";
 
 function cleanTestRoot() {
   removeSafeTree(DESKTOP_BUILD_ROOT, TEST_ROOT, { pathInspector: false });
@@ -127,9 +132,9 @@ function sourceState(overrides = {}) {
     branch: "main",
     commit: "f".repeat(40),
     originMain: "f".repeat(40),
-    version: "0.8.1",
+    version: "0.8.2",
     status: "",
-    versions: { packageJson: "0.8.1", tauri: "0.8.1" },
+    versions: { packageJson: "0.8.2", tauri: "0.8.2" },
     ...overrides,
   };
 }
@@ -233,7 +238,7 @@ test("command provider keeps the file as one direct argument and forwards only n
     AZURE_CLIENT_SECRET: "not-allowed",
     AWS_SECRET_ACCESS_KEY: "not-allowed-either",
   });
-  const releaseEnvironment = signingEnvironment(source, "Glacial-0.8.1-ffffffffffff-20260719T120000Z");
+  const releaseEnvironment = signingEnvironment(source, "Glacial-0.8.2-ffffffffffff-20260719T120000Z");
   assert.equal(releaseEnvironment.AZURE_CLIENT_ID, "allowed-value");
   assert.equal("AZURE_CLIENT_SECRET" in releaseEnvironment, false);
   assert.equal("AWS_SECRET_ACCESS_KEY" in releaseEnvironment, false);
@@ -436,7 +441,7 @@ test("application capture validation rejects missing, duplicate, unrelated, and 
 test("Tauri signing evidence requires one transient uninstaller between plugins and final installer", () => {
   const capture = join(TEST_ROOT, "capture-evidence", "Glacial.exe");
   const target = join(TEST_ROOT, "target-evidence", "glacial.exe");
-  const installer = join(TEST_ROOT, "bundle", "Glacial_0.8.1_x64-setup.exe");
+  const installer = join(TEST_ROOT, "bundle", "Glacial_0.8.2_x64-setup.exe");
   mkdirSync(dirname(capture), { recursive: true });
   writeFileSync(capture, minimalPe());
   const config = { expectedThumbprint: THUMBPRINT, applicationTarget: target, applicationCapture: capture };
@@ -505,9 +510,163 @@ test("release source revalidation rejects every mutable provenance field", () =>
     { commit: "e".repeat(40) },
     { originMain: "e".repeat(40) },
     { status: " M file" },
-    { version: "0.8.2" },
-    { versions: { packageJson: "0.8.1", tauri: "0.8.2" } },
+    { version: "0.8.3" },
+    { versions: { packageJson: "0.8.2", tauri: "0.8.3" } },
   ]) assert.throws(() => assertSameReleaseSource(before, sourceState(changed)), /changed/);
+});
+
+test("release profile arguments accept only one exact explicit supported profile", () => {
+  assert.deepEqual(parseReleaseArguments(["--profile", "signed-preview"]), { profile: "signed-preview", dryRun: false });
+  assert.deepEqual(parseReleaseArguments(["--dry-run", "--profile", "public-rc"]), { profile: "public-rc", dryRun: true });
+  assert.throws(() => parseReleaseArguments([]), /explicit --profile/);
+  assert.throws(() => parseReleaseArguments(["--profile"]), /Unsupported release profile/);
+  assert.throws(() => parseReleaseArguments(["--profile", "public"]), /Unsupported release profile/);
+  assert.throws(() => parseReleaseArguments(["--profile", "PUBLIC-RC"]), /Unsupported release profile/);
+  assert.throws(() => parseReleaseArguments(["--profile=public-rc"]), /Unsupported release argument/);
+  assert.throws(() => parseReleaseArguments(["--profile", "public-rc", "--profile", "public-rc"]), /exactly once/);
+  assert.throws(() => parseReleaseArguments(["--profile", "public-rc", "--dry-run", "--dry-run"]), /at most once/);
+  assert.throws(() => parseReleaseArguments(["--profile", "public-rc", "--bypass-trust"]), /Unsupported release argument/);
+});
+
+test("release profiles accept only their established verified signer trust classifications", () => {
+  const selfSigned = { trustClassification: "self-signed" };
+  const publiclyTrusted = { trustClassification: "publicly-trusted" };
+  assert.equal(assertReleaseProfileTrust("signed-preview", selfSigned), selfSigned);
+  assert.equal(assertReleaseProfileTrust("signed-preview", publiclyTrusted), publiclyTrusted);
+  assert.equal(assertReleaseProfileTrust("public-rc", publiclyTrusted), publiclyTrusted);
+  assert.throws(() => assertReleaseProfileTrust("public-rc", selfSigned), /exactly as publicly-trusted/);
+  for (const signerIdentity of [
+    undefined,
+    {},
+    { trustClassification: null },
+    { trustClassification: true },
+    { trustClassification: "unknown" },
+    { trustClassification: "publicly trusted" },
+    { trustClassification: "PUBLICLY-TRUSTED" },
+  ]) assert.throws(() => assertReleaseProfileTrust("public-rc", signerIdentity), /exactly as publicly-trusted/);
+});
+
+test("public trust failure stops immediately after preflight and before every release-producing operation", async () => {
+  const operations = [];
+  await assert.rejects(() => runAfterSignerPreflight({
+    profile: "public-rc",
+    preflight: () => {
+      operations.push("preflight");
+      return { trustClassification: "self-signed" };
+    },
+    runTrustedSteps: () => operations.push(
+      "build",
+      "sign",
+      "stage",
+      "cleanup",
+      "tauri",
+      "package",
+      "copy",
+      "metadata",
+      "publish",
+    ),
+  }), /exactly as publicly-trusted/);
+  assert.deepEqual(operations, ["preflight"]);
+});
+
+test("accepted signer trust reaches release steps only after preflight", async () => {
+  for (const [profile, trustClassification] of [
+    ["signed-preview", "self-signed"],
+    ["signed-preview", "publicly-trusted"],
+    ["public-rc", "publicly-trusted"],
+  ]) {
+    const operations = [];
+    const state = await runAfterSignerPreflight({
+      profile,
+      preflight: () => {
+        operations.push("preflight");
+        return { trustClassification };
+      },
+      runTrustedSteps: (releaseState) => {
+        operations.push(`run:${releaseState.signerIdentity.trustClassification}`);
+      },
+    });
+    assert.deepEqual(operations, ["preflight", `run:${trustClassification}`]);
+    assert.equal(state.signerIdentity.trustClassification, trustClassification);
+  }
+});
+
+test("dry-run plans and manifest fields report profile trust requirements honestly", () => {
+  const config = loadSigningConfig(storeEnvironment(), { dryRun: true });
+  const preview = buildDryRunPlan("signed-preview", config);
+  const publicRc = buildDryRunPlan("public-rc", config);
+  assert.equal(preview.releaseProfile, "signed-preview");
+  assert.equal(preview.requiredSignerTrust, "valid-signed-signer");
+  assert.equal(publicRc.releaseProfile, "public-rc");
+  assert.equal(publicRc.requiredSignerTrust, "publicly-trusted");
+  for (const plan of [preview, publicRc]) {
+    const preflightIndex = plan.actualSteps.indexOf("preflight-disposable-signature");
+    const gateIndex = plan.actualSteps.indexOf("enforce-release-profile-trust");
+    const buildIndex = plan.actualSteps.indexOf("build-backend");
+    assert.ok(preflightIndex >= 0 && preflightIndex < gateIndex && gateIndex < buildIndex);
+    assert.equal(plan.trustGate.after, "preflight-disposable-signature");
+    assert.equal(plan.trustGate.before, "build-backend");
+  }
+  assert.deepEqual(
+    releaseProfileManifestFields("signed-preview", { trustClassification: "self-signed" }),
+    {
+      releaseProfile: "signed-preview",
+      requiredSignerTrust: "valid-signed-signer",
+      signerTrustClassification: "self-signed",
+    },
+  );
+  assert.deepEqual(
+    releaseProfileManifestFields("public-rc", { trustClassification: "publicly-trusted" }),
+    {
+      releaseProfile: "public-rc",
+      requiredSignerTrust: "publicly-trusted",
+      signerTrustClassification: "publicly-trusted",
+    },
+  );
+  assert.throws(
+    () => releaseProfileManifestFields("public-rc", { trustClassification: "self-signed" }),
+    /exactly as publicly-trusted/,
+  );
+});
+
+test("release package commands and established version sources identify 0.8.2", () => {
+  const packageJson = JSON.parse(readFileSync(join(REPOSITORY, "frontend", "package.json"), "utf8"));
+  const packageLock = JSON.parse(readFileSync(join(REPOSITORY, "frontend", "package-lock.json"), "utf8"));
+  const tauri = JSON.parse(readFileSync(join(REPOSITORY, "frontend", "src-tauri", "tauri.conf.json"), "utf8"));
+  const cargo = readFileSync(join(REPOSITORY, "frontend", "src-tauri", "Cargo.toml"), "utf8");
+  const cargoLock = readFileSync(join(REPOSITORY, "frontend", "src-tauri", "Cargo.lock"), "utf8");
+  const releaseTool = readFileSync(join(REPOSITORY, "scripts", "desktop", "Build-SignedWindowsRelease.mjs"), "utf8");
+  const signingTool = readFileSync(join(REPOSITORY, "scripts", "desktop", "windows-signing.mjs"), "utf8");
+  const changelog = readFileSync(join(REPOSITORY, "backend", "app", "changelog.py"), "utf8");
+  const readme = readFileSync(join(REPOSITORY, "README.md"), "utf8");
+  const signingDocs = readFileSync(join(REPOSITORY, "docs", "windows-release-signing.md"), "utf8");
+
+  assert.deepEqual({
+    signedPreviewPlan: packageJson.scripts["release:windows:signed-preview:plan"],
+    signedPreview: packageJson.scripts["release:windows:signed-preview"],
+    publicRcPlan: packageJson.scripts["release:windows:public-rc:plan"],
+    publicRc: packageJson.scripts["release:windows:public-rc"],
+    legacyPlan: packageJson.scripts["release:windows:plan"],
+    legacySigned: packageJson.scripts["release:windows:signed"],
+  }, {
+    signedPreviewPlan: "node ../scripts/desktop/Build-SignedWindowsRelease.mjs --profile signed-preview --dry-run",
+    signedPreview: "node ../scripts/desktop/Build-SignedWindowsRelease.mjs --profile signed-preview",
+    publicRcPlan: "node ../scripts/desktop/Build-SignedWindowsRelease.mjs --profile public-rc --dry-run",
+    publicRc: "node ../scripts/desktop/Build-SignedWindowsRelease.mjs --profile public-rc",
+    legacyPlan: "node ../scripts/desktop/Build-SignedWindowsRelease.mjs --profile signed-preview --dry-run",
+    legacySigned: "node ../scripts/desktop/Build-SignedWindowsRelease.mjs --profile signed-preview",
+  });
+  assert.deepEqual(
+    [packageJson.version, packageLock.version, packageLock.packages[""].version, tauri.version],
+    ["0.8.2", "0.8.2", "0.8.2", "0.8.2"],
+  );
+  assert.match(cargo, /^version = "0\.8\.2"$/m);
+  assert.match(cargoLock, /\[\[package\]\]\r?\nname = "glacial"\r?\nversion = "0\.8\.2"/);
+  assert.match(releaseTool, /expected 0\.8\.2/);
+  assert.match(signingTool, /\^Glacial-0\\\.8\\\.2-/);
+  assert.match(changelog, /"version": "0\.8\.2"/);
+  assert.match(readme, /Glacial v0\.8\.2 is licensed/);
+  assert.match(signingDocs, /Glacial v0\.8\.2 is intended/);
 });
 
 test("candidate publication is failure-atomic and never overwrites existing candidates", () => {

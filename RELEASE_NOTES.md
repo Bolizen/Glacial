@@ -1,3 +1,13 @@
+# Glacial 0.8.2 Public Release Candidate Trust Gate
+
+Glacial 0.8.2 adds an explicit fail-closed trust boundary between internal signed previews and public release candidates.
+
+## Release profile trust gate
+
+- Adds strict `signed-preview` and `public-rc` release profiles while retaining the legacy signed commands as signed-preview aliases.
+- Requires the established disposable signer preflight to classify a public-RC signer exactly as `publicly-trusted` before any Glacial build, signing, staging, packaging, metadata, or publication work begins.
+- Records the selected profile, required signer trust, and verified trust classification in release metadata while preserving self-signed preview warnings and all existing signing and artifact-integrity checks.
+
 # Glacial 0.8.1 Remediation Brief Correctness
 
 Glacial 0.8.1 is a narrowly scoped correctness patch for the Agent Remediation Brief.

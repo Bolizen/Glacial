@@ -48,6 +48,23 @@ const RELEASE_WORK = join(DESKTOP_BUILD_ROOT, "release-work");
 const EXPAND_PORTABLE_ARCHIVE_SCRIPT = join(REPOSITORY, "scripts", "desktop", "Expand-PortableArchive.ps1");
 const EXPECTED_NSIS_COMPONENTS = ["NSISdl.dll", "StartMenu.dll", "System.dll", "nsDialogs.dll", "nsis_tauri_utils.dll"];
 const PORTABLE_ARCHIVE_ROOTS = ["Glacial.exe", "glacial-backend.exe", "_internal"];
+const RELEASE_PROFILES = new Set(["signed-preview", "public-rc"]);
+const ACTUAL_RELEASE_STEPS = [
+  "verify-source",
+  "preflight-disposable-signature",
+  "enforce-release-profile-trust",
+  "build-backend",
+  "sign-backend",
+  "stage-backend",
+  "clean-generated-tauri-release-output",
+  "tauri-build-and-sign-once",
+  "verify-installer-captured-application-and-restoration",
+  "assemble-portable-from-captured-identical-bytes",
+  "verify-zip",
+  "write-final-hashes",
+  "revalidate-source",
+  "atomic-publish",
+];
 
 function redact(text, secretValues = []) {
   let value = String(text ?? "");
@@ -82,6 +99,86 @@ function lockVersion(path) {
   return match?.[1] ?? null;
 }
 
+export function parseReleaseArguments(args) {
+  if (!Array.isArray(args)) throw new Error("Release arguments must be an array.");
+  let profile = null;
+  let dryRun = false;
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === "--profile") {
+      if (profile !== null) throw new Error("The --profile argument must be supplied exactly once.");
+      const value = args[index + 1];
+      if (!RELEASE_PROFILES.has(value)) throw new Error(`Unsupported release profile: ${value ?? "(missing)"}.`);
+      profile = value;
+      index += 1;
+    } else if (argument === "--dry-run") {
+      if (dryRun) throw new Error("The --dry-run argument may be supplied at most once.");
+      dryRun = true;
+    } else {
+      throw new Error(`Unsupported release argument: ${String(argument)}.`);
+    }
+  }
+  if (profile === null) throw new Error("An explicit --profile signed-preview or --profile public-rc argument is required.");
+  return { profile, dryRun };
+}
+
+export function requiredSignerTrust(profile) {
+  if (profile === "signed-preview") return "valid-signed-signer";
+  if (profile === "public-rc") return "publicly-trusted";
+  throw new Error(`Unsupported release profile: ${String(profile)}.`);
+}
+
+export function assertReleaseProfileTrust(profile, signerIdentity) {
+  const trustClassification = signerIdentity?.trustClassification;
+  if (profile === "signed-preview") {
+    if (!["self-signed", "publicly-trusted"].includes(trustClassification)) throw new Error("The signed-preview signer trust classification is invalid or unsupported.");
+  } else if (profile === "public-rc") {
+    if (trustClassification !== "publicly-trusted") throw new Error("The public-rc profile requires signer trust classified exactly as publicly-trusted.");
+  } else {
+    throw new Error(`Unsupported release profile: ${String(profile)}.`);
+  }
+  return signerIdentity;
+}
+
+export function releaseProfileManifestFields(profile, signerIdentity) {
+  assertReleaseProfileTrust(profile, signerIdentity);
+  return {
+    releaseProfile: profile,
+    requiredSignerTrust: requiredSignerTrust(profile),
+    signerTrustClassification: signerIdentity.trustClassification,
+  };
+}
+
+export function buildDryRunPlan(profile, config) {
+  return {
+    mode: "dry-run",
+    repository: REPOSITORY,
+    releaseProfile: profile,
+    requiredSignerTrust: requiredSignerTrust(profile),
+    trustGate: {
+      after: "preflight-disposable-signature",
+      before: "build-backend",
+      enforcement: profile === "public-rc"
+        ? "require-exact-publicly-trusted"
+        : "accept-valid-self-signed-or-publicly-trusted",
+    },
+    provider: config.provider,
+    expectedSubject: config.expectedSubject,
+    expectedThumbprint: config.expectedThumbprint,
+    timestampOrigin: new URL(config.timestampUrl).origin,
+    tauriOverlay: createTauriSigningOverlay(),
+    actualSteps: [...ACTUAL_RELEASE_STEPS],
+  };
+}
+
+export async function runAfterSignerPreflight({ profile, preflight, runTrustedSteps, state = {} }) {
+  const signerIdentity = await preflight();
+  assertReleaseProfileTrust(profile, signerIdentity);
+  state.signerIdentity = signerIdentity;
+  await runTrustedSteps(state);
+  return state;
+}
+
 export function verifyReleaseSource(gitPath) {
   const environment = minimalEnvironment(process.env);
   const root = resolve(runText(gitPath, ["rev-parse", "--show-toplevel"], { cwd: REPOSITORY, env: environment }));
@@ -105,9 +202,9 @@ export function verifyReleaseSource(gitPath) {
     cargo: cargoVersion(join(FRONTEND, "src-tauri", "Cargo.toml")),
     cargoLock: lockVersion(join(FRONTEND, "src-tauri", "Cargo.lock")),
   };
-  for (const [name, version] of Object.entries(versions)) if (version !== "0.8.1") throw new Error(`${name} identifies version ${version ?? "unknown"}; expected 0.8.1.`);
-  if (!readFileSync(join(REPOSITORY, "backend", "app", "changelog.py"), "utf8").includes('"version": "0.8.1"')) throw new Error("Backend release metadata does not identify 0.8.1.");
-  return { root, branch, commit, originMain, version: "0.8.1", versions, status: "" };
+  for (const [name, version] of Object.entries(versions)) if (version !== "0.8.2") throw new Error(`${name} identifies version ${version ?? "unknown"}; expected 0.8.2.`);
+  if (!readFileSync(join(REPOSITORY, "backend", "app", "changelog.py"), "utf8").includes('"version": "0.8.2"')) throw new Error("Backend release metadata does not identify 0.8.2.");
+  return { root, branch, commit, originMain, version: "0.8.2", versions, status: "" };
 }
 
 export function assertSameReleaseSource(before, after) {
@@ -455,11 +552,12 @@ function artifactRecord(kind, path, root) {
   return { kind, filename: basename(path), path: relative(root, path).replaceAll("\\", "/"), bytes: statSync(path).size, sha256: sha256(path) };
 }
 
-function writeReleaseMetadata({ workRoot, source, signerIdentity, installer, portableZip, portablePeRecords, backendSigningRecords, signingEvents, payloadAudit, buildStartedUtc, applicationSha256, installerApplicationEvidence }) {
+function writeReleaseMetadata({ workRoot, source, releaseProfile, signerIdentity, installer, portableZip, portablePeRecords, backendSigningRecords, signingEvents, payloadAudit, buildStartedUtc, applicationSha256, installerApplicationEvidence }) {
   const artifacts = [artifactRecord("nsis-installer", installer, workRoot), artifactRecord("portable-zip", portableZip, workRoot)];
   const manifest = {
     schema: "glacial-release-candidate/v1",
     product: "Glacial",
+    ...releaseProfileManifestFields(releaseProfile, signerIdentity),
     version: source.version,
     commit: source.commit,
     branch: source.branch,
@@ -472,6 +570,7 @@ function writeReleaseMetadata({ workRoot, source, signerIdentity, installer, por
     signing: {
       signerSubject: signerIdentity.canonicalSubject,
       signerThumbprint: signerIdentity.signerThumbprint,
+      trustClassification: signerIdentity.trustClassification,
       trust: signerIdentity.trustClassification === "publicly-trusted" ? "publicly trusted" : "self-signed",
       timestampRequired: true,
       applicationSha256,
@@ -530,12 +629,12 @@ function formatTimestamp(date) {
   return date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
 }
 
-function dryRun() {
+function dryRun(profile) {
   const config = loadSigningConfig(process.env, { dryRun: true });
-  process.stdout.write(`${JSON.stringify({ mode: "dry-run", repository: REPOSITORY, provider: config.provider, expectedSubject: config.expectedSubject, expectedThumbprint: config.expectedThumbprint, timestampOrigin: new URL(config.timestampUrl).origin, tauriOverlay: createTauriSigningOverlay(), actualSteps: ["verify-source", "preflight-disposable-signature", "build-backend", "sign-backend", "stage-backend", "clean-generated-tauri-release-output", "tauri-build-and-sign-once", "verify-installer-captured-application-and-restoration", "assemble-portable-from-captured-identical-bytes", "verify-zip", "write-final-hashes", "revalidate-source", "atomic-publish"] }, null, 2)}\n`);
+  process.stdout.write(`${JSON.stringify(buildDryRunPlan(profile, config), null, 2)}\n`);
 }
 
-async function buildSignedRelease() {
+async function buildSignedRelease(releaseProfile) {
   if (process.platform !== "win32") throw new Error("The signed Windows release workflow must run on Windows.");
   const gitPath = resolveToolExecutable("git.exe", process.env, { forbiddenRoot: REPOSITORY });
   const rustcPath = resolveToolExecutable("rustc.exe", process.env, { forbiddenRoot: REPOSITORY });
@@ -552,56 +651,64 @@ async function buildSignedRelease() {
   for (const path of [signingRoot, workRoot, finalRoot]) assertSafePath(DESKTOP_BUILD_ROOT, path);
   if (existsSync(signingRoot) || existsSync(workRoot) || existsSync(finalRoot)) throw new Error(`Refusing to reuse release state: ${releaseId}`);
   ensureSafeDirectory(DESKTOP_BUILD_ROOT, signingRoot);
-  ensureSafeDirectory(DESKTOP_BUILD_ROOT, join(workRoot, "artifacts"));
 
   const releaseEnvironment = signingEnvironment(process.env, releaseId);
   const config = loadSigningConfig(releaseEnvironment);
-  const signerIdentity = preflightSigningProvider(config, { probeParent: join(signingRoot, "probe") });
   const overlayPath = join(signingRoot, "tauri.signing.conf.json");
-  writeFileSync(overlayPath, `${JSON.stringify(createTauriSigningOverlay(npm.command), null, 2)}\n`, { flag: "wx" });
   const secretValues = config.provider === "command" ? config.providerEnvironmentNames.map((name) => config.providerEnvironment[name]).filter(Boolean) : [];
 
-  const state = { source, releaseId, workRoot, finalRoot, signerIdentity };
-  await runReleaseSteps([
-    { name: "build-backend", run: () => { state.buildPython = validateDesktopBuildEnvironment(); buildBackend(state.buildPython); } },
-    { name: "sign-backend", run: () => { state.backendSigningRecords = signBackendTree(PYINSTALLER_PAYLOAD, config); } },
-    { name: "stage-backend", run: () => stageSignedBackend(rustcPath) },
-    { name: "clean-tauri-release-output", run: () => removeSafeTree(REPOSITORY, TAURI_TARGET) },
-    { name: "tauri-build", run: () => runVisible(npm.command, [...npm.prefixArgs, "run", "tauri:build", "--", "--config", overlayPath], { cwd: FRONTEND, env: releaseEnvironment, secretValues }) },
-    { name: "verify-tauri-output", run: () => {
-      state.installer = findInstaller(source.version);
-      state.workingApplication = join(TAURI_TARGET, "glacial.exe");
-      state.application = config.applicationCapture;
-      for (const path of [state.workingApplication, state.application]) if (!existsSync(path)) throw new Error(`Tauri application lifecycle evidence is missing: ${path}`);
-      verifySignature(state.installer, config, { expectFirstParty: true, expectedCanonicalSubject: signerIdentity.expectedCanonicalSubject });
-      verifySignature(state.application, config, { expectFirstParty: true, expectedCanonicalSubject: signerIdentity.expectedCanonicalSubject });
-      const restored = assertExpectedTauriRestoration(state.workingApplication, state.application);
-      state.applicationSha256 = sha256(state.application);
-      state.signingEvents = parseAuditLog(config.auditLog);
-      const signingEvidence = requireSigningEvents(state.signingEvents, config, state.installer, signerIdentity.expectedCanonicalSubject);
-      const nsisScript = join(TAURI_TARGET, "nsis", "x64", "installer.nsi");
-      const nsisSource = assertNsisApplicationSource(nsisScript, state.workingApplication);
-      state.installerApplicationEvidence = { method: "tauri-v2.11.4-static-nsis-source", nsisScript: relative(REPOSITORY, nsisScript).replaceAll("\\", "/"), nsisSource: relative(REPOSITORY, nsisSource).replaceAll("\\", "/"), signedCaptureSha256: state.applicationSha256, signingEventSha256: signingEvidence.applicationEvent.sha256, restoredWorkingSha256: restored.sha256 };
-    } },
-    { name: "assemble-portable", run: () => { state.portablePeRecords = assemblePortable(state.application, config, signerIdentity.expectedCanonicalSubject); state.payloadAudit = auditPortablePayload(PORTABLE_ROOT); } },
-    { name: "copy-and-package", run: () => {
-      state.installerDestination = join(workRoot, "artifacts", basename(state.installer));
-      copyFileSync(state.installer, state.installerDestination, constants.COPYFILE_EXCL);
-      verifySignature(state.installerDestination, config, { expectFirstParty: true, expectedCanonicalSubject: signerIdentity.expectedCanonicalSubject });
-      state.portableZip = join(workRoot, "artifacts", `Glacial_${source.version}_x64-portable.zip`);
-      createPortableZip(powershellPath, PORTABLE_ROOT, state.portableZip);
-      verifyPortableArchive(tarPath, powershellPath, state.portableZip, PORTABLE_ROOT, join(workRoot, "zip-verification"), config, signerIdentity.expectedCanonicalSubject);
-    } },
-    { name: "write-metadata", run: () => { state.metadata = writeReleaseMetadata({ workRoot, source, signerIdentity, installer: state.installerDestination, portableZip: state.portableZip, portablePeRecords: state.portablePeRecords, backendSigningRecords: state.backendSigningRecords, signingEvents: state.signingEvents, payloadAudit: state.payloadAudit, buildStartedUtc, applicationSha256: state.applicationSha256, installerApplicationEvidence: state.installerApplicationEvidence }); } },
-    { name: "publish", run: () => publishCandidate({ workRoot, finalRoot, sourceBefore: source, integrityVerifier: () => verifyPublishedHashes(workRoot, state.metadata.manifestPath, state.metadata.sumsPath), sourceVerifier: () => verifyReleaseSource(gitPath) }) },
-  ], state);
+  const state = { source, releaseId, workRoot, finalRoot, releaseProfile };
+  await runAfterSignerPreflight({
+    profile: releaseProfile,
+    preflight: () => preflightSigningProvider(config, { probeParent: join(signingRoot, "probe") }),
+    state,
+    runTrustedSteps: async () => {
+      const { signerIdentity } = state;
+      ensureSafeDirectory(DESKTOP_BUILD_ROOT, join(workRoot, "artifacts"));
+      writeFileSync(overlayPath, `${JSON.stringify(createTauriSigningOverlay(npm.command), null, 2)}\n`, { flag: "wx" });
+      await runReleaseSteps([
+        { name: "build-backend", run: () => { state.buildPython = validateDesktopBuildEnvironment(); buildBackend(state.buildPython); } },
+        { name: "sign-backend", run: () => { state.backendSigningRecords = signBackendTree(PYINSTALLER_PAYLOAD, config); } },
+        { name: "stage-backend", run: () => stageSignedBackend(rustcPath) },
+        { name: "clean-tauri-release-output", run: () => removeSafeTree(REPOSITORY, TAURI_TARGET) },
+        { name: "tauri-build", run: () => runVisible(npm.command, [...npm.prefixArgs, "run", "tauri:build", "--", "--config", overlayPath], { cwd: FRONTEND, env: releaseEnvironment, secretValues }) },
+        { name: "verify-tauri-output", run: () => {
+          state.installer = findInstaller(source.version);
+          state.workingApplication = join(TAURI_TARGET, "glacial.exe");
+          state.application = config.applicationCapture;
+          for (const path of [state.workingApplication, state.application]) if (!existsSync(path)) throw new Error(`Tauri application lifecycle evidence is missing: ${path}`);
+          verifySignature(state.installer, config, { expectFirstParty: true, expectedCanonicalSubject: signerIdentity.expectedCanonicalSubject });
+          verifySignature(state.application, config, { expectFirstParty: true, expectedCanonicalSubject: signerIdentity.expectedCanonicalSubject });
+          const restored = assertExpectedTauriRestoration(state.workingApplication, state.application);
+          state.applicationSha256 = sha256(state.application);
+          state.signingEvents = parseAuditLog(config.auditLog);
+          const signingEvidence = requireSigningEvents(state.signingEvents, config, state.installer, signerIdentity.expectedCanonicalSubject);
+          const nsisScript = join(TAURI_TARGET, "nsis", "x64", "installer.nsi");
+          const nsisSource = assertNsisApplicationSource(nsisScript, state.workingApplication);
+          state.installerApplicationEvidence = { method: "tauri-v2.11.4-static-nsis-source", nsisScript: relative(REPOSITORY, nsisScript).replaceAll("\\", "/"), nsisSource: relative(REPOSITORY, nsisSource).replaceAll("\\", "/"), signedCaptureSha256: state.applicationSha256, signingEventSha256: signingEvidence.applicationEvent.sha256, restoredWorkingSha256: restored.sha256 };
+        } },
+        { name: "assemble-portable", run: () => { state.portablePeRecords = assemblePortable(state.application, config, signerIdentity.expectedCanonicalSubject); state.payloadAudit = auditPortablePayload(PORTABLE_ROOT); } },
+        { name: "copy-and-package", run: () => {
+          state.installerDestination = join(workRoot, "artifacts", basename(state.installer));
+          copyFileSync(state.installer, state.installerDestination, constants.COPYFILE_EXCL);
+          verifySignature(state.installerDestination, config, { expectFirstParty: true, expectedCanonicalSubject: signerIdentity.expectedCanonicalSubject });
+          state.portableZip = join(workRoot, "artifacts", `Glacial_${source.version}_x64-portable.zip`);
+          createPortableZip(powershellPath, PORTABLE_ROOT, state.portableZip);
+          verifyPortableArchive(tarPath, powershellPath, state.portableZip, PORTABLE_ROOT, join(workRoot, "zip-verification"), config, signerIdentity.expectedCanonicalSubject);
+        } },
+        { name: "write-metadata", run: () => { state.metadata = writeReleaseMetadata({ workRoot, source, releaseProfile, signerIdentity, installer: state.installerDestination, portableZip: state.portableZip, portablePeRecords: state.portablePeRecords, backendSigningRecords: state.backendSigningRecords, signingEvents: state.signingEvents, payloadAudit: state.payloadAudit, buildStartedUtc, applicationSha256: state.applicationSha256, installerApplicationEvidence: state.installerApplicationEvidence }); } },
+        { name: "publish", run: () => publishCandidate({ workRoot, finalRoot, sourceBefore: source, integrityVerifier: () => verifyPublishedHashes(workRoot, state.metadata.manifestPath, state.metadata.sumsPath), sourceVerifier: () => verifyReleaseSource(gitPath) }) },
+      ], state);
+    },
+  });
 
-  process.stdout.write(`${JSON.stringify({ releaseCandidate: finalRoot, artifacts: state.metadata.artifacts, manifest: join(finalRoot, basename(state.metadata.manifestPath)), sha256Sums: join(finalRoot, basename(state.metadata.sumsPath)) }, null, 2)}\n`);
+  process.stdout.write(`${JSON.stringify({ releaseProfile, releaseCandidate: finalRoot, artifacts: state.metadata.artifacts, manifest: join(finalRoot, basename(state.metadata.manifestPath)), sha256Sums: join(finalRoot, basename(state.metadata.sumsPath)) }, null, 2)}\n`);
 }
 
 async function main() {
-  if (process.argv.includes("--dry-run")) { dryRun(); return; }
-  await buildSignedRelease();
+  const options = parseReleaseArguments(process.argv.slice(2));
+  if (options.dryRun) { dryRun(options.profile); return; }
+  await buildSignedRelease(options.profile);
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(SCRIPT_PATH)) {

@@ -2,6 +2,15 @@ from __future__ import annotations
 
 CHANGELOG_ENTRIES = [
     {
+        "version": "0.8.2",
+        "title": "Public release candidate trust gate",
+        "changes": [
+            "Separated internal signed-preview and public-rc release profiles with strict explicit command-line selection.",
+            "Required verified signer trust classified exactly as publicly-trusted before any public-RC build or artifact-producing release step.",
+            "Recorded release profile and trust requirements honestly while preserving the existing signed-preview, timestamp, signature, payload, and atomic-publication checks.",
+        ],
+    },
+    {
         "version": "0.8.1",
         "title": "Remediation Brief correctness",
         "changes": [

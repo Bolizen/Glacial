@@ -1,6 +1,6 @@
 # Windows release signing
 
-Glacial v0.8.1 is intended to use an Authenticode certificate with the subject `CN=Icefields Development`. The initial certificate is self-signed and is not publicly trusted. Its signature proves byte integrity and publisher-key continuity only; it does not establish Windows reputation or public trust.
+Glacial v0.8.2 is intended to use an Authenticode certificate with the subject `CN=Icefields Development`. The existing certificate is self-signed and is not publicly trusted. Its signature proves byte integrity and publisher-key continuity only; it does not establish Windows reputation or public trust.
 
 Windows Smart App Control, SmartScreen, or organization-managed Application Control may still block Glacial. Do not disable those controls, add exclusions, restore blocked files, or instruct users to bypass warnings. Treat a block as failed or incomplete acceptance.
 
@@ -19,12 +19,32 @@ npm.cmd --prefix frontend run desktop:portable
 
 These npm commands invoke Node directly. They do not use `-ExecutionPolicy Bypass` and do not read signing configuration.
 
-Signed release candidates use only:
+### Signed preview
+
+The signed-preview profile is for internal development, local testing, and release-pipeline validation. It accepts either the existing valid self-signed certificate or a publicly trusted signer, but self-signed output is not automatically appropriate for public distribution.
+
+```powershell
+npm.cmd --prefix frontend run release:windows:signed-preview:plan
+npm.cmd --prefix frontend run release:windows:signed-preview
+```
+
+The legacy commands remain exact signed-preview aliases and never select the public-release profile:
 
 ```powershell
 npm.cmd --prefix frontend run release:windows:plan
 npm.cmd --prefix frontend run release:windows:signed
 ```
+
+### Public release candidate
+
+The public-rc profile is for a candidate that may be publicly distributed. It fails closed unless the disposable signer preflight derives `trustClassification` exactly equal to `publicly-trusted`; the existing self-signed certificate cannot satisfy this gate.
+
+```powershell
+npm.cmd --prefix frontend run release:windows:public-rc:plan
+npm.cmd --prefix frontend run release:windows:public-rc
+```
+
+Both profiles retain the established RFC 3161 timestamp, exact signer identity, signature, payload, restoration, archive, hash, and atomic-publication checks. Glacial does not currently claim to possess or configure a publicly trusted code-signing certificate.
 
 ## Signing providers
 
@@ -189,7 +209,7 @@ Command mode also requires:
 
 There is no operator-supplied trust label. The pipeline derives `self-signed` or `publicly trusted` from the actual verified signer chain. It rejects invalid, ambiguous, or privately rooted non-self-signed chains.
 
-Example store-mode plan:
+Example signed-preview store-mode plan:
 
 ```powershell
 $env:GLACIAL_WINDOWS_SIGNING_PROVIDER = "store"
@@ -199,26 +219,34 @@ $env:GLACIAL_WINDOWS_SIGNTOOL_PATH = "C:\Program Files (x86)\Windows Kits\10\bin
 $env:GLACIAL_WINDOWS_TIMESTAMP_URL = "http://timestamp.digicert.com"
 $env:GLACIAL_WINDOWS_REQUIRE_TIMESTAMP = "1"
 
-npm.cmd --prefix frontend run release:windows:plan
+npm.cmd --prefix frontend run release:windows:signed-preview:plan
 ```
 
-After separate certificate provisioning, a clean `main`, and `HEAD == origin/main`:
+After separate certificate provisioning, a clean `main`, and `HEAD == origin/main`, produce an internal signed preview with:
 
 ```powershell
-npm.cmd --prefix frontend run release:windows:signed
+npm.cmd --prefix frontend run release:windows:signed-preview
+```
+
+Plan or produce a public release candidate only after configuring a publicly trusted signer:
+
+```powershell
+npm.cmd --prefix frontend run release:windows:public-rc:plan
+npm.cmd --prefix frontend run release:windows:public-rc
 ```
 
 The coordinator performs this order:
 
-1. Verify repository identity, branch, clean status, `HEAD == origin/main`, and v0.8.1 metadata.
+1. Verify repository identity, branch, clean status, `HEAD == origin/main`, and v0.8.2 metadata.
 2. Select one exact CurrentUser certificate or external signer and sign/verify a disposable timestamped PE probe.
-3. Verify build/runtime environments, build the backend once, preserve valid vendor bytes, and sign every unsigned PE.
-4. Stage the signed backend and let Tauri sign Glacial.exe, supported NSIS components, uninstaller, and final installer; the custom signer atomically captures the one verified NSIS-patched Glacial.exe before Tauri restores its working file.
-5. Verify the final installer, captured application, exact signing audit event, restored working-file state, and generated NSIS main-binary source; reuse only the captured signed Glacial.exe bytes for portable assembly.
-6. Create the portable ZIP with Windows-compatible root entry names, validate Explorer visibility, re-extract it with both Windows `Expand-Archive` and `tar.exe`, compare every source/archive file, and reverify every PE.
-7. Generate final manifest and hashes only after all binary mutation is complete.
-8. Recheck branch, HEAD, origin/main, clean status, and release metadata.
-9. Atomically publish a new unique candidate directory.
+3. Enforce the selected profile immediately from the verified `trustClassification`: signed preview accepts `self-signed` or `publicly-trusted`; public RC accepts exactly `publicly-trusted`.
+4. Verify build/runtime environments, build the backend once, preserve valid vendor bytes, and sign every unsigned PE.
+5. Stage the signed backend and let Tauri sign Glacial.exe, supported NSIS components, uninstaller, and final installer; the custom signer atomically captures the one verified NSIS-patched Glacial.exe before Tauri restores its working file.
+6. Verify the final installer, captured application, exact signing audit event, restored working-file state, and generated NSIS main-binary source; reuse only the captured signed Glacial.exe bytes for portable assembly.
+7. Create the portable ZIP with Windows-compatible root entry names, validate Explorer visibility, re-extract it with both Windows `Expand-Archive` and `tar.exe`, compare every source/archive file, and reverify every PE.
+8. Generate final manifest and hashes only after all binary mutation is complete, recording the selected profile, required signer trust, and verified signer trust classification.
+9. Recheck branch, HEAD, origin/main, clean status, and release metadata.
+10. Atomically publish a new unique candidate directory.
 
 The failed unsigned candidate `Glacial-0.4.0-fbf96d568350-20260719T065059Z` is historical evidence and must never be overwritten or removed.
 
@@ -237,6 +265,6 @@ Verify every executable PE, including `.pyd` files and extracted portable conten
 
 ## Migration to publicly trusted signing
 
-For a publicly trusted certificate in `CurrentUser\My`, change only the build-time thumbprint and exact expected subject. The pipeline derives public trust from the actual chain.
+Glacial does not currently claim to possess a publicly trusted code-signing certificate. Before a public release candidate can be produced, obtain and configure an appropriate publicly trusted signer, then change only the build-time thumbprint and exact expected subject. The pipeline derives public trust from the actual verified chain and the public-rc gate rejects every other classification.
 
 For Azure Artifact Signing or another remote signer, set command mode, expected production subject/thumbprint, reviewed executable, non-secret argument template, and the minimal provider environment-name allowlist. Prefer managed identity. Artifact names, layout, signing order, manifest location, and release semantics remain unchanged.
