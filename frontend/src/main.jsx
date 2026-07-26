@@ -140,6 +140,13 @@ export function App() {
   const [reviewCheckpoints, setReviewCheckpoints] = useState(EMPTY_REVIEW_CHECKPOINTS);
   const [reviewCheckpointMutation, setReviewCheckpointMutation] = useState({ saving: false, error: "", success: "" });
   const [reviewCheckpointPreview, setReviewCheckpointPreview] = useState(null);
+  const [remediationBrief, setRemediationBrief] = useState({
+    open: false,
+    loading: false,
+    data: null,
+    error: "",
+    status: "",
+  });
   const [notes, setNotes] = useState([]);
   const [noteBody, setNoteBody] = useState("");
   const [changelog, setChangelog] = useState([]);
@@ -161,6 +168,7 @@ export function App() {
   const [reviewNavigation, setReviewNavigation] = useState({ targetId: "", findingFilter: "", nonce: 0 });
   const [toastTop, setToastTop] = useState(112);
   const topbarRef = useRef(null);
+  const remediationBriefTriggerRef = useRef(null);
   const selectedPathRef = useRef("");
   const projectGenerationRef = useRef(0);
   const projectsRequestRef = useRef({ id: 0, controller: null });
@@ -187,6 +195,7 @@ export function App() {
     trustedScanBaselineMutation: 0,
     reviewCheckpoints: 0,
     reviewCheckpointMutation: 0,
+    remediationBrief: 0,
     agentsExists: 0,
     scanMutation: 0,
     noteMutation: 0,
@@ -366,6 +375,7 @@ export function App() {
     setReviewCheckpoints(EMPTY_REVIEW_CHECKPOINTS);
     setReviewCheckpointMutation({ saving: false, error: "", success: "" });
     setReviewCheckpointPreview(null);
+    setRemediationBrief({ open: false, loading: false, data: null, error: "", status: "" });
     setNotes([]);
     setNoteBody("");
     setCopyStatus("");
@@ -378,6 +388,66 @@ export function App() {
     trustedBaselineRequestRef.current.controller?.abort();
     trustedBaselineRequestRef.current = { id: trustedBaselineRequestRef.current.id + 1, controller: null };
     setTrustedBaselineMutation({ saving: false, error: "", success: "" });
+  }
+
+  async function openRemediationBrief(event) {
+    const projectPath = selectedPathRef.current;
+    const generation = projectGenerationRef.current;
+    const scanId = latestProjectScan?.id;
+    if (!projectPath || !Number.isInteger(scanId) || scanId < 1) return;
+    if (!remediationBrief.open) {
+      remediationBriefTriggerRef.current = event?.currentTarget || document.activeElement;
+    }
+    const requestId = beginScopedProjectRequest("remediationBrief");
+    setRemediationBrief({ open: true, loading: true, data: null, error: "", status: "" });
+    try {
+      const data = await api("/api/remediation-brief", {
+        method: "POST",
+        body: { project_path: projectPath, scan_id: scanId },
+      });
+      if (!scopedProjectRequestIsCurrent("remediationBrief", requestId, projectPath, generation)) return;
+      if (typeof data?.markdown !== "string" || !data.markdown || data.scanId !== scanId) {
+        throw new Error("The backend returned an invalid remediation brief.");
+      }
+      setRemediationBrief({ open: true, loading: false, data, error: "", status: "" });
+    } catch (error) {
+      if (!isAbortError(error) && scopedProjectRequestIsCurrent("remediationBrief", requestId, projectPath, generation)) {
+        setRemediationBrief({ open: true, loading: false, data: null, error: error.message, status: "" });
+      }
+    }
+  }
+
+  function closeRemediationBrief() {
+    beginScopedProjectRequest("remediationBrief");
+    setRemediationBrief({ open: false, loading: false, data: null, error: "", status: "" });
+    const trigger = remediationBriefTriggerRef.current;
+    window.setTimeout(() => trigger?.focus?.(), 0);
+  }
+
+  async function copyRemediationBrief() {
+    const markdown = remediationBrief.data?.markdown;
+    if (!markdown) return;
+    if (!navigator.clipboard?.writeText) {
+      setRemediationBrief((current) => ({ ...current, status: "Clipboard unavailable. Download the Markdown file instead." }));
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(markdown);
+      setRemediationBrief((current) => ({ ...current, status: "Brief copied." }));
+    } catch {
+      setRemediationBrief((current) => ({ ...current, status: "Could not copy the brief." }));
+    }
+  }
+
+  function downloadRemediationBrief() {
+    const data = remediationBrief.data;
+    if (!data?.markdown) return;
+    try {
+      exportMarkdown(data.markdown, safeRemediationBriefFileName(data.fileName, data.scanId));
+      setRemediationBrief((current) => ({ ...current, status: "Brief download started." }));
+    } catch {
+      setRemediationBrief((current) => ({ ...current, status: "Could not download the brief." }));
+    }
   }
 
   function selectProject(path, { restoring = false, force = false } = {}) {
@@ -1615,6 +1685,7 @@ export function App() {
               checkpointMutation={reviewCheckpointMutation}
               onRecordCheckpoint={requestReviewCheckpoint}
               onAction={handleReviewAction}
+              onOpenRemediationBrief={openRemediationBrief}
             />
           ) : null}
 
@@ -1746,6 +1817,15 @@ export function App() {
           onCancel={() => setReviewCheckpointPreview(null)}
         />
       ) : null}
+      {remediationBrief.open ? (
+        <RemediationBriefPreview
+          value={remediationBrief}
+          onCopy={copyRemediationBrief}
+          onDownload={downloadRemediationBrief}
+          onClose={closeRemediationBrief}
+          onRetry={openRemediationBrief}
+        />
+      ) : null}
     </main>
   );
 }
@@ -1776,6 +1856,7 @@ function ReviewWorkspace({
   checkpointMutation,
   onRecordCheckpoint,
   onAction,
+  onOpenRemediationBrief,
 }) {
   return (
     <section className={`project-security-status review-workspace security-status-${value.status}`} id="review-workspace" tabIndex="-1" aria-labelledby="project-security-status-title">
@@ -1825,6 +1906,18 @@ function ReviewWorkspace({
           <p>Review the evidence path and checkpoint state below before proceeding cautiously.</p>
         </section>
       )}
+      {model.hasScan ? (
+        <section className="remediation-brief-action" aria-labelledby="remediation-brief-action-title">
+          <div>
+            <span className="guided-review-eyebrow">Generated review aid</span>
+            <h3 id="remediation-brief-action-title">Agent Remediation Brief</h3>
+            <p>Preview a bounded backend-authored brief for this latest scan’s unresolved findings. Glacial will not launch an agent or modify the project.</p>
+          </div>
+          <button type="button" className="secondary-button" onClick={onOpenRemediationBrief}>
+            Generate brief
+          </button>
+        </section>
+      ) : null}
       <section className="review-evidence-path" aria-labelledby="review-evidence-title">
         <div className="review-evidence-heading">
           <div>
@@ -1866,6 +1959,93 @@ function ReviewWorkspace({
       />
       <p className="project-security-disclaimer">{value.disclaimer}</p>
     </section>
+  );
+}
+
+function RemediationBriefPreview({ value, onCopy, onDownload, onClose, onRetry }) {
+  const closeRef = useRef(null);
+  const panelRef = useRef(null);
+
+  useEffect(() => {
+    closeRef.current?.focus();
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key === "Tab") {
+        const focusable = [...(panelRef.current?.querySelectorAll(
+          'button:not(:disabled), [href], input:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+        ) || [])];
+        if (!focusable.length) return;
+        const first = focusable[0];
+        const last = focusable.at(-1);
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  const data = value.data;
+  return (
+    <div className="modal-backdrop remediation-brief-backdrop" role="presentation">
+      <section ref={panelRef} className="modal-panel remediation-brief-preview" role="dialog" aria-modal="true" aria-labelledby="remediation-brief-preview-title">
+        <div className="panel-heading remediation-brief-heading">
+          <div>
+            <span className="guided-review-eyebrow">Latest scan only</span>
+            <h2 id="remediation-brief-preview-title">Agent Remediation Brief preview</h2>
+            <p className="muted">Backend-authored Markdown for human review. Project evidence is displayed as inert text, and no project file is written.</p>
+          </div>
+          <button ref={closeRef} type="button" className="tertiary-button modal-close" onClick={onClose}>Close</button>
+        </div>
+        <div className="remediation-brief-content">
+          {value.loading ? (
+            <div className="remediation-brief-state" role="status">
+              <strong>Generating brief…</strong>
+              <p>Reconstructing bounded explanations for the selected project’s latest scan.</p>
+            </div>
+          ) : null}
+          {!value.loading && value.error ? (
+            <div className="remediation-brief-state remediation-brief-error" role="alert">
+              <strong>Could not generate the brief.</strong>
+              <p>{value.error}</p>
+              <button type="button" className="secondary-button compact-action" onClick={onRetry}>Retry</button>
+            </div>
+          ) : null}
+          {!value.loading && data ? (
+            <>
+              <dl className="remediation-brief-metadata">
+                <div><dt>Latest scan</dt><dd>#{data.scanId}</dd></div>
+                <div><dt>Coverage</dt><dd>{data.coverageStatus}</dd></div>
+                <div><dt>Unresolved</dt><dd>{data.unresolvedFindingCount}</dd></div>
+                <div><dt>Included</dt><dd>{data.includedFindingCount}</dd></div>
+              </dl>
+              {data.empty ? (
+                <div className="remediation-brief-empty">
+                  <strong>No unresolved findings are recorded.</strong>
+                  <p>The preview still includes coverage limitations and the non-certification disclaimer.</p>
+                </div>
+              ) : null}
+              <pre className="remediation-brief-markdown" aria-label="Generated remediation brief Markdown">{data.markdown}</pre>
+            </>
+          ) : null}
+        </div>
+        <div className="modal-actions remediation-brief-actions">
+          <span className="remediation-brief-status" role="status" aria-live="polite">{value.status}</span>
+          <button type="button" className="secondary-button" onClick={onCopy} disabled={!data?.markdown || value.loading}>Copy brief</button>
+          <button type="button" className="secondary-button" onClick={onDownload} disabled={!data?.markdown || value.loading}>Download .md</button>
+          <button type="button" className="tertiary-button" onClick={onClose}>Close</button>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -4239,15 +4419,25 @@ function formatFindingTypeDelta(latestSummary = {}, previousSummary = {}) {
 }
 
 function exportScanReport(content) {
+  exportMarkdown(content, "scan-report.md");
+}
+
+function exportMarkdown(content, fileName) {
   const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = "scan-report.md";
+  link.download = fileName;
   document.body.appendChild(link);
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+}
+
+function safeRemediationBriefFileName(value, scanId) {
+  const fileName = typeof value === "string" ? value : "";
+  if (/^glacial-agent-remediation-brief-scan-[1-9][0-9]*\.md$/.test(fileName)) return fileName;
+  return `glacial-agent-remediation-brief-scan-${Number.isInteger(scanId) && scanId > 0 ? scanId : "latest"}.md`;
 }
 
 function formatDate(value) {

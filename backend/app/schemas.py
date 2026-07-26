@@ -31,6 +31,13 @@ class ProjectPathRequest(BaseModel):
     project_path: str = Field(min_length=1, max_length=1000)
 
 
+class RemediationBriefRequest(ProjectPathRequest):
+    scan_id: int = Field(gt=0)
+
+    class Config:
+        extra = "forbid"
+
+
 class AgentPreviewRequest(ProjectPathRequest):
     project_purpose: str = Field(default="", max_length=4000)
     project_rules: str = Field(default="", max_length=4000)

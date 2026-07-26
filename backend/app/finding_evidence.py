@@ -122,6 +122,15 @@ def normalize_suspicious_text_evidence(value: Any) -> dict[str, Any] | None:
     }
 
 
+def redact_sensitive_text(value: Any, limit: int) -> str:
+    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n")
+    bounded = "".join(
+        character if character in "\n\t" or ord(character) >= 32 else "�"
+        for character in text[:max(0, limit)]
+    )
+    return _redact_excerpt(bounded)
+
+
 def _bounded_line(line: str, *, center: int | None) -> str:
     clean = "".join(
         character if character == "\t" or ord(character) >= 32 else "�"

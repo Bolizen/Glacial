@@ -1710,6 +1710,132 @@ pre {
   margin-right: auto;
 }
 
+.remediation-brief-action {
+  align-items: center;
+  background: var(--color-surface-inset);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: var(--space-4);
+}
+
+.remediation-brief-action h3,
+.remediation-brief-action p {
+  margin: 0;
+}
+
+.remediation-brief-action p {
+  color: var(--color-text-secondary);
+  font-size: 0.8rem;
+  line-height: 1.45;
+  margin-top: var(--space-1);
+}
+
+.remediation-brief-preview {
+  display: grid;
+  gap: var(--space-4);
+  max-height: min(88vh, 820px);
+  max-width: min(1080px, calc(100vw - 48px));
+  overflow: hidden;
+  width: 100%;
+}
+
+.remediation-brief-heading {
+  margin: 0;
+}
+
+.remediation-brief-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.remediation-brief-state,
+.remediation-brief-empty {
+  background: var(--color-surface-inset);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  padding: var(--space-4);
+}
+
+.remediation-brief-state p,
+.remediation-brief-empty p {
+  color: var(--color-text-secondary);
+  margin: var(--space-1) 0 0;
+}
+
+.remediation-brief-error {
+  border-left: 3px solid var(--color-danger);
+}
+
+.remediation-brief-error button {
+  margin-top: var(--space-3);
+}
+
+.remediation-brief-metadata {
+  display: grid;
+  gap: var(--space-2);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0;
+}
+
+.remediation-brief-metadata > div {
+  background: var(--color-surface-inset);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  min-width: 0;
+  padding: var(--space-3);
+}
+
+.remediation-brief-metadata dt {
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.remediation-brief-metadata dd {
+  margin: var(--space-1) 0 0;
+  overflow-wrap: anywhere;
+}
+
+.remediation-brief-markdown {
+  background: var(--color-surface-inset);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 0.78rem;
+  line-height: 1.55;
+  margin: 0;
+  min-height: 220px;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  padding: var(--space-4);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.remediation-brief-actions {
+  align-items: center;
+  border-top: 1px solid var(--color-border-subtle);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  padding-top: var(--space-3);
+}
+
+.remediation-brief-status {
+  color: var(--color-text-secondary);
+  flex: 1 1 220px;
+  font-size: 0.8rem;
+}
+
 .review-evidence-path {
   display: grid;
   gap: var(--space-3);
@@ -3116,6 +3242,13 @@ textarea:disabled {
   max-width: 520px;
   padding: var(--space-5);
   width: min(100%, 520px);
+}
+
+.modal-panel.remediation-brief-preview {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  max-height: min(88vh, 820px);
+  max-width: min(1080px, calc(100vw - 48px));
+  width: min(1080px, calc(100vw - 48px));
 }
 
 .modal-panel form {
@@ -4918,6 +5051,38 @@ label,
 
   .review-next-action > button {
     width: 100%;
+  }
+
+  .remediation-brief-action {
+    align-items: stretch;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .remediation-brief-action > button {
+    width: 100%;
+  }
+
+  .modal-panel.remediation-brief-preview {
+    max-height: calc(100vh - 28px);
+    max-width: calc(100vw - 28px);
+    padding: var(--space-4);
+    width: calc(100vw - 28px);
+  }
+
+  .remediation-brief-metadata {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .remediation-brief-actions {
+    align-items: stretch;
+  }
+
+  .remediation-brief-status {
+    flex-basis: 100%;
+  }
+
+  .remediation-brief-actions button {
+    flex: 1 1 150px;
   }
 
   .review-evidence-heading,

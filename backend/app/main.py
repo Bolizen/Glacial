@@ -55,7 +55,8 @@ from .review_checkpoints import (
     checkpoint_page,
     create_checkpoint,
 )
-from .schemas import AgentPreviewRequest, FindingReviewDelete, FindingReviewRequest, NoteCreate, ProjectCreate, ProjectMetadataUpdate, ProjectPathRequest, ProjectRegister, ProjectRootUpdate, ReviewCheckpointCreate, TrustProfileRequest, TrustedDependencyBaselineApprove, TrustedDependencyBaselineNote, TrustedScanBaselineSet
+from .remediation_brief import build_remediation_brief
+from .schemas import AgentPreviewRequest, FindingReviewDelete, FindingReviewRequest, NoteCreate, ProjectCreate, ProjectMetadataUpdate, ProjectPathRequest, ProjectRegister, ProjectRootUpdate, RemediationBriefRequest, ReviewCheckpointCreate, TrustProfileRequest, TrustedDependencyBaselineApprove, TrustedDependencyBaselineNote, TrustedScanBaselineSet
 from .trusted_dependency_baseline import BASELINE_SCHEMA_VERSION, BaselineError, approval_for_analysis, enrich_scan as enrich_trusted_baseline, public_baseline, snapshot_from_analysis, snapshot_json, valid_fingerprint as valid_baseline_fingerprint
 from .trusted_scan_baseline import PROVENANCE_MANUAL, trusted_scan_baseline_state
 
@@ -433,6 +434,42 @@ def scan_history(project_path: str = Query(min_length=1, max_length=1000)) -> di
     reviews = _finding_reviews(str(project))
     baseline = _trusted_baseline_row(str(project))
     return {"scans": [enrich_trusted_baseline(enrich_scan(row_to_scan(row), reviews), baseline) for row in rows]}
+
+
+@app.post("/api/remediation-brief")
+def remediation_brief(payload: RemediationBriefRequest) -> dict[str, object]:
+    project = _ensure_project(payload.project_path)
+    with get_connection() as connection:
+        project_row = connection.execute(
+            "SELECT name FROM projects WHERE path = ?",
+            (str(project),),
+        ).fetchone()
+        row = connection.execute(
+            "SELECT * FROM scans WHERE id = ? AND project_path = ?",
+            (payload.scan_id, str(project)),
+        ).fetchone()
+        if row is None:
+            other_project = connection.execute(
+                "SELECT 1 FROM scans WHERE id = ?",
+                (payload.scan_id,),
+            ).fetchone()
+            if other_project:
+                raise HTTPException(status_code=403, detail="The selected scan does not belong to the selected project.")
+            raise HTTPException(status_code=404, detail="The selected scan was not found.")
+        latest = connection.execute(
+            "SELECT id FROM scans WHERE project_path = ? ORDER BY scan_date DESC, id DESC LIMIT 1",
+            (str(project),),
+        ).fetchone()
+    if latest is None or latest["id"] != payload.scan_id:
+        raise HTTPException(status_code=409, detail="Only the selected project's latest scan can generate a remediation brief.")
+    scan = enrich_scan(row_to_scan(row), _finding_reviews(str(project)))
+    try:
+        return build_remediation_brief(
+            project_name=project_row["name"] if project_row else project.name,
+            scan=scan,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.get("/api/scans/comparison-options")

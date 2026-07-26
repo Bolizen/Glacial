@@ -2,6 +2,15 @@ from __future__ import annotations
 
 CHANGELOG_ENTRIES = [
     {
+        "version": "0.8.0",
+        "title": "Agent Remediation Brief",
+        "changes": [
+            "Added an explicit latest-scan Review action that previews backend-authored Markdown before copy or download without launching an agent or writing into the scanned project.",
+            "Included deterministically ordered unresolved findings using canonical bounded scanner explanations, conservative legacy fallback, inert evidence fencing, secret redaction, and explicit coverage limitations.",
+            "Kept scans, findings, reviews, checkpoints, baselines, dependencies, expectations, risk, completeness, activity, and AGENTS.md behavior unchanged.",
+        ],
+    },
+    {
         "version": "0.7.3",
         "title": "Finding Explainability correction",
         "changes": [

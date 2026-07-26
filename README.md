@@ -15,7 +15,7 @@ Glacial is an early stage local-first project focused on project scanning, safet
 
 ## Licensing
 
-Glacial v0.7.3 is licensed under the Functional Source License, Version 1.1, ALv2 Future License (`FSL-1.1-ALv2`). It is Fair Source and source-available, but it is not presently OSI open source.
+Glacial v0.8.0 is licensed under the Functional Source License, Version 1.1, ALv2 Future License (`FSL-1.1-ALv2`). It is Fair Source and source-available, but it is not presently OSI open source.
 
 Internal use, study, modification, and redistribution are permitted subject to the license. Offering Glacial, or substantially similar functionality, to others as a competing commercial product or service is not permitted under the public license. Separate commercial licensing may be available from the copyright holder.
 
@@ -134,6 +134,7 @@ The standalone debugging port remains `8000`; Tauri development uses an ephemera
 - Review is the canonical Guided Review Workspace for the selected project. It summarizes the latest canonical Project Security Status, presents one prioritized next action and up to two additional actions, and keeps the six existing evidence sections in their conservative canonical order.
 - Review actions navigate to the existing finding workbench, Dependency Trust, Project Expectations, drift, baseline, comparison, or scan areas without approving, adopting, replacing, recording, or otherwise mutating evidence automatically. Historical scan selection in Reports does not change Review's latest-scan evidence.
 - Review shows current checkpoint state, bounded eligibility reasons, explicit checkpoint confirmation when eligible, and the newest three immutable checkpoint records. Readiness and checkpoints document available evidence and manual review; they are not certifications or security guarantees.
+- Review can generate an Agent Remediation Brief preview from the selected project's latest scan. The backend deterministically reconstructs bounded scanner explanations for unresolved findings, preserves redaction and coverage limitations, and returns authoritative Markdown for explicit copy or download; Glacial does not launch an agent, execute code, install dependencies, or write the brief into the scanned project.
 - Successful scans now open Review so the user can follow the canonical next action. The older guided checklist is reduced to a compact, locally dismissible Review link.
 - Glacial stores its SQLite database at `backend/data/glacial.db`.
 - The default workspace root is `~/GlacialProjects`. You can configure a different absolute workspace root in the app.

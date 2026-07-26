@@ -741,6 +741,181 @@ test("Review separates latest evidence controls from a preserved historical Repo
   assert.doesNotMatch(exportedMarkdown, /src\/latest-context\.js/);
 });
 
+test("Agent Remediation Brief uses the latest Review scan and previews, copies, downloads, and closes as inert text", async (t) => {
+  const current = {
+    ...scanWithFindings(152, [reviewableFinding("brief-current", { path: "src/latest.js", severity: "high" })]),
+    scanMetadataReliable: true,
+    dependencyTrust: emptyDependencyTrustFixture(),
+  };
+  const historical = {
+    ...withCompleteness(scan(151, "low", "2026-07-10T12:00:00Z"), { complete: true }),
+    scanMetadataReliable: true,
+    dependencyTrust: emptyDependencyTrustFixture(),
+  };
+  let copied = "";
+  let downloadedName = "";
+  let downloadedBlob = null;
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText: async (value) => { copied = value; } },
+  });
+  const originalCreateObjectURL = URL.createObjectURL;
+  const originalRevokeObjectURL = URL.revokeObjectURL;
+  const anchorPrototype = dom.window.HTMLAnchorElement.prototype;
+  const originalAnchorClick = anchorPrototype.click;
+  URL.createObjectURL = (blob) => {
+    downloadedBlob = blob;
+    return "blob:remediation-brief";
+  };
+  URL.revokeObjectURL = () => {};
+  anchorPrototype.click = function captureDownload() {
+    downloadedName = this.download;
+  };
+  t.after(() => {
+    URL.createObjectURL = originalCreateObjectURL;
+    URL.revokeObjectURL = originalRevokeObjectURL;
+    anchorPrototype.click = originalAnchorClick;
+  });
+
+  await renderApp();
+  await resolveDetails(await takeDetailRequests(PROJECT_A_PATH), { scans: [current, historical] });
+  await openReports();
+  const historicalRow = [...document.querySelectorAll(".history-row")]
+    .find((row) => row.textContent.includes("Jul 10"));
+  await click(historicalRow.querySelector(".history-view-button"));
+  await openReview();
+
+  const review = document.querySelector(".review-workspace");
+  const primaryAction = review.querySelector(".review-next-action > button");
+  const evidenceAction = review.querySelector(".security-evidence button");
+  const trigger = buttonWithText("Generate brief");
+  assert.equal(primaryAction.disabled, false);
+  assert.equal(evidenceAction.disabled, false);
+  await click(trigger);
+
+  let modal = document.querySelector(".remediation-brief-preview");
+  assert.ok(modal);
+  assert.match(modal.textContent, /Generating brief/);
+  assert.equal(modal.querySelector('[aria-label="Generated remediation brief Markdown"]'), null);
+  assert.equal(document.activeElement, modal.querySelector(".modal-close"));
+  await act(async () => {
+    window.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true }));
+  });
+  assert.equal(document.activeElement, [...modal.querySelectorAll("button:not(:disabled)")].at(-1));
+  await act(async () => {
+    window.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+  });
+  assert.equal(document.activeElement, modal.querySelector(".modal-close"));
+  const request = await fetchHarness.next("/api/remediation-brief", { method: "POST" });
+  assert.deepEqual(request.body, { project_path: PROJECT_A_PATH, scan_id: 152 });
+  const markdown = "# Agent Remediation Brief\n\n<img src=x onerror=alert(1)>\n\nsrc/latest.js";
+  await respond(request, {
+    schemaVersion: 1,
+    projectName: "Project A",
+    scanId: 152,
+    scanDate: current.scan_date,
+    coverageStatus: "complete",
+    unresolvedFindingCount: 1,
+    includedFindingCount: 1,
+    omittedFindingCount: 0,
+    empty: false,
+    fileName: "glacial-agent-remediation-brief-scan-152.md",
+    markdown,
+  });
+
+  modal = document.querySelector(".remediation-brief-preview");
+  const preview = modal.querySelector('[aria-label="Generated remediation brief Markdown"]');
+  assert.equal(preview.textContent, markdown);
+  assert.equal(modal.querySelector("img"), null, "project-derived Markdown must not become trusted HTML");
+  await click(buttonWithText("Copy brief"));
+  assert.equal(copied, markdown);
+  assert.match(modal.textContent, /Brief copied/);
+  assert.ok(document.querySelector(".remediation-brief-preview"), "copy status must preserve the preview");
+
+  await click(buttonWithText("Download .md"));
+  assert.equal(downloadedName, "glacial-agent-remediation-brief-scan-152.md");
+  assert.equal(await downloadedBlob.text(), markdown);
+  assert.match(modal.textContent, /Brief download started/);
+
+  await click([...modal.querySelectorAll("button")].find((button) => button.textContent === "Close"));
+  assert.equal(document.querySelector(".remediation-brief-preview"), null);
+  await act(async () => new Promise((resolve) => window.setTimeout(resolve, 0)));
+  assert.equal(document.activeElement, trigger);
+  assert.equal(primaryAction.disabled, false);
+  assert.equal(evidenceAction.disabled, false);
+
+  await click(trigger);
+  const secondRequest = await fetchHarness.next("/api/remediation-brief", { method: "POST" });
+  await respond(secondRequest, {
+    schemaVersion: 1,
+    scanId: 152,
+    coverageStatus: "complete",
+    unresolvedFindingCount: 1,
+    includedFindingCount: 1,
+    empty: false,
+    fileName: "glacial-agent-remediation-brief-scan-152.md",
+    markdown,
+  });
+  await act(async () => {
+    window.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await flushMicrotasks();
+  });
+  assert.equal(document.querySelector(".remediation-brief-preview"), null);
+});
+
+test("Agent Remediation Brief keeps useful empty, clipboard-failure, and backend-error states in the preview", async (t) => {
+  const current = {
+    ...withCompleteness(scan(153, "none", "2026-07-25T12:00:00Z"), { complete: false, traversalFailureCount: 1 }),
+    scanMetadataReliable: true,
+    dependencyTrust: emptyDependencyTrustFixture(),
+  };
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText: async () => { throw new Error("denied"); } },
+  });
+  const originalCreateObjectURL = URL.createObjectURL;
+  URL.createObjectURL = () => { throw new Error("download blocked"); };
+  t.after(() => {
+    URL.createObjectURL = originalCreateObjectURL;
+  });
+  await renderApp();
+  await resolveDetails(await takeDetailRequests(PROJECT_A_PATH), { scans: [current] });
+  await openReview();
+
+  await click(buttonWithText("Generate brief"));
+  let request = await fetchHarness.next("/api/remediation-brief", { method: "POST" });
+  const emptyMarkdown = "# Agent Remediation Brief\n\nCoverage is incomplete.\n\nNo unresolved findings are recorded.";
+  await respond(request, {
+    schemaVersion: 1,
+    scanId: 153,
+    coverageStatus: "incomplete",
+    unresolvedFindingCount: 0,
+    includedFindingCount: 0,
+    empty: true,
+    fileName: "glacial-agent-remediation-brief-scan-153.md",
+    markdown: emptyMarkdown,
+  });
+  let modal = document.querySelector(".remediation-brief-preview");
+  assert.match(modal.textContent, /No unresolved findings are recorded/);
+  assert.match(modal.textContent, /coverage limitations/);
+  await click(buttonWithText("Copy brief"));
+  assert.match(modal.textContent, /Could not copy the brief/);
+  assert.equal(modal.querySelector("pre").textContent, emptyMarkdown);
+  await click(buttonWithText("Download .md"));
+  assert.match(modal.textContent, /Could not download the brief/);
+  assert.equal(modal.querySelector("pre").textContent, emptyMarkdown);
+
+  await click([...modal.querySelectorAll("button")].find((button) => button.textContent === "Close"));
+  await click(buttonWithText("Generate brief"));
+  request = await fetchHarness.next("/api/remediation-brief", { method: "POST" });
+  await respond(request, { detail: "Latest scan changed. Generate the brief again." }, 409);
+  modal = document.querySelector(".remediation-brief-preview");
+  assert.match(modal.textContent, /Could not generate the brief/);
+  assert.match(modal.textContent, /Latest scan changed/);
+  assert.ok([...modal.querySelectorAll("button")].some((button) => button.textContent === "Retry"));
+  assert.ok([...modal.querySelectorAll("button")].some((button) => button.textContent === "Close"));
+});
+
 test("Review routes significant dependency change to Dependency Trust without approving it", async () => {
   const current = {
     ...withCompleteness(scan(133, "low", "2026-07-25T12:00:00Z"), { complete: true }),

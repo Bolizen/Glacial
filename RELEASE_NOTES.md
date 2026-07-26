@@ -1,3 +1,16 @@
+# Glacial 0.8.0 Agent Remediation Brief
+
+Glacial 0.8.0 adds a bounded generated review aid for handing the latest scan's unresolved findings to a human-supervised coding agent.
+
+## Agent Remediation Brief
+
+- Adds an explicit action to the canonical Review workspace and always targets the selected project's latest scan, independent of historical Reports selection.
+- Generates authoritative deterministic Markdown in the backend, reconstructing accepted canonical scanner explanations and using conservative fallback text for legacy or malformed findings.
+- Includes only unresolved findings in severity-priority order, with bounded project-relative evidence, preserved suspicious-text redaction, inert project-evidence fences, and explicit incomplete or indeterminate coverage limitations.
+- Requires preview before explicit `Copy brief` or `Download .md` actions and provides loading, empty, error, success, keyboard, scrolling, and narrow-width states.
+- Does not launch an agent, call a remote agent API, execute project code or package scripts, install dependencies, write into the scanned project, or mutate scan and review evidence.
+- Keeps findings as review prompts rather than proof of compromise, autonomous remediation, or certification of safety.
+
 # Glacial 0.7.3 Finding Explainability Correction
 
 Glacial 0.7.3 keeps finding review controls immediately available while hardening persisted scanner explanations.
