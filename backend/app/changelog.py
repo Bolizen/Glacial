@@ -2,6 +2,15 @@ from __future__ import annotations
 
 CHANGELOG_ENTRIES = [
     {
+        "version": "0.8.1",
+        "title": "Remediation Brief correctness",
+        "changes": [
+            "Included freshly reconstructed canonical severity rationales in generated remediation briefs without inventing rationale for legacy or malformed findings.",
+            "Read project, requested scan, latest-scan identity, and finding reviews through one explicit SQLite read snapshot before brief generation.",
+            "Preserved endpoint schemas, finding and review semantics, evidence safety, frontend behavior, and the database schema.",
+        ],
+    },
+    {
         "version": "0.8.0",
         "title": "Agent Remediation Brief",
         "changes": [

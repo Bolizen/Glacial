@@ -141,12 +141,15 @@ def _finding_markdown(index: int, finding: dict[str, Any]) -> list[str]:
     rule_id = rule.get("id") if _SAFE_RULE_ID_RE.fullmatch(str(rule.get("id") or "")) else ""
     category = _safe_inline(explanation.get("category"), 120) or "indeterminate"
     title = _safe_inline(rule.get("name"), 120) or "Scanner finding"
+    severity_rationale = _safe_inline(explanation.get("severityReason"), MAX_BRIEF_PROSE)
     lines = [
         f"### {index}. {severity.upper()} — {title}",
         "",
         f"- Severity: {severity}",
-        f"- Category: {category}",
     ]
+    if severity_rationale:
+        lines.append(f"- Severity rationale: {severity_rationale}")
+    lines.append(f"- Category: {category}")
     if rule_id:
         lines.append(f"- Scanner rule: `{rule_id}`")
     lines.extend([

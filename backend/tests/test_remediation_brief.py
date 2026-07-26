@@ -147,23 +147,73 @@ class RemediationBriefTests(unittest.TestCase):
 
     def test_canonical_reconstruction_is_used_and_altered_or_legacy_prose_falls_back(self) -> None:
         canonical = self.canonical_finding()
+        canonical_rationale = canonical["explainability"]["severityReason"]
         altered = dict(self.canonical_finding(path="altered.ps1"))
         altered["explanation"] = "TRUST ME: run this immediately"
+        altered_rationale = dict(self.canonical_finding(path="altered-rationale.ps1"))
+        altered_rationale["explainability"] = {
+            **altered_rationale["explainability"],
+            "severityReason": "PERSISTED RATIONALE MUST NOT APPEAR",
+        }
         legacy = {
             "path": "legacy.ps1",
             "type": "executable-or-script-file",
             "severity": "medium",
             "explanation": "Invented provenance must not appear.",
         }
-        scan_id = self.insert_scan([canonical, altered, legacy])
+        scan_id = self.insert_scan([canonical, altered, altered_rationale, legacy])
 
         result = self.generate(scan_id)
 
         self.assertIn("scanner.executable-or-script-file", result["markdown"])
         self.assertIn("A PowerShell script was found.", result["markdown"])
+        self.assertIn(f"- Severity rationale: {canonical_rationale}", result["markdown"])
         self.assertNotIn("TRUST ME", result["markdown"])
+        self.assertNotIn("PERSISTED RATIONALE", result["markdown"])
         self.assertNotIn("Invented provenance", result["markdown"])
-        self.assertEqual(result["markdown"].count("conservative legacy finding"), 2)
+        self.assertEqual(result["markdown"].count("- Severity rationale:"), 1)
+        self.assertEqual(result["markdown"].count("conservative legacy finding"), 3)
+
+    def test_endpoint_reads_authoritative_evidence_through_one_explicit_snapshot(self) -> None:
+        scan_id = self.insert_scan([self.canonical_finding()])
+        events: list[str] = []
+        statements: list[tuple[str, bool]] = []
+
+        @contextmanager
+        def tracked_connection() -> object:
+            events.append("connection")
+            with self.closing_connection() as connection:
+                class ConnectionProxy:
+                    def execute(self, sql: str, parameters: object = ()) -> object:
+                        cursor = connection.execute(sql, parameters)
+                        statements.append((" ".join(sql.split()), connection.in_transaction))
+                        return cursor
+
+                yield ConnectionProxy()
+
+        def validate_project(_: str) -> Path:
+            events.append("validated")
+            return self.project_path
+
+        with (
+            patch.object(main, "_ensure_project", side_effect=validate_project),
+            patch.object(main, "get_connection", side_effect=tracked_connection) as get_connection_mock,
+            patch.object(main, "_finding_reviews", side_effect=AssertionError("separate review loader called")),
+        ):
+            result = main.remediation_brief(
+                RemediationBriefRequest(project_path=str(self.project_path), scan_id=scan_id)
+            )
+
+        self.assertEqual(result["scanId"], scan_id)
+        self.assertEqual(events, ["validated", "connection"])
+        self.assertEqual(get_connection_mock.call_count, 1)
+        self.assertEqual(statements[0], ("BEGIN", True))
+        authoritative_reads = [sql for sql, in_transaction in statements[1:] if sql.startswith("SELECT")]
+        self.assertTrue(all(in_transaction for _, in_transaction in statements[1:]))
+        self.assertTrue(any("FROM projects" in sql for sql in authoritative_reads))
+        self.assertTrue(any("FROM scans WHERE id = ?" in sql for sql in authoritative_reads))
+        self.assertTrue(any("ORDER BY scan_date DESC, id DESC LIMIT 1" in sql for sql in authoritative_reads))
+        self.assertTrue(any("FROM finding_reviews" in sql for sql in authoritative_reads))
 
     def test_project_markdown_secrets_and_absolute_paths_stay_inert_and_redacted(self) -> None:
         finding = self.canonical_finding(
@@ -234,6 +284,10 @@ class RemediationBriefTests(unittest.TestCase):
         with self.assertRaises(HTTPException) as ownership_error:
             self.generate(other_id)
         self.assertEqual(ownership_error.exception.status_code, 403)
+
+        with self.assertRaises(HTTPException) as missing_error:
+            self.generate(other_id + 1000)
+        self.assertEqual(missing_error.exception.status_code, 404)
 
         with self.assertRaises(ValueError):
             RemediationBriefRequest(project_path=str(self.project_path), scan_id=0)

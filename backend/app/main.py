@@ -440,32 +440,33 @@ def scan_history(project_path: str = Query(min_length=1, max_length=1000)) -> di
 def remediation_brief(payload: RemediationBriefRequest) -> dict[str, object]:
     project = _ensure_project(payload.project_path)
     with get_connection() as connection:
+        connection.execute("BEGIN")
         project_row = connection.execute(
             "SELECT name FROM projects WHERE path = ?",
             (str(project),),
         ).fetchone()
         row = connection.execute(
-            "SELECT * FROM scans WHERE id = ? AND project_path = ?",
-            (payload.scan_id, str(project)),
+            "SELECT * FROM scans WHERE id = ?",
+            (payload.scan_id,),
         ).fetchone()
         if row is None:
-            other_project = connection.execute(
-                "SELECT 1 FROM scans WHERE id = ?",
-                (payload.scan_id,),
-            ).fetchone()
-            if other_project:
-                raise HTTPException(status_code=403, detail="The selected scan does not belong to the selected project.")
             raise HTTPException(status_code=404, detail="The selected scan was not found.")
+        row = dict(row)
+        if row["project_path"] != str(project):
+            raise HTTPException(status_code=403, detail="The selected scan does not belong to the selected project.")
         latest = connection.execute(
             "SELECT id FROM scans WHERE project_path = ? ORDER BY scan_date DESC, id DESC LIMIT 1",
             (str(project),),
         ).fetchone()
-    if latest is None or latest["id"] != payload.scan_id:
+        latest_id = latest["id"] if latest else None
+        project_name = project_row["name"] if project_row else project.name
+        reviews = _finding_reviews_for_connection(connection, str(project))
+    if latest_id != payload.scan_id:
         raise HTTPException(status_code=409, detail="Only the selected project's latest scan can generate a remediation brief.")
-    scan = enrich_scan(row_to_scan(row), _finding_reviews(str(project)))
+    scan = enrich_scan(row_to_scan(row), reviews)
     try:
         return build_remediation_brief(
-            project_name=project_row["name"] if project_row else project.name,
+            project_name=project_name,
             scan=scan,
         )
     except ValueError as exc:
@@ -1022,11 +1023,18 @@ def _agents_path(project: Path) -> Path:
 
 def _finding_reviews(project_path: str) -> list[dict[str, object]]:
     with get_connection() as connection:
-        rows = connection.execute(
-            "SELECT fingerprint, status, note, created_at, updated_at FROM finding_reviews "
-            "WHERE project_path = ? ORDER BY updated_at DESC, fingerprint",
-            (project_path,),
-        ).fetchall()
+        return _finding_reviews_for_connection(connection, project_path)
+
+
+def _finding_reviews_for_connection(
+    connection: object,
+    project_path: str,
+) -> list[dict[str, object]]:
+    rows = connection.execute(
+        "SELECT fingerprint, status, note, created_at, updated_at FROM finding_reviews "
+        "WHERE project_path = ? ORDER BY updated_at DESC, fingerprint",
+        (project_path,),
+    ).fetchall()
     return [dict(row) for row in rows]
 
 

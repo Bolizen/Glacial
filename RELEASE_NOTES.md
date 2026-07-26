@@ -1,3 +1,13 @@
+# Glacial 0.8.1 Remediation Brief Correctness
+
+Glacial 0.8.1 is a narrowly scoped correctness patch for the Agent Remediation Brief.
+
+## Remediation brief correctness
+
+- Includes the freshly reconstructed canonical severity rationale beside each canonical finding's severity metadata while preserving conservative fallback for legacy or malformed findings.
+- Reads project, scan, latest-scan, and finding-review evidence through one explicit SQLite read snapshot before generating a latest-scan brief.
+- Preserves endpoint and response schemas, unresolved filtering, priority ordering, evidence safety, frontend behavior, scan semantics, and database schema.
+
 # Glacial 0.8.0 Agent Remediation Brief
 
 Glacial 0.8.0 adds a bounded generated review aid for handing the latest scan's unresolved findings to a human-supervised coding agent.
