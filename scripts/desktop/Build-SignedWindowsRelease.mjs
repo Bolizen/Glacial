@@ -4,7 +4,6 @@ import {
   cpSync,
   existsSync,
   lstatSync,
-  mkdirSync,
   readFileSync,
   readdirSync,
   renameSync,
@@ -15,7 +14,6 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   DESKTOP_BUILD_ROOT,
-  assertSafeTree,
   assertSafePath,
   createTauriSigningOverlay,
   ensureSafeDirectory,
@@ -25,13 +23,11 @@ import {
   preflightSigningProvider,
   removeSafeTree,
   resolveNpmInvocation,
-  resolveSystemExecutable,
   resolveToolExecutable,
   runCommand,
   sha256,
   signBackendTree,
   signingEnvironment,
-  verifyPayloadTree,
   verifySignature,
 } from "./windows-signing.mjs";
 
@@ -42,12 +38,9 @@ const PYINSTALLER_ROOT = join(DESKTOP_BUILD_ROOT, "pyinstaller");
 const PYINSTALLER_PAYLOAD = join(PYINSTALLER_ROOT, "dist", "glacial-backend");
 const SIDECAR_STAGE = join(FRONTEND, "src-tauri", "binaries");
 const TAURI_TARGET = join(FRONTEND, "src-tauri", "target", "release");
-const PORTABLE_ROOT = join(DESKTOP_BUILD_ROOT, "portable", "Glacial");
 const RELEASE_CANDIDATES = join(DESKTOP_BUILD_ROOT, "release-candidates");
 const RELEASE_WORK = join(DESKTOP_BUILD_ROOT, "release-work");
-const EXPAND_PORTABLE_ARCHIVE_SCRIPT = join(REPOSITORY, "scripts", "desktop", "Expand-PortableArchive.ps1");
 const EXPECTED_NSIS_COMPONENTS = ["NSISdl.dll", "StartMenu.dll", "System.dll", "nsDialogs.dll", "nsis_tauri_utils.dll"];
-const PORTABLE_ARCHIVE_ROOTS = ["Glacial.exe", "glacial-backend.exe", "_internal"];
 const RELEASE_PROFILES = new Set(["signed-preview", "public-rc"]);
 const ACTUAL_RELEASE_STEPS = [
   "verify-source",
@@ -59,8 +52,7 @@ const ACTUAL_RELEASE_STEPS = [
   "clean-generated-tauri-release-output",
   "tauri-build-and-sign-once",
   "verify-installer-captured-application-and-restoration",
-  "assemble-portable-from-captured-identical-bytes",
-  "verify-zip",
+  "copy-verified-installer",
   "write-final-hashes",
   "revalidate-source",
   "atomic-publish",
@@ -390,170 +382,12 @@ function findInstaller(version) {
   return installers[0];
 }
 
-export function assertFileIdentity(left, right, label = "file") {
-  if (statSync(left).size !== statSync(right).size || sha256(left) !== sha256(right)) throw new Error(`${label} bytes are not identical.`);
-  return true;
-}
-
-export function copyCapturedApplication(application, destination, config) {
-  if (resolve(application).toLowerCase() !== resolve(config.applicationCapture).toLowerCase()) throw new Error("Portable assembly requires the preserved signed Glacial application capture.");
-  const output = assertSafePath(DESKTOP_BUILD_ROOT, destination);
-  copyFileSync(application, output, constants.COPYFILE_EXCL);
-  assertFileIdentity(application, output, "captured Glacial.exe portable input");
-  return output;
-}
-
-function assemblePortable(application, config, expectedCanonicalSubject) {
-  const stagedBackend = join(SIDECAR_STAGE, "glacial-backend-x86_64-pc-windows-msvc.exe");
-  const stagedInternal = join(SIDECAR_STAGE, "_internal");
-  for (const required of [application, stagedBackend, stagedInternal]) if (!existsSync(required)) throw new Error(`Signed portable input is missing: ${required}`);
-  verifySignature(application, config, { expectFirstParty: true, expectedCanonicalSubject });
-  verifyPayloadTree(SIDECAR_STAGE, config, { requiredFirstParty: ["glacial-backend-x86_64-pc-windows-msvc.exe"], expectedCanonicalSubject });
-  removeSafeTree(DESKTOP_BUILD_ROOT, PORTABLE_ROOT);
-  ensureSafeDirectory(DESKTOP_BUILD_ROOT, PORTABLE_ROOT);
-  const portableApplication = join(PORTABLE_ROOT, "Glacial.exe");
-  copyCapturedApplication(application, portableApplication, config);
-  copyFileSync(stagedBackend, join(PORTABLE_ROOT, "glacial-backend.exe"));
-  cpSync(stagedInternal, join(PORTABLE_ROOT, "_internal"), { recursive: true, errorOnExist: true });
-  assertFileIdentity(application, portableApplication, "Glacial.exe installer/portable input");
-  return verifyPayloadTree(PORTABLE_ROOT, config, { requiredFirstParty: ["Glacial.exe", "glacial-backend.exe"], expectedCanonicalSubject });
-}
-
-function listPayloadFiles(root, current = root, output = []) {
-  if (current === root) assertSafeTree(root);
-  if (lstatSync(current).isSymbolicLink()) throw new Error(`Payload contains a symbolic link or junction: ${current}`);
-  for (const entry of readdirSync(current, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-    const path = join(current, entry.name);
-    if (lstatSync(path).isSymbolicLink()) throw new Error(`Payload contains a symbolic link or junction: ${path}`);
-    if (entry.isDirectory()) listPayloadFiles(root, path, output); else if (entry.isFile()) output.push(path);
-  }
-  return output;
-}
-
-function auditPortablePayload(root) {
-  const files = listPayloadFiles(root);
-  const forbiddenPath = /(^|\/)(\.git|\.svn|node_modules|tests?|fixtures?|__pycache__|logs?|cache)(\/|$)/i;
-  const forbiddenFile = /(^|\/)(\.env($|\.)|\.npmrc$|.*\.(map|db|sqlite|sqlite3|bak|backup|log|pem|pfx|key|pyc|pyo))$/i;
-  const violations = [];
-  let obsoleteBrandingMatches = 0;
-  for (const path of files) {
-    const payloadPath = relative(root, path).replaceAll("\\", "/");
-    if (forbiddenPath.test(payloadPath) || forbiddenFile.test(payloadPath)) violations.push(payloadPath);
-    if (/codexforge/i.test(payloadPath)) obsoleteBrandingMatches += 1;
-    if (readFileSync(path).toString("latin1").toLowerCase().includes("codexforge")) obsoleteBrandingMatches += 1;
-  }
-  if (violations.length) throw new Error(`Forbidden payload files found:\n${violations.join("\n")}`);
-  if (obsoleteBrandingMatches) throw new Error("Obsolete CodexForge branding remains in the portable payload.");
-  return { files: files.length, forbiddenFiles: 0, obsoleteCodexForgeMatches: 0 };
-}
-
-function fileInventory(root) {
-  return new Map(listPayloadFiles(root).map((path) => [relative(root, path).replaceAll("\\", "/"), { bytes: statSync(path).size, sha256: sha256(path) }]));
-}
-
-export function createPortableZip(powershellPath, source, destination) {
-  if (existsSync(destination)) throw new Error(`Refusing to overwrite an existing portable archive: ${destination}`);
-  for (const name of PORTABLE_ARCHIVE_ROOTS) if (!existsSync(join(source, name))) throw new Error(`The portable archive input is missing: ${name}`);
-  const result = invokePortableArchivePowerShell(powershellPath, "create", destination, { source });
-  if (!Number.isInteger(result.CreatedEntries) || result.CreatedEntries <= 0) throw new Error("The Windows ZIP writer produced no portable entries.");
-  if (!existsSync(destination)) throw new Error("The archive tool did not produce the portable ZIP.");
-}
-
-export function validatePortableZipEntryNames(entryNames, explorerShellItemCount) {
-  if (!Array.isArray(entryNames) || !entryNames.length) throw new Error("The Windows-compatible ZIP reader found no archive entries.");
-  if (!Number.isInteger(explorerShellItemCount) || explorerShellItemCount <= 0) throw new Error("The portable ZIP appears empty to the Windows Explorer shell API.");
-  const seen = new Set();
-  let application = false;
-  let backend = false;
-  let internalFile = false;
-  for (const name of entryNames) {
-    if (typeof name !== "string" || !name || name.startsWith("./") || name.startsWith("/") || name.startsWith("\\") || /^[A-Za-z]:/.test(name) || name.includes("\\")) throw new Error(`Unsafe or incompatible portable ZIP entry: ${name}`);
-    const directory = name.endsWith("/");
-    const trimmed = directory ? name.slice(0, -1) : name;
-    const segments = trimmed.split("/");
-    if (!trimmed || segments.some((segment) => !segment || segment === "." || segment === "..")) throw new Error(`Unsafe or incompatible portable ZIP entry: ${name}`);
-    const canonical = trimmed.toLowerCase();
-    if (seen.has(canonical)) throw new Error(`Duplicate portable ZIP entry: ${name}`);
-    seen.add(canonical);
-    if (segments[0] === "Glacial.exe") {
-      if (segments.length !== 1 || directory) throw new Error(`Unexpected Glacial.exe archive path: ${name}`);
-      application = true;
-    } else if (segments[0] === "glacial-backend.exe") {
-      if (segments.length !== 1 || directory) throw new Error(`Unexpected glacial-backend.exe archive path: ${name}`);
-      backend = true;
-    } else if (segments[0] === "_internal") {
-      if (!directory && segments.length > 1) internalFile = true;
-      if (!directory && segments.length === 1) throw new Error("_internal must be a directory in the portable ZIP.");
-    } else {
-      throw new Error(`Unexpected portable ZIP root entry: ${name}`);
-    }
-  }
-  if (!application || !backend || !internalFile) throw new Error("The portable ZIP is missing an expected root payload.");
-  return entryNames;
-}
-
-function invokePortableArchivePowerShell(powershellPath, operation, archive, paths = {}) {
-  const payload = { operation, archive: resolve(archive) };
-  for (const [name, path] of Object.entries(paths)) payload[name] = resolve(path);
-  const environment = minimalEnvironment(process.env, { GLACIAL_PORTABLE_ZIP_VALIDATION_JSON: JSON.stringify(payload) });
-  const helperScript = readFileSync(EXPAND_PORTABLE_ARCHIVE_SCRIPT, "utf8");
-  const result = runCommand(powershellPath, ["-NoProfile", "-NonInteractive", "-Command", helperScript], { env: environment, includeFailureOutput: true });
-  return JSON.parse(String(result.stdout).trim());
-}
-
-function assertInventoryMatches(sourceFiles, extractedFiles, label) {
-  if (sourceFiles.size !== extractedFiles.size) throw new Error(`${label} file set does not match the portable source directory.`);
-  for (const [path, expected] of sourceFiles) {
-    const actual = extractedFiles.get(path);
-    if (!actual || actual.bytes !== expected.bytes || actual.sha256 !== expected.sha256) throw new Error(`${label} changed or omitted ${path}.`);
-  }
-}
-
-function extractAndVerifyPortableArchive(tarPath, powershellPath, archive, source, verificationRoot) {
-  if (existsSync(verificationRoot)) throw new Error("Refusing to overwrite an existing ZIP verification directory.");
-  ensureSafeDirectory(DESKTOP_BUILD_ROOT, verificationRoot);
-  const windowsRoot = join(verificationRoot, "expand-archive");
-  const tarRoot = join(verificationRoot, "tar");
-  const inspection = invokePortableArchivePowerShell(powershellPath, "inspect", archive);
-  const entryNames = validatePortableZipEntryNames(inspection.Entries, inspection.ExplorerShellItemCount);
-  invokePortableArchivePowerShell(powershellPath, "expand", archive, { destination: windowsRoot });
-  ensureSafeDirectory(DESKTOP_BUILD_ROOT, tarRoot);
-  const tarEntries = runText(tarPath, ["-t", "-f", resolve(archive)], { env: minimalEnvironment(process.env) }).split(/\r?\n/).filter(Boolean);
-  validatePortableZipEntryNames(tarEntries, inspection.ExplorerShellItemCount);
-  runVisible(tarPath, ["-x", "-f", resolve(archive), "-C", resolve(tarRoot)], { env: minimalEnvironment(process.env) });
-  const sourceFiles = fileInventory(source);
-  const windowsFiles = fileInventory(windowsRoot);
-  const tarFiles = fileInventory(tarRoot);
-  assertInventoryMatches(sourceFiles, windowsFiles, "Expand-Archive extraction");
-  assertInventoryMatches(sourceFiles, tarFiles, "tar.exe extraction");
-  return { entryNames, explorerShellItemCount: inspection.ExplorerShellItemCount, sourceFiles, windowsFiles, tarFiles, windowsRoot };
-}
-
-export function verifyPortableArchiveCompatibility(tarPath, powershellPath, archive, source, verificationRoot) {
-  try {
-    const result = extractAndVerifyPortableArchive(tarPath, powershellPath, archive, source, verificationRoot);
-    return { entryNames: result.entryNames, explorerShellItemCount: result.explorerShellItemCount, windowsFiles: [...result.windowsFiles.entries()], tarFiles: [...result.tarFiles.entries()] };
-  } finally {
-    removeSafeTree(DESKTOP_BUILD_ROOT, verificationRoot);
-  }
-}
-
-function verifyPortableArchive(tarPath, powershellPath, archive, source, verificationRoot, config, expectedCanonicalSubject) {
-  try {
-    const result = extractAndVerifyPortableArchive(tarPath, powershellPath, archive, source, verificationRoot);
-    auditPortablePayload(result.windowsRoot);
-    return verifyPayloadTree(result.windowsRoot, config, { requiredFirstParty: ["Glacial.exe", "glacial-backend.exe"], expectedCanonicalSubject });
-  } finally {
-    removeSafeTree(DESKTOP_BUILD_ROOT, verificationRoot);
-  }
-}
-
 function artifactRecord(kind, path, root) {
   return { kind, filename: basename(path), path: relative(root, path).replaceAll("\\", "/"), bytes: statSync(path).size, sha256: sha256(path) };
 }
 
-function writeReleaseMetadata({ workRoot, source, releaseProfile, signerIdentity, installer, portableZip, portablePeRecords, backendSigningRecords, signingEvents, payloadAudit, buildStartedUtc, applicationSha256, installerApplicationEvidence }) {
-  const artifacts = [artifactRecord("nsis-installer", installer, workRoot), artifactRecord("portable-zip", portableZip, workRoot)];
+function writeReleaseMetadata({ workRoot, source, releaseProfile, signerIdentity, installer, backendSigningRecords, signingEvents, buildStartedUtc, applicationSha256, installerApplicationEvidence }) {
+  const artifacts = [artifactRecord("nsis-installer", installer, workRoot)];
   const manifest = {
     schema: "glacial-release-candidate/v1",
     product: "Glacial",
@@ -577,11 +411,9 @@ function writeReleaseMetadata({ workRoot, source, releaseProfile, signerIdentity
       installerApplicationEvidence,
       backend: backendSigningRecords.map((record) => ({ path: record.relativePath, classification: record.classification, beforeSha256: record.beforeSha256, afterSha256: record.afterSha256, signerThumbprint: record.signature.signerThumbprint })),
       events: signingEvents.map(({ path, applicationCapturePath, ...event }) => ({ file: basename(path), applicationCapture: applicationCapturePath ? relative(DESKTOP_BUILD_ROOT, applicationCapturePath).replaceAll("\\", "/") : null, ...event })),
-      portablePeFiles: portablePeRecords,
     },
-    payloadAudit,
     artifacts,
-    acceptance: { automatedPortableBackendRuntimeSmokeTest: "NOT COMPLETED: deferred to manual acceptance because of local Windows security policy.", pendingManualChecks: ["portable application launch", "backend startup", "backend authentication"] },
+    acceptance: { installedLifecycle: "NOT COMPLETED: deferred to frozen installed-edition acceptance.", pendingManualChecks: ["NSIS installation", "installed application launch", "backend startup and authentication", "upgrade, reset, recovery, and uninstall"] },
     warnings: signerIdentity.trustClassification === "self-signed" ? [`The v${source.version} certificate is self-signed and not publicly trusted.`, "Windows Smart App Control or SmartScreen may still block the application; do not weaken Windows security controls."] : [],
   };
   const manifestPath = join(workRoot, "release-candidate-manifest.json");
@@ -639,8 +471,6 @@ async function buildSignedRelease(releaseProfile) {
   const gitPath = resolveToolExecutable("git.exe", process.env, { forbiddenRoot: REPOSITORY });
   const rustcPath = resolveToolExecutable("rustc.exe", process.env, { forbiddenRoot: REPOSITORY });
   const npm = resolveNpmInvocation(process.env, { forbiddenRoot: REPOSITORY });
-  const tarPath = resolveSystemExecutable("System32/tar.exe");
-  const powershellPath = resolveSystemExecutable("System32/WindowsPowerShell/v1.0/powershell.exe");
   const source = verifyReleaseSource(gitPath);
   const started = new Date();
   const buildStartedUtc = started.toISOString();
@@ -687,16 +517,12 @@ async function buildSignedRelease(releaseProfile) {
           const nsisSource = assertNsisApplicationSource(nsisScript, state.workingApplication);
           state.installerApplicationEvidence = { method: "tauri-v2.11.4-static-nsis-source", nsisScript: relative(REPOSITORY, nsisScript).replaceAll("\\", "/"), nsisSource: relative(REPOSITORY, nsisSource).replaceAll("\\", "/"), signedCaptureSha256: state.applicationSha256, signingEventSha256: signingEvidence.applicationEvent.sha256, restoredWorkingSha256: restored.sha256 };
         } },
-        { name: "assemble-portable", run: () => { state.portablePeRecords = assemblePortable(state.application, config, signerIdentity.expectedCanonicalSubject); state.payloadAudit = auditPortablePayload(PORTABLE_ROOT); } },
-        { name: "copy-and-package", run: () => {
+        { name: "copy-installer", run: () => {
           state.installerDestination = join(workRoot, "artifacts", basename(state.installer));
           copyFileSync(state.installer, state.installerDestination, constants.COPYFILE_EXCL);
           verifySignature(state.installerDestination, config, { expectFirstParty: true, expectedCanonicalSubject: signerIdentity.expectedCanonicalSubject });
-          state.portableZip = join(workRoot, "artifacts", `Glacial_${source.version}_x64-portable.zip`);
-          createPortableZip(powershellPath, PORTABLE_ROOT, state.portableZip);
-          verifyPortableArchive(tarPath, powershellPath, state.portableZip, PORTABLE_ROOT, join(workRoot, "zip-verification"), config, signerIdentity.expectedCanonicalSubject);
         } },
-        { name: "write-metadata", run: () => { state.metadata = writeReleaseMetadata({ workRoot, source, releaseProfile, signerIdentity, installer: state.installerDestination, portableZip: state.portableZip, portablePeRecords: state.portablePeRecords, backendSigningRecords: state.backendSigningRecords, signingEvents: state.signingEvents, payloadAudit: state.payloadAudit, buildStartedUtc, applicationSha256: state.applicationSha256, installerApplicationEvidence: state.installerApplicationEvidence }); } },
+        { name: "write-metadata", run: () => { state.metadata = writeReleaseMetadata({ workRoot, source, releaseProfile, signerIdentity, installer: state.installerDestination, backendSigningRecords: state.backendSigningRecords, signingEvents: state.signingEvents, buildStartedUtc, applicationSha256: state.applicationSha256, installerApplicationEvidence: state.installerApplicationEvidence }); } },
         { name: "publish", run: () => publishCandidate({ workRoot, finalRoot, sourceBefore: source, integrityVerifier: () => verifyPublishedHashes(workRoot, state.metadata.manifestPath, state.metadata.sumsPath), sourceVerifier: () => verifyReleaseSource(gitPath) }) },
       ], state);
     },

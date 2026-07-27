@@ -12,12 +12,10 @@ Unsigned development is independent of release signing and never requires a cert
 
 ```powershell
 npm.cmd --prefix frontend run desktop:backend:plan
-npm.cmd --prefix frontend run desktop:portable:plan
 npm.cmd --prefix frontend run desktop:backend
-npm.cmd --prefix frontend run desktop:portable
 ```
 
-These npm commands invoke Node directly. They do not use `-ExecutionPolicy Bypass` and do not read signing configuration.
+These npm commands invoke Node directly to plan or build the internal PyInstaller backend. They do not use `-ExecutionPolicy Bypass`, do not read signing configuration, and do not create a user-distributable application. Normal Tauri development and internal staging remain development workflows, not product distributions.
 
 ### Signed preview
 
@@ -44,7 +42,7 @@ npm.cmd --prefix frontend run release:windows:public-rc:plan
 npm.cmd --prefix frontend run release:windows:public-rc
 ```
 
-Both profiles retain the established RFC 3161 timestamp, exact signer identity, signature, payload, restoration, archive, hash, and atomic-publication checks. Glacial does not currently claim to possess or configure a publicly trusted code-signing certificate.
+Both profiles retain the established RFC 3161 timestamp, exact signer identity, signature, installer-payload, restoration, hash, and atomic-publication checks. Each profile produces only the installed NSIS artifact and its release metadata. Glacial does not currently claim to possess or configure a publicly trusted code-signing certificate.
 
 ## Signing providers
 
@@ -52,7 +50,7 @@ Both profiles retain the established RFC 3161 timestamp, exact signer identity, 
 
 `command` mode invokes one absolute reviewed executable directly, without a shell. Its JSON argument array contains exactly one `{file}` placeholder. Only explicitly named provider environment variables are forwarded. Credentials must not appear in command arguments, paths, logs, manifests, or tracked files. Prefer managed identity or an HSM/provider session over long-lived environment secrets.
 
-Tauri receives an ignored generated overlay whose object-form `signCommand` calls the same wrapper. Tauri patches and signs Glacial.exe for each bundle type, then restores its unsigned working executable after bundling. The wrapper atomically preserves the one verified NSIS application signing result in the confined release signing state; that exact capture is verified against the signing audit and NSIS staging evidence, then reused byte-for-byte for portable packaging. Glacial.exe is never signed a second time after Tauri finishes. Existing valid vendor-signed files are hashed before and after verification and are never re-signed.
+Tauri receives an ignored generated overlay whose object-form `signCommand` calls the same wrapper. Tauri patches and signs Glacial.exe for the NSIS bundle, then restores its unsigned working executable after bundling. The wrapper atomically preserves the verified NSIS application signing result in confined release signing state so it can be checked against the signing audit and generated NSIS source evidence. Glacial.exe is never signed a second time after Tauri finishes. Existing valid vendor-signed files are hashed before and after verification and are never re-signed.
 
 ## Repeat-safe self-signed provisioning
 
@@ -242,8 +240,8 @@ The coordinator performs this order:
 3. Enforce the selected profile immediately from the verified `trustClassification`: signed preview accepts `self-signed` or `publicly-trusted`; public RC accepts exactly `publicly-trusted`.
 4. Verify build/runtime environments, build the backend once, preserve valid vendor bytes, and sign every unsigned PE.
 5. Stage the signed backend and let Tauri sign Glacial.exe, supported NSIS components, uninstaller, and final installer; the custom signer atomically captures the one verified NSIS-patched Glacial.exe before Tauri restores its working file.
-6. Verify the final installer, captured application, exact signing audit event, restored working-file state, and generated NSIS main-binary source; reuse only the captured signed Glacial.exe bytes for portable assembly.
-7. Create the portable ZIP with Windows-compatible root entry names, validate Explorer visibility, re-extract it with both Windows `Expand-Archive` and `tar.exe`, compare every source/archive file, and reverify every PE.
+6. Verify the final installer, captured application, exact signing audit event, restored working-file state, and generated NSIS main-binary source.
+7. Copy only the verified NSIS installer into release-candidate state.
 8. Generate final manifest and hashes only after all binary mutation is complete, recording the selected profile, required signer trust, and verified signer trust classification.
 9. Recheck branch, HEAD, origin/main, clean status, and release metadata.
 10. Atomically publish a new unique candidate directory.
@@ -258,10 +256,11 @@ $signTool = "C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\signtoo
 Get-AuthenticodeSignature -LiteralPath "<path-to-file>" |
     Select-Object Status, StatusMessage, SignerCertificate, TimeStamperCertificate
 Get-FileHash -Algorithm SHA256 -LiteralPath "<installer-path>"
-Get-FileHash -Algorithm SHA256 -LiteralPath "<portable-zip-path>"
 ```
 
-Verify every executable PE, including `.pyd` files and extracted portable contents. After installation in a disposable acceptance environment, obtain the actual uninstaller path from the uninstall registry entry and verify it the same way.
+Verify every executable PE included in the installed application, including `.pyd` files. After installation in a disposable acceptance environment, obtain the actual uninstaller path from the uninstall registry entry and verify it the same way.
+
+Glacial v1 does not publish a portable binary archive. Internal unpacked Tauri/PyInstaller outputs are staging inputs only, and GitHub-generated source archives are source snapshots rather than Glacial binary distributions.
 
 ## Migration to publicly trusted signing
 

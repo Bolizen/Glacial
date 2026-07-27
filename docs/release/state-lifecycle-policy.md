@@ -1,6 +1,6 @@
 # Glacial State Lifecycle and Recovery Policy
 
-Status: v1 policy baseline for Glacial 0.9.3. This document describes source-level behavior and required future acceptance. It is not evidence that installed, portable, crash, power-loss, upgrade, reset, or uninstall behavior has passed.
+Status: v1 policy baseline for Glacial 0.9.3. This document describes source-level behavior and required future acceptance. It is not evidence that installed, crash, power-loss, upgrade, reset, or uninstall behavior has passed.
 
 ## Ownership boundary
 
@@ -34,7 +34,7 @@ The following are outside the application-state lifecycle even when Glacial read
 - Scanned project directories and every source, manifest, lockfile, script, secret-designated file, or other project file in them.
 - A generated project-root `AGENTS.md`. It is an explicit, confirmation-gated project-file write governed by the separate root-only writer contract.
 - Downloaded scan reports, remediation briefs, and remediation package ZIPs. Browser downloads are user-selected exports, not an application database or managed backup.
-- Installer, portable, release-candidate, signing, manifest, checksum, and other release-build artifacts.
+- NSIS installer, release-candidate, signing, manifest, checksum, and other release-build artifacts.
 - Source-controlled fixtures and disposable test databases under test-owned temporary directories.
 - Developer build outputs, caches, and local tool state.
 
@@ -133,10 +133,10 @@ Verified migration backups are retained indefinitely in the v1 policy unless a f
 
 | Operation | API or internal entrypoint | Tables/files touched | Cardinality | Transaction mode | Rollback expectation | Duplicate/stale/concurrency behavior | Existing evidence | Missing evidence | Required G046 evidence | Later artifact evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Initialize new database | startup `init_db` | All schema objects, default `settings`, `user_version` | Multi-object | Explicit immediate | No partial schema/version publication | Repeated v1 startup is read-only/idempotent | Prior startup tests | No prior explicit version evidence | New/current idempotency, schema/FK/index/integrity checks | Installed and portable first-run in G048 |
-| Migrate supported legacy database | startup `initialize_database` | Recognized schema objects/columns, setting if absent, `user_version`, backup file | Multi-object/file | Verified backup, then explicit immediate | Every schema/data change and version publication rolls back pre-commit | Version/counters rechecked after lock; retry safe | Historical source shapes | No prior migration registry or rollback proof | All predecessor fixtures, preserved records, injected pre-publication failure, retry recovery | Installed/portable upgrade and forced-process acceptance in G048/G055 |
+| Initialize new database | startup `init_db` | All schema objects, default `settings`, `user_version` | Multi-object | Explicit immediate | No partial schema/version publication | Repeated v1 startup is read-only/idempotent | Prior startup tests | No prior explicit version evidence | New/current idempotency, schema/FK/index/integrity checks | Installed-edition first run in G049 |
+| Migrate supported legacy database | startup `initialize_database` | Recognized schema objects/columns, setting if absent, `user_version`, backup file | Multi-object/file | Verified backup, then explicit immediate | Every schema/data change and version publication rolls back pre-commit | Version/counters rechecked after lock; retry safe | Historical source shapes | No prior migration registry or rollback proof | All predecessor fixtures, preserved records, injected pre-publication failure, retry recovery | Installed-edition upgrade and forced-process acceptance in G049/G056 |
 | Publish migration backup | `_create_verified_backup` | Temporary and final backup files | Multi-file publication | SQLite backup plus atomic no-overwrite link | Failure removes incomplete temp/final; source unchanged | Unique name; collision fails closed | None before G046 | Power-loss publication acceptance | Verification, atomic observation, collision, failed cleanup tests | Filesystem interruption on artifact hosts |
-| Set workspace root | `PUT /api/config/project-root`; `set_setting` | One `settings` row | Single record | Implicit single-write | Row unchanged on exception | Upsert; path validated before write; last committed update wins | `test_project_lifecycle`, desktop startup tests | Concurrent desktop acceptance | Inventory and retained targeted test | Installed/portable path persistence in G048 |
+| Set workspace root | `PUT /api/config/project-root`; `set_setting` | One `settings` row | Single record | Implicit single-write | Row unchanged on exception | Upsert; path validated before write; last committed update wins | `test_project_lifecycle`, desktop startup tests | Concurrent desktop acceptance | Inventory and retained targeted test | Installed-edition path persistence in G049 |
 | Create project and register it | `POST /api/projects` | New external project directory, one `projects` row | Cross-resource | Directory creation then implicit DB write; no shared transaction | DB write rolls back; an already-created empty directory can remain if DB registration fails | Existing folder rejects; DB key rejects duplicate path | Source inspection and frontend flow tests | Dedicated cross-resource failure cleanup evidence | Explicitly record the non-atomic boundary; do not overclaim `V1-DATA-001` | Desktop create failure/retry acceptance |
 | Register existing project | `POST /api/projects/register` | One `projects` row | Single record | Implicit upsert | Row unchanged on exception | Same path updates description/type; validated current root | Project lifecycle/source evidence | Direct duplicate/stale test is limited | Inventory | Desktop registration/restart acceptance |
 | Update project metadata | `PUT /api/projects/metadata` | One `projects` row | Single record | Implicit single-write | Row unchanged on exception | Missing registration fails; last committed update wins | `test_project_lifecycle` | Concurrent UI acceptance | Retained targeted test | G048 |
@@ -155,9 +155,9 @@ Verified migration backups are retained indefinitely in the v1 policy unless a f
 | Append activity event | `append_activity_event` called only by owning mutation | One activity row | Dependent record | Owner's transaction | Never commits independently of required primary mutation | `(project_id, dedupe_key)` suppresses defined duplicates | Activity tests | Artifact interruption | Exercised through representative owner families | G048/G055 |
 | Save/clear UI session state | `writeSessionState`, `clearSessionState` | WebView local storage key | Single value | Web storage operation | Failure returns false and does not become security evidence | Versioned parser; malformed/cross-workspace values ignored | `sessionState.test.js` | Real WebView persistence/reset | Inventory | G048 |
 | Dismiss guided review | `dismissGuidedReview` | WebView local storage key | Single bounded value | Web storage operation | Storage failure retains prior in-memory list | Normalized, deduped, capped at 100; not review evidence | `guidedReview.test.js` | Real WebView persistence/reset | Inventory | G048 |
-| Write startup diagnostics | Rust `StartupDiagnostics` | `backend-startup.log` | One bounded file | Truncate on startup; bounded atomicity is not claimed | Diagnostic failure blocks owned-backend startup rather than exposing token | Full token redacted; output capped | Rust diagnostics test | Installed/portable log location/permissions | Inventory and source decision | G048/G055 |
+| Write startup diagnostics | Rust `StartupDiagnostics` | `backend-startup.log` | One bounded file | Truncate on startup; bounded atomicity is not claimed | Diagnostic failure blocks owned-backend startup rather than exposing token | Full token redacted; output capped | Rust diagnostics test | Installed log location/permissions | Inventory and source decision | G049/G056 |
 | Write generated `AGENTS.md` | `POST /api/agents/write` | External project-root `AGENTS.md` and operation temp | Single external file | Separate atomic writer contract | Existing file requires confirmation; failures clean owned temp | Stale/link/hardlink/path checks; explicit overwrite | `test_agents.py` | Desktop dialog acceptance | Classified outside application-state reset/unregister | G048 |
-| Download report/brief/package | Frontend download actions | User download destination | External export | Browser download boundary | Failed download does not mutate SQLite/project | Explicit user action; stale package rejected | Remediation/report tests | Installed/portable download acceptance | Classified outside managed state | G048/G055 |
+| Download report/brief/package | Frontend download actions | User download destination | External export | Browser download boundary | Failed download does not mutate SQLite/project | Explicit user action; stale package rejected | Remediation/report tests | Installed-edition download acceptance | Classified outside managed state | G049/G056 |
 
 ## Retention
 
@@ -168,7 +168,7 @@ Verified migration backups are retained indefinitely in the v1 policy unless a f
 - Migration backups persist indefinitely until a future explicit reviewed retention flow exists.
 - Operation-owned migration temporary files are removed after success or handled failure. A verified published backup is not temporary.
 - The startup log is replaced at each launch and bounded to the implementation maximum; no multi-day log-retention period is currently promised.
-- Release upgrade, installed-state location, portable-state location, and cross-edition behavior still require G048/G055 artifact evidence.
+- Installed-edition upgrade and exact application-owned state locations still require G049/G056 artifact evidence. There is no supported cross-edition or relocation contract.
 
 ## Reset contract
 
@@ -183,7 +183,7 @@ Glacial 0.9.3 does not expose a reset route or prominent reset UI. Any future su
 7. Old state is not automatically merged into the new database.
 8. Reset of WebView convenience state and logs is explicit about those separate stores.
 
-Installed and portable reset UX, permissions, interrupted reset, path readback, and clean-machine acceptance remain G048/G055 work.
+Installed-edition reset UX, permissions, interrupted reset, path readback, and clean-machine acceptance remain G049/G056 work.
 
 ## Backup and manual restore contract
 
@@ -199,8 +199,8 @@ Installed and portable reset UX, permissions, interrupted reset, path readback, 
 
 ## Uninstall boundary
 
-Application uninstallation must never remove scanned project files, generated project instructions, or downloaded exports. G046 does not claim what the current NSIS uninstaller retains or removes from application-local data, WebView storage, or logs because no current installed artifact was exercised. Exact installed and portable paths, upgrade retention, reset, and uninstall retention/removal behavior remain mandatory G048/G055 acceptance evidence.
+Application uninstallation must never remove scanned project files, generated project instructions, or downloaded exports. G046 does not claim what the current NSIS uninstaller retains or removes from application-local data, WebView storage, or logs because no current installed artifact was exercised. Exact installed paths, upgrade retention, reset, and uninstall retention/removal behavior remain mandatory G049/G056 acceptance evidence.
 
 ## Evidence boundary
 
-The G046 tests prove controlled source-level behavior: recognized schema migrations, version publication, logical rollback, backup verification/publication/collision handling, future/corrupt/malformed rejection, and representative multi-record transaction coupling. They do not prove sudden process termination, parent crash, OS crash, power loss, disk-full behavior at every statement, antivirus interference, filesystem corruption, installer upgrade, portable relocation, reset UX, or uninstall behavior. Those claims remain blocked until their assigned desktop and release-candidate handoffs produce artifact evidence.
+The G046 tests prove controlled source-level behavior: recognized schema migrations, version publication, logical rollback, backup verification/publication/collision handling, future/corrupt/malformed rejection, and representative multi-record transaction coupling. They do not prove sudden process termination, parent crash, OS crash, power loss, disk-full behavior at every statement, antivirus interference, filesystem corruption, installer upgrade, unsupported relocation, reset UX, or uninstall behavior. Those claims remain blocked until their assigned desktop and release-candidate handoffs produce artifact evidence.

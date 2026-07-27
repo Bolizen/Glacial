@@ -24,6 +24,12 @@ Glacial is an early stage local-first project focused on project scanning, safet
 
 These are planning and release-governance artifacts. They are not proof that Glacial is secure, complete, or ready for v1.0 release.
 
+## Windows distribution scope
+
+Glacial v1 supports one Windows x64 product distribution: the installed application packaged through the NSIS installer. Application-owned mutable state uses the installed application-data and log locations documented in the [state lifecycle policy](docs/release/state-lifecycle-policy.md).
+
+Glacial does not provide or support a portable binary edition. Unpacked development builds, test fixtures, build staging directories, source checkouts, and GitHub-generated source archives are not portable product distributions. Copying or relocating files from an installation is unsupported and does not create a portable edition. Installed-edition upgrade, reset, recovery, and uninstall acceptance is still pre-v1 work; the repository remains `NOT READY`.
+
 ## Licensing
 
 Glacial v0.9.3 is licensed under the Functional Source License, Version 1.1, ALv2 Future License (`FSL-1.1-ALv2`). It is Fair Source and source-available, but it is not presently OSI open source.

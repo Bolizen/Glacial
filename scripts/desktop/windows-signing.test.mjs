@@ -2,7 +2,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
-  copyFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -31,7 +30,6 @@ import {
   preflightSigningProvider,
   removeSafeTree,
   resolveNpmInvocation,
-  resolveSystemExecutable,
   runCommand,
   sha256,
   signOne,
@@ -41,14 +39,11 @@ import {
   assertReleaseProfileTrust,
   assertExpectedTauriRestoration,
   assertExactPackageSet,
-  assertFileIdentity,
   assertInterpreterIdentity,
   assertNsisApplicationSource,
   assertSameReleaseSource,
   buildDryRunPlan,
   canonicalizePackageName,
-  copyCapturedApplication,
-  createPortableZip,
   normalizeInstalledPackages,
   packageSetDifference,
   parseRequirementsLock,
@@ -59,8 +54,6 @@ import {
   requireSigningEvents,
   runAfterSignerPreflight,
   runReleaseSteps,
-  validatePortableZipEntryNames,
-  verifyPortableArchiveCompatibility,
   verifyPublishedHashes,
 } from "./Build-SignedWindowsRelease.mjs";
 import { developmentPlan, runDevelopmentCommand } from "./desktop-development.mjs";
@@ -68,8 +61,6 @@ import { developmentPlan, runDevelopmentCommand } from "./desktop-development.mj
 const TEST_PATH = fileURLToPath(import.meta.url);
 const REPOSITORY = resolve(dirname(TEST_PATH), "..", "..");
 const TEST_ROOT = join(DESKTOP_BUILD_ROOT, "release-signing-tests");
-const PORTABLE_ZIP_TEST_ROOT = join(DESKTOP_BUILD_ROOT, "portable-zip-tests", String(process.pid));
-const FAILED_RC = join(DESKTOP_BUILD_ROOT, "release-candidates", "Glacial-0.4.0-fbf96d568350-20260719T065059Z");
 const THUMBPRINT = "A".repeat(40);
 const RELEASE_ID = "Glacial-0.9.3-ffffffffffff-20260720T120000Z";
 
@@ -369,15 +360,13 @@ test("private-key probe signs, verifies, derives trust, and removes its disposab
   assert.deepEqual(readdirSync(probeParent), []);
 });
 
-test("signed application capture survives Tauri restoration and is the only portable application input", () => {
+test("signed application capture survives Tauri restoration and remains installer evidence", () => {
   const workingApplication = join(TEST_ROOT, "tauri", "target", "release", "glacial.exe");
   const capture = join(TEST_ROOT, "signing", "application", "Glacial.exe");
   const auditLog = join(TEST_ROOT, "signing", "signing-events.jsonl");
-  const portableApplication = join(TEST_ROOT, "portable", "Glacial.exe");
   const nsisScript = join(TEST_ROOT, "tauri", "target", "release", "nsis", "x64", "installer.nsi");
   const failedEvidence = join(TEST_ROOT, "failed-build-evidence.exe");
   mkdirSync(dirname(workingApplication), { recursive: true });
-  mkdirSync(dirname(portableApplication), { recursive: true });
   mkdirSync(dirname(nsisScript), { recursive: true });
   const original = minimalPe();
   writeFileSync(workingApplication, original);
@@ -410,9 +399,6 @@ test("signed application capture survives Tauri restoration and is the only port
   writeFileSync(workingApplication, original);
   assert.equal(assertExpectedTauriRestoration(workingApplication, capture, { signature: { status: "NotSigned" } }).status, "NotSigned");
   assert.equal(assertNsisApplicationSource(nsisScript, workingApplication), workingApplication);
-  copyCapturedApplication(capture, portableApplication, config);
-  assert.deepEqual(readFileSync(portableApplication), capturedBytes);
-  assert.throws(() => copyCapturedApplication(workingApplication, join(TEST_ROOT, "portable", "wrong.exe"), config), /preserved signed/);
   assert.throws(() => signOne(workingApplication, config, { runner, pathInspector: false }), /duplicate/);
   assert.equal(readFileSync(failedEvidence, "utf8"), "preserve failed build");
 
@@ -454,54 +440,6 @@ test("Tauri signing evidence requires one transient uninstaller between plugins 
   assert.throws(() => requireSigningEvents([application, ...plugins, installerEvent], config, installer, "CN=ICEFIELDS DEVELOPMENT"), /transient NSIS uninstaller/);
 });
 
-test("production portable ZIP is visible to Windows and extracts identically with Expand-Archive and tar.exe", () => {
-  const source = join(PORTABLE_ZIP_TEST_ROOT, "source");
-  const archive = join(PORTABLE_ZIP_TEST_ROOT, "Glacial-portable.zip");
-  const verificationRoot = join(PORTABLE_ZIP_TEST_ROOT, "verification");
-  try {
-    mkdirSync(join(source, "_internal", "nested"), { recursive: true });
-    writeFileSync(join(source, "Glacial.exe"), minimalPe());
-    writeFileSync(join(source, "glacial-backend.exe"), Buffer.concat([minimalPe(), Buffer.from("backend")]));
-    writeFileSync(join(source, "_internal", "runtime.dll"), Buffer.from("runtime"));
-    writeFileSync(join(source, "_internal", "nested", "data.txt"), Buffer.from("data"));
-    const tarPath = resolveSystemExecutable("System32/tar.exe");
-    const powershellPath = resolveSystemExecutable("System32/WindowsPowerShell/v1.0/powershell.exe");
-
-    createPortableZip(powershellPath, source, archive);
-    const result = verifyPortableArchiveCompatibility(tarPath, powershellPath, archive, source, verificationRoot);
-    assert.ok(result.explorerShellItemCount > 0);
-    assert.deepEqual(result.entryNames.filter((name) => !name.endsWith("/")).sort(), ["Glacial.exe", "_internal/nested/data.txt", "_internal/runtime.dll", "glacial-backend.exe"].sort());
-    assert.ok(result.entryNames.every((name) => !name.startsWith("./")));
-    const windowsFiles = new Map(result.windowsFiles);
-    const tarFiles = new Map(result.tarFiles);
-    for (const relativePath of ["Glacial.exe", "glacial-backend.exe", "_internal/runtime.dll", "_internal/nested/data.txt"]) {
-      const sourcePath = join(source, ...relativePath.split("/"));
-      assert.equal(windowsFiles.get(relativePath).sha256, sha256(sourcePath));
-      assert.equal(tarFiles.get(relativePath).sha256, sha256(sourcePath));
-    }
-    assert.equal(windowsFiles.get("Glacial.exe").sha256, sha256(join(source, "Glacial.exe")));
-    assert.equal(existsSync(verificationRoot), false);
-  } finally {
-    removeSafeTree(DESKTOP_BUILD_ROOT, PORTABLE_ZIP_TEST_ROOT, { pathInspector: false });
-  }
-});
-
-test("portable ZIP entry validation rejects empty, hidden-root, absolute, drive-qualified, traversal, and wrapped archives", () => {
-  const valid = ["Glacial.exe", "glacial-backend.exe", "_internal/runtime.dll"];
-  assert.deepEqual(validatePortableZipEntryNames(valid, 3), valid);
-  assert.throws(() => validatePortableZipEntryNames([], 0), /no archive entries/);
-  assert.throws(() => validatePortableZipEntryNames(valid, 0), /appears empty/);
-  for (const entries of [
-    ["./Glacial.exe", "glacial-backend.exe", "_internal/runtime.dll"],
-    ["/Glacial.exe", "glacial-backend.exe", "_internal/runtime.dll"],
-    ["\\Glacial.exe", "glacial-backend.exe", "_internal/runtime.dll"],
-    ["C:/Glacial.exe", "glacial-backend.exe", "_internal/runtime.dll"],
-    ["Glacial.exe", "glacial-backend.exe", "_internal/../runtime.dll"],
-    ["Glacial.exe", "glacial-backend.exe", "_internal\\..\\runtime.dll"],
-    ["wrapper/Glacial.exe", "glacial-backend.exe", "_internal/runtime.dll"],
-  ]) assert.throws(() => validatePortableZipEntryNames(entries, 3), /Unsafe|Unexpected/);
-});
-
 test("release source revalidation rejects every mutable provenance field", () => {
   const before = sourceState();
   assert.equal(assertSameReleaseSource(before, sourceState()), true);
@@ -510,7 +448,7 @@ test("release source revalidation rejects every mutable provenance field", () =>
     { commit: "e".repeat(40) },
     { originMain: "e".repeat(40) },
     { status: " M file" },
-    { version: "0.9.3" },
+    { version: "0.9.2" },
     { versions: { packageJson: "0.9.3", tauri: "0.9.4" } },
   ]) assert.throws(() => assertSameReleaseSource(before, sourceState(changed)), /changed/);
 });
@@ -710,29 +648,17 @@ test("actual release-step executor stops before publication after any failed ste
   assert.deepEqual(calls, ["sign", "verify"]);
 });
 
-test("identical Glacial.exe bytes are required for installer and portable inputs", () => {
-  const installerInput = join(TEST_ROOT, "target", "glacial.exe");
-  const portableInput = join(TEST_ROOT, "portable", "Glacial.exe");
-  mkdirSync(dirname(installerInput), { recursive: true });
-  mkdirSync(dirname(portableInput), { recursive: true });
-  writeFileSync(installerInput, minimalPe());
-  copyFileSync(installerInput, portableInput);
-  assert.equal(assertFileIdentity(installerInput, portableInput, "Glacial.exe"), true);
-  writeFileSync(portableInput, Buffer.concat([minimalPe(), Buffer.from("changed")]));
-  assert.throws(() => assertFileIdentity(installerInput, portableInput, "Glacial.exe"), /not identical/);
-});
-
 test("manifest and SHA256SUMS verification detects post-packaging mutation", () => {
   const root = join(TEST_ROOT, "hashes");
   const artifacts = join(root, "artifacts");
   mkdirSync(artifacts, { recursive: true });
-  const artifact = join(artifacts, "Glacial.zip");
+  const artifact = join(artifacts, "Glacial_0.9.3_x64-setup.exe");
   writeFileSync(artifact, "final bytes");
   const hash = sha256(artifact);
   const manifestPath = join(root, "release-candidate-manifest.json");
   const sumsPath = join(root, "SHA256SUMS.txt");
-  writeFileSync(manifestPath, JSON.stringify({ artifacts: [{ filename: "Glacial.zip", path: "artifacts/Glacial.zip", bytes: 11, sha256: hash }] }));
-  writeFileSync(sumsPath, `${hash}  Glacial.zip\n`);
+  writeFileSync(manifestPath, JSON.stringify({ artifacts: [{ filename: "Glacial_0.9.3_x64-setup.exe", path: "artifacts/Glacial_0.9.3_x64-setup.exe", bytes: 11, sha256: hash }] }));
+  writeFileSync(sumsPath, `${hash}  Glacial_0.9.3_x64-setup.exe\n`);
   assert.equal(verifyPublishedHashes(root, manifestPath, sumsPath), true);
   writeFileSync(artifact, "mutated");
   assert.throws(() => verifyPublishedHashes(root, manifestPath, sumsPath), /mismatch/);
@@ -750,14 +676,15 @@ test("repeat provisioning and exact CurrentUser removal guards are documented", 
 
 test("ordinary unsigned development plans require neither signing nor PowerShell", () => {
   assert.deepEqual(developmentPlan("build-backend"), ["validate unsigned build tools", "build PyInstaller backend"]);
-  const plan = runDevelopmentCommand("build-portable", { dryRun: true });
+  const plan = runDevelopmentCommand("build-backend", { dryRun: true });
   assert.equal(plan.signingRequired, false);
   assert.equal(plan.certificateRequired, false);
   const packageJson = JSON.parse(readFileSync(join(REPOSITORY, "frontend", "package.json"), "utf8"));
   assert.match(packageJson.scripts["desktop:backend"], /^node /);
-  assert.match(packageJson.scripts["desktop:portable"], /^node /);
   assert.doesNotMatch(packageJson.scripts["desktop:backend"], /ExecutionPolicy|sign/i);
-  assert.doesNotMatch(packageJson.scripts["desktop:portable"], /ExecutionPolicy|sign/i);
+  assert.equal(packageJson.scripts["desktop:portable"], undefined);
+  assert.equal(packageJson.scripts["desktop:portable:plan"], undefined);
+  assert.throws(() => developmentPlan("build-portable"), /Expected build-backend/);
 });
 
 test("npm is launched through the absolute Node executable without a command shell", () => {
@@ -770,24 +697,9 @@ test("npm is launched through the absolute Node executable without a command she
 });
 
 test("unsigned development dry-run commands execute without signing configuration", () => {
-  for (const command of ["build-backend", "build-portable"]) {
-    const result = spawnSync(process.execPath, [join(REPOSITORY, "scripts", "desktop", "desktop-development.mjs"), command, "--dry-run"], { cwd: REPOSITORY, env: minimalEnvironment(process.env), encoding: "utf8", shell: false });
-    assert.equal(result.status, 0, result.stderr);
-    const plan = JSON.parse(result.stdout);
-    assert.equal(plan.signingRequired, false);
-    assert.equal(plan.certificateRequired, false);
-  }
-});
-
-test("historical failed release candidate remains byte-identical during tests", () => {
-  if (!existsSync(FAILED_RC)) return;
-  const expected = new Map([
-    ["Glacial_0.4.0_x64-portable.zip", [19011005, "B07E01C1AC7225E713201782D0BF9B3D397776F509352817C423A3EF5202C427"]],
-    ["Glacial_0.4.0_x64-setup.exe", [15952735, "79E0B8BA2CA360A300FFA882F4AF7FF74B1B880F920AECDA2AA18775F251CFA8"]],
-  ]);
-  for (const [name, [bytes, hash]] of expected) {
-    const path = join(FAILED_RC, "artifacts", name);
-    assert.equal(readFileSync(path).length, bytes);
-    assert.equal(sha256(path), hash);
-  }
+  const result = spawnSync(process.execPath, [join(REPOSITORY, "scripts", "desktop", "desktop-development.mjs"), "build-backend", "--dry-run"], { cwd: REPOSITORY, env: minimalEnvironment(process.env), encoding: "utf8", shell: false });
+  assert.equal(result.status, 0, result.stderr);
+  const plan = JSON.parse(result.stdout);
+  assert.equal(plan.signingRequired, false);
+  assert.equal(plan.certificateRequired, false);
 });
