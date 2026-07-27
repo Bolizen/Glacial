@@ -1,3 +1,19 @@
+# Glacial 0.9.3 Versioned State Lifecycle and Recovery
+
+Glacial 0.9.3 makes application-owned SQLite state versioned, recoverable, and inspectable. It remains a pre-v1 hardening release: the readiness verdict is still `NOT READY` while P1 work remains.
+
+## State lifecycle and release governance
+
+- Uses SQLite `PRAGMA user_version` as the authoritative schema version, with schema version `1` representing the first explicitly versioned Glacial state.
+- Migrates conservatively recognized unversioned historical databases, including early core, scan-history, checkpoint-predecessor, and complete v0.9.2 shapes, while preserving valid projects, settings, scans, notes, reviews, profiles, baselines, activity, and checkpoints.
+- Creates and verifies a SQLite-safe pre-migration backup before modifying nonempty supported legacy state, publishes the schema version last inside one explicit transaction, and rolls back the whole migration on pre-commit failure.
+- Rejects future, unsupported, malformed, or corrupt state without downgrade, reset, deletion, truncation, or silent recreation.
+- Inventories persistent mutations and adds focused injected-failure evidence for unregister, review/activity, Trust Profile/activity, dependency baseline/activity, scan baseline/activity, checkpoint/activity, and migration publication boundaries.
+- Publishes retention, reset, backup/restore, malformed-state, and uninstall policy while leaving installed and portable acceptance to later artifact work.
+- Clarifies that remediation-reader compatibility rejection tests become mandatory before a Glacial-owned reader ships rather than requiring a fake current importer.
+- Adds a permanent mandatory repository-wide Codex Security Deep Security Scan and finding-closure gate before release-candidate construction.
+- Does not claim stable status, release authorization, artifact lifecycle acceptance, or completion of the remaining v1 P1 work.
+
 # Glacial 0.9.2 Remediation Policy Closure and PostCSS Remediation
 
 Glacial 0.9.2 closes the three P2 owner decisions from the v1.0 readiness audit. The overall verdict remains `NOT READY` because 27 P1 requirements remain unresolved.

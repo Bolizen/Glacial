@@ -26,7 +26,7 @@ These are planning and release-governance artifacts. They are not proof that Gla
 
 ## Licensing
 
-Glacial v0.9.2 is licensed under the Functional Source License, Version 1.1, ALv2 Future License (`FSL-1.1-ALv2`). It is Fair Source and source-available, but it is not presently OSI open source.
+Glacial v0.9.3 is licensed under the Functional Source License, Version 1.1, ALv2 Future License (`FSL-1.1-ALv2`). It is Fair Source and source-available, but it is not presently OSI open source.
 
 Internal use, study, modification, and redistribution are permitted subject to the license. Offering Glacial, or substantially similar functionality, to others as a competing commercial product or service is not permitted under the public license. Separate commercial licensing may be available from the copyright holder.
 

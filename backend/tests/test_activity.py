@@ -199,6 +199,67 @@ class ProjectActivityTests(unittest.TestCase):
             "totalFindingCount": 2,
         })
 
+    def test_finding_review_and_required_activity_roll_back_together(self) -> None:
+        finding = {"type": "test", "path": "one.py", "severity": "high"}
+        with database.get_connection() as connection:
+            scan_id = connection.execute(
+                "INSERT INTO scans "
+                "(project_path, scan_date, overall_risk, findings_json) VALUES (?, ?, ?, ?)",
+                (
+                    str(self.project),
+                    "2026-05-01T00:00:00+00:00",
+                    "high",
+                    json.dumps([finding]),
+                ),
+            ).lastrowid
+            scan_before = tuple(
+                connection.execute(
+                    "SELECT * FROM scans WHERE id = ?",
+                    (scan_id,),
+                ).fetchone()
+            )
+
+        with (
+            patch.object(
+                main,
+                "append_activity_event",
+                side_effect=RuntimeError("injected activity failure"),
+            ),
+            self.assertRaisesRegex(RuntimeError, "injected activity failure"),
+        ):
+            main.update_finding_review(
+                FindingReviewRequest(
+                    project_path=str(self.project),
+                    scan_id=scan_id,
+                    fingerprint=finding_fingerprint(finding),
+                    status="reviewed",
+                )
+            )
+
+        with database.get_connection() as connection:
+            self.assertIsNone(
+                connection.execute(
+                    "SELECT 1 FROM finding_reviews WHERE project_path = ?",
+                    (str(self.project),),
+                ).fetchone()
+            )
+            self.assertEqual(
+                connection.execute(
+                    "SELECT COUNT(*) FROM project_activity_events WHERE project_id = ?",
+                    (str(self.project),),
+                ).fetchone()[0],
+                0,
+            )
+            self.assertEqual(
+                tuple(
+                    connection.execute(
+                        "SELECT * FROM scans WHERE id = ?",
+                        (scan_id,),
+                    ).fetchone()
+                ),
+                scan_before,
+            )
+
     def test_dependency_approval_records_only_the_meaningful_transition(self) -> None:
         (self.project / "package.json").write_text(
             json.dumps({"dependencies": {"alpha": "1.0.0"}}),
@@ -234,6 +295,78 @@ class ProjectActivityTests(unittest.TestCase):
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0]["relatedScanId"], scan["id"])
         self.assertEqual(events[0]["details"], {"status": "approved"})
+
+    def test_dependency_baseline_and_required_activity_roll_back_together(self) -> None:
+        (self.project / "package.json").write_text(
+            json.dumps({"dependencies": {"alpha": "1.0.0"}}),
+            encoding="utf-8",
+        )
+        (self.project / "package-lock.json").write_text(
+            json.dumps(
+                {
+                    "lockfileVersion": 3,
+                    "packages": {
+                        "": {"dependencies": {"alpha": "1.0.0"}},
+                        "node_modules/alpha": {
+                            "version": "1.0.0",
+                            "resolved": "https://registry.npmjs.org/alpha/-/alpha-1.0.0.tgz",
+                            "integrity": "sha512-AAAA",
+                        },
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        scan = main.run_scan(ProjectPathRequest(project_path=str(self.project)))
+        fingerprint = scan["dependencyTrust"]["trustedBaseline"]["approval"]["fingerprint"]
+        with database.get_connection() as connection:
+            scan_before = tuple(
+                connection.execute(
+                    "SELECT * FROM scans WHERE id = ?",
+                    (scan["id"],),
+                ).fetchone()
+            )
+
+        with (
+            patch.object(
+                main,
+                "append_activity_event",
+                side_effect=RuntimeError("injected activity failure"),
+            ),
+            self.assertRaisesRegex(RuntimeError, "injected activity failure"),
+        ):
+            main.approve_trusted_dependency_baseline(
+                TrustedDependencyBaselineApprove(
+                    project_path=str(self.project),
+                    scan_id=scan["id"],
+                    fingerprint=fingerprint,
+                )
+            )
+
+        with database.get_connection() as connection:
+            self.assertIsNone(
+                connection.execute(
+                    "SELECT 1 FROM trusted_dependency_baselines WHERE project_path = ?",
+                    (str(self.project),),
+                ).fetchone()
+            )
+            self.assertEqual(
+                connection.execute(
+                    "SELECT COUNT(*) FROM project_activity_events "
+                    "WHERE project_id = ? AND event_type = 'dependency_review_completed'",
+                    (str(self.project),),
+                ).fetchone()[0],
+                0,
+            )
+            self.assertEqual(
+                tuple(
+                    connection.execute(
+                        "SELECT * FROM scans WHERE id = ?",
+                        (scan["id"],),
+                    ).fetchone()
+                ),
+                scan_before,
+            )
 
     def test_timeline_orders_paginates_and_sanitizes_malformed_history(self) -> None:
         with database.get_connection() as connection:

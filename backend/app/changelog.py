@@ -2,6 +2,16 @@ from __future__ import annotations
 
 CHANGELOG_ENTRIES = [
     {
+        "version": "0.9.3",
+        "date": "2026-07-27",
+        "title": "Versioned state lifecycle and recovery",
+        "changes": [
+            "Introduced authoritative SQLite PRAGMA user_version schema versioning with conservative migration of supported unversioned Glacial databases.",
+            "Added verified pre-migration backups, transactional schema publication, fail-closed future/corrupt-state handling, and focused rollback evidence for multi-record state mutations.",
+            "Published the application-state lifecycle and recovery policy, clarified the remediation-reader readiness contract, and added a mandatory pre-release-candidate Deep Security Scan gate; Glacial remains NOT READY while P1 work remains.",
+        ],
+    },
+    {
         "version": "0.9.2",
         "date": "2026-07-27",
         "title": "Remediation policy closure and PostCSS remediation",

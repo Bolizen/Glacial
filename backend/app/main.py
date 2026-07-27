@@ -275,6 +275,7 @@ def unregister_project(payload: ProjectPathRequest) -> dict[str, object]:
 
     path = str(requested.absolute())
     with get_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
         row = connection.execute("SELECT name FROM projects WHERE path = ?", (path,)).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Project registration was not found.")

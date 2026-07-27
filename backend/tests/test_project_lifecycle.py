@@ -141,6 +141,87 @@ class ProjectLifecycleTests(unittest.TestCase):
             main.unregister_project(ProjectPathRequest(project_path=str(self.project)))
         self.assertEqual(missing.exception.status_code, 404)
 
+    def test_unregister_failure_after_early_deletes_rolls_back_every_state_family(self) -> None:
+        marker = self.project / "keep.txt"
+        marker.write_text("keep", encoding="utf-8")
+        with database.get_connection() as connection:
+            scan_id = connection.execute(
+                "INSERT INTO scans "
+                "(project_path, scan_date, overall_risk, findings_json) "
+                "VALUES (?, 'now', 'high', '[]')",
+                (str(self.project),),
+            ).lastrowid
+            connection.execute(
+                "INSERT INTO notes (project_path, body, created_at) "
+                "VALUES (?, 'note', 'now')",
+                (str(self.project),),
+            )
+            connection.execute(
+                "INSERT INTO project_trust_profiles "
+                "(project_path, profile_json, updated_at) VALUES (?, '{}', 'now')",
+                (str(self.project),),
+            )
+            connection.execute(
+                "INSERT INTO finding_reviews "
+                "(project_path, fingerprint, status, created_at, updated_at) "
+                "VALUES (?, 'cf1_test', 'reviewed', 'now', 'now')",
+                (str(self.project),),
+            )
+            connection.execute(
+                "INSERT INTO trusted_dependency_baselines "
+                "(project_path, baseline_schema_version, dependency_schema_version, "
+                "fingerprint, snapshot_json, created_at, updated_at) "
+                "VALUES (?, 1, 1, 'cfdb2_test', '{}', 'now', 'now')",
+                (str(self.project),),
+            )
+            connection.execute(
+                "INSERT INTO trusted_scan_baselines "
+                "(project_id, scan_id, pinned_at) VALUES (?, ?, 'now')",
+                (str(self.project), scan_id),
+            )
+            connection.execute(
+                "INSERT INTO project_activity_events "
+                "(event_id, project_id, event_type, occurred_at) "
+                "VALUES ('evt_test', ?, 'project_expectations_updated', 'now')",
+                (str(self.project),),
+            )
+        before = self._project_state_snapshot()
+
+        class FaultAfterScanDelete:
+            def __init__(self, connection: sqlite3.Connection):
+                self.connection = connection
+
+            def execute(self, sql: str, parameters: object = ()) -> object:
+                cursor = self.connection.execute(sql, parameters)
+                if sql.startswith("DELETE FROM scans"):
+                    raise RuntimeError("injected unregister failure")
+                return cursor
+
+            def __getattr__(self, name: str) -> object:
+                return getattr(self.connection, name)
+
+        @contextmanager
+        def faulting_connection() -> object:
+            connection = sqlite3.connect(self.database_path)
+            connection.row_factory = sqlite3.Row
+            try:
+                yield FaultAfterScanDelete(connection)
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+            finally:
+                connection.close()
+
+        with (
+            patch.object(main, "get_connection", side_effect=faulting_connection),
+            self.assertRaisesRegex(RuntimeError, "injected unregister failure"),
+        ):
+            main.unregister_project(ProjectPathRequest(project_path=str(self.project)))
+
+        self.assertEqual(self._project_state_snapshot(), before)
+        self.assertTrue(marker.is_file())
+
     def test_missing_registration_remains_listed_and_can_be_unregistered(self) -> None:
         self.project.rmdir()
 
@@ -246,6 +327,41 @@ class ProjectLifecycleTests(unittest.TestCase):
         self.assertEqual(partially_malformed["trustedPackageManagers"], ["pip"])
         self.assertEqual(partially_malformed["riskTolerance"], "normal")
         self.assertEqual(partially_malformed["notes"], "")
+
+    def _project_state_snapshot(self) -> dict[str, list[tuple[object, ...]]]:
+        tables = (
+            "projects",
+            "scans",
+            "notes",
+            "project_trust_profiles",
+            "finding_reviews",
+            "trusted_dependency_baselines",
+            "trusted_scan_baselines",
+            "project_activity_events",
+            "project_review_checkpoints",
+        )
+        columns = {
+            "projects": "path",
+            "scans": "project_path",
+            "notes": "project_path",
+            "project_trust_profiles": "project_path",
+            "finding_reviews": "project_path",
+            "trusted_dependency_baselines": "project_path",
+            "trusted_scan_baselines": "project_id",
+            "project_activity_events": "project_id",
+            "project_review_checkpoints": "project_id",
+        }
+        with database.get_connection() as connection:
+            return {
+                table: [
+                    tuple(row)
+                    for row in connection.execute(
+                        f"SELECT * FROM {table} WHERE {columns[table]} = ? ORDER BY rowid",
+                        (str(self.project),),
+                    )
+                ]
+                for table in tables
+            }
 
 
 if __name__ == "__main__":

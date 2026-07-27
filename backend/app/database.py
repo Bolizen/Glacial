@@ -8,6 +8,11 @@ from typing import Any
 
 from .finding_evidence import normalize_suspicious_text_evidence
 from .finding_explainability import normalize_finding_explainability
+from .state_lifecycle import (
+    DATABASE_SCHEMA_VERSION,
+    configure_connection,
+    initialize_database,
+)
 
 
 DESKTOP_DATA_DIR_ENV = "GLACIAL_DESKTOP_DATA_DIR"
@@ -40,7 +45,7 @@ WORKSPACE_ROOT_SETTING = "project_root"
 def get_connection() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(DB_PATH)
-    connection.row_factory = sqlite3.Row
+    configure_connection(connection)
     return connection
 
 
@@ -49,131 +54,11 @@ def prepare_database_directory() -> None:
 
 
 def init_db() -> None:
-    with get_connection() as connection:
-        connection.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS settings (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS projects (
-                path TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                description TEXT NOT NULL DEFAULT '',
-                project_type TEXT NOT NULL DEFAULT '',
-                created_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS scans (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_path TEXT NOT NULL,
-                scan_date TEXT NOT NULL,
-                overall_risk TEXT NOT NULL,
-                findings_json TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS notes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_path TEXT NOT NULL,
-                body TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS project_trust_profiles (
-                project_path TEXT PRIMARY KEY,
-                profile_json TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS finding_reviews (
-                project_path TEXT NOT NULL,
-                fingerprint TEXT NOT NULL,
-                status TEXT NOT NULL CHECK (status IN ('reviewed', 'expected')),
-                note TEXT NOT NULL DEFAULT '',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                PRIMARY KEY (project_path, fingerprint)
-            );
-
-            CREATE INDEX IF NOT EXISTS finding_reviews_project_path
-            ON finding_reviews (project_path);
-
-            CREATE TABLE IF NOT EXISTS trusted_dependency_baselines (
-                project_path TEXT PRIMARY KEY,
-                baseline_schema_version INTEGER NOT NULL,
-                dependency_schema_version INTEGER NOT NULL,
-                fingerprint TEXT NOT NULL,
-                snapshot_json TEXT NOT NULL,
-                source_scan_id INTEGER,
-                source_scan_date TEXT NOT NULL DEFAULT '',
-                note TEXT NOT NULL DEFAULT '',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS trusted_scan_baselines (
-                project_id TEXT PRIMARY KEY,
-                scan_id INTEGER NOT NULL,
-                pinned_at TEXT NOT NULL,
-                provenance TEXT NOT NULL DEFAULT 'manual'
-                    CHECK (provenance IN ('manual')),
-                FOREIGN KEY (scan_id) REFERENCES scans(id)
-            );
-
-            CREATE TABLE IF NOT EXISTS project_activity_events (
-                event_id TEXT PRIMARY KEY,
-                project_id TEXT NOT NULL,
-                event_type TEXT NOT NULL,
-                occurred_at TEXT NOT NULL,
-                related_scan_id INTEGER,
-                details_json TEXT NOT NULL DEFAULT '{}',
-                dedupe_key TEXT,
-                UNIQUE (project_id, dedupe_key)
-            );
-
-            CREATE INDEX IF NOT EXISTS project_activity_events_project_time
-            ON project_activity_events (project_id, occurred_at DESC, event_id DESC);
-
-            CREATE TABLE IF NOT EXISTS project_review_checkpoints (
-                checkpoint_id TEXT PRIMARY KEY,
-                project_id TEXT NOT NULL,
-                scan_id INTEGER NOT NULL,
-                baseline_scan_id INTEGER,
-                baseline_provenance TEXT NOT NULL
-                    CHECK (baseline_provenance IN ('manual', 'automatic', 'none')),
-                expectations_fingerprint TEXT NOT NULL,
-                dependency_analysis_fingerprint TEXT NOT NULL,
-                dependency_approval_fingerprint TEXT NOT NULL DEFAULT '',
-                dependency_approval_state TEXT NOT NULL,
-                finding_reviews_fingerprint TEXT NOT NULL,
-                baseline_findings_fingerprint TEXT NOT NULL DEFAULT '',
-                new_critical_high_count INTEGER NOT NULL DEFAULT 0,
-                finding_review_complete INTEGER NOT NULL CHECK (finding_review_complete IN (0, 1)),
-                unresolved_critical_count INTEGER NOT NULL,
-                unresolved_high_count INTEGER NOT NULL,
-                coverage_fingerprint TEXT NOT NULL,
-                metadata_reliable INTEGER NOT NULL CHECK (metadata_reliable IN (0, 1)),
-                checkpoint_schema_version INTEGER NOT NULL,
-                evaluator_version INTEGER NOT NULL,
-                evidence_fingerprint TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                provenance TEXT NOT NULL DEFAULT 'manual'
-                    CHECK (provenance IN ('manual')),
-                FOREIGN KEY (scan_id) REFERENCES scans(id),
-                FOREIGN KEY (baseline_scan_id) REFERENCES scans(id)
-            );
-
-            CREATE INDEX IF NOT EXISTS project_review_checkpoints_project_time
-            ON project_review_checkpoints (project_id, created_at DESC, checkpoint_id DESC);
-            """
-        )
-        connection.execute(
-            "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
-            (WORKSPACE_ROOT_SETTING, DEFAULT_WORKSPACE_ROOT),
-        )
-        _ensure_scan_history_columns(connection)
-        _ensure_review_checkpoint_columns(connection)
+    initialize_database(
+        DB_PATH,
+        get_connection,
+        default_workspace_root=DEFAULT_WORKSPACE_ROOT,
+    )
 
 
 def get_setting(key: str) -> str | None:
@@ -275,38 +160,6 @@ def _normalize_finding(finding: dict[str, Any]) -> dict[str, Any]:
     if explainability:
         normalized["explainability"] = explainability
     return normalized
-
-
-def _ensure_scan_history_columns(connection: sqlite3.Connection) -> None:
-    columns = {row["name"] for row in connection.execute("PRAGMA table_info(scans)").fetchall()}
-    additions = {
-        "finding_count": "INTEGER NOT NULL DEFAULT 0",
-        "reviewed_file_count": "INTEGER NOT NULL DEFAULT 0",
-        "ignored_file_count": "INTEGER NOT NULL DEFAULT 0",
-        "finding_summary_json": "TEXT NOT NULL DEFAULT '{}'",
-        "scan_metadata_json": "TEXT NOT NULL DEFAULT '{}'",
-    }
-    for name, definition in additions.items():
-        if name not in columns:
-            connection.execute(f"ALTER TABLE scans ADD COLUMN {name} {definition}")
-
-
-def _ensure_review_checkpoint_columns(connection: sqlite3.Connection) -> None:
-    columns = {
-        row["name"]
-        for row in connection.execute(
-            "PRAGMA table_info(project_review_checkpoints)"
-        ).fetchall()
-    }
-    additions = {
-        "baseline_findings_fingerprint": "TEXT NOT NULL DEFAULT ''",
-        "new_critical_high_count": "INTEGER NOT NULL DEFAULT 0",
-    }
-    for name, definition in additions.items():
-        if name not in columns:
-            connection.execute(
-                f"ALTER TABLE project_review_checkpoints ADD COLUMN {name} {definition}"
-            )
 
 
 def _row_value(row: sqlite3.Row, key: str, default: Any) -> Any:
