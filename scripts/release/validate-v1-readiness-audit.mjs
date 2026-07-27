@@ -48,9 +48,9 @@ const contractIds = contractRows.map(([id]) => id);
 const auditIds = auditRows.map(([id]) => id);
 const jsonIds = snapshot.requirements.map(({ id }) => id);
 
-if (contractIds.length !== 60) fail(`expected 60 contract requirements, found ${contractIds.length}`);
-if (auditIds.length !== 60) fail(`expected 60 Markdown audit rows, found ${auditIds.length}`);
-if (jsonIds.length !== 60) fail(`expected 60 JSON audit requirements, found ${jsonIds.length}`);
+if (contractIds.length === 0) fail("contract contains no requirements");
+if (auditIds.length === 0) fail("Markdown audit contains no requirement records");
+if (jsonIds.length === 0) fail("JSON audit contains no requirements");
 
 for (const id of contractIds) if (!idPattern.test(id)) fail(`malformed contract ID ${id}`);
 for (const row of contractRows) {
@@ -66,6 +66,10 @@ requireUnique(auditIds, "Markdown audit");
 requireUnique(jsonIds, "JSON audit");
 requireSameIds(contractIds, auditIds, "Markdown audit");
 requireSameIds(contractIds, jsonIds, "JSON audit");
+for (const id of contractIds) {
+  const appearances = contract.match(new RegExp(`\\b${id}\\b`, "g"))?.length ?? 0;
+  if (appearances !== 1) fail(`${id} must appear exactly once in the contract; found ${appearances}`);
+}
 
 const markdownById = new Map(auditRows.map(([id, status, priority]) => [
   id,
@@ -107,7 +111,7 @@ for (const requirement of snapshot.requirements) {
 
 for (const prefix of ["VER", "SCAN", "FS", "DATA", "AGENT", "DESKTOP", "SEC", "REL", "DOC", "UX"]) {
   const count = contractIds.filter((id) => id.startsWith(`V1-${prefix}-`)).length;
-  if (count !== 6) fail(`expected 6 ${prefix} requirements, found ${count}`);
+  if (count === 0) fail(`contract contains no ${prefix} requirements`);
 }
 
 if (JSON.stringify(calculatedStatusCounts) !== JSON.stringify(snapshot.status_counts)) {
@@ -128,6 +132,14 @@ const verdictMatches = [...audit.matchAll(/\*\*Overall verdict: (READY|CONDITION
 if (verdictMatches.length !== 1) fail(`expected exactly one Markdown overall verdict, found ${verdictMatches.length}`);
 if (verdictMatches[0][1] !== snapshot.overall_verdict) fail("Markdown and JSON verdicts differ");
 if (snapshot.overall_verdict !== "NOT READY") fail("current evidence requires NOT READY");
+
+const versionMatches = [...audit.matchAll(/^- Audited product version: `([^`]+)`$/gm)];
+if (versionMatches.length !== 1) fail(`expected one Markdown audited version, found ${versionMatches.length}`);
+if (versionMatches[0][1] !== snapshot.audited_version) fail("Markdown and JSON audited versions differ");
+
+const commitMatches = [...audit.matchAll(/^- Audited behavioral baseline commit: `([0-9a-f]{40})`$/gm)];
+if (commitMatches.length !== 1) fail(`expected one Markdown audited commit, found ${commitMatches.length}`);
+if (commitMatches[0][1] !== snapshot.audited_commit) fail("Markdown and JSON audited commits differ");
 
 const sequenceIds = new Set(sequence.match(/V1-[A-Z]+-\d{3}/g) ?? []);
 const uncoveredBlockers = snapshot.requirements

@@ -1,20 +1,20 @@
 {
   "schema_version": "1.0.0",
   "product": "Glacial",
-  "audited_version": "0.9.2",
-  "audited_commit": "6f9d30caff2070afcc8371f1e7b4ef1a05534f67",
-  "generated_at_utc": "2026-07-27T05:45:45Z",
+  "audited_version": "0.9.3",
+  "audited_commit": "2dea7a020027e1ade3a0603eb0733214cdb4764a",
+  "generated_at_utc": "2026-07-27T18:13:34Z",
   "overall_verdict": "NOT READY",
   "status_counts": {
-    "PASS": 33,
-    "PARTIAL": 18,
+    "PASS": 36,
+    "PARTIAL": 16,
     "FAIL": 6,
     "UNKNOWN": 3,
     "NOT_APPLICABLE": 0
   },
   "priority_counts": {
     "P0": 0,
-    "P1": 27,
+    "P1": 25,
     "P2": 0,
     "P3": 0
   },
@@ -44,7 +44,7 @@
       "area": "Product identity and version integrity",
       "status": "PASS",
       "priority": null,
-      "summary": "Authoritative source versions agree on 0.9.2 and are machine-validated.",
+      "summary": "Authoritative source versions agree on 0.9.3 and are machine-validated.",
       "evidence": [
         "frontend/package.json and package-lock.json",
         "frontend/src-tauri/tauri.conf.json, Cargo.toml, and Cargo.lock",
@@ -114,11 +114,11 @@
       "area": "Product identity and version integrity",
       "status": "PASS",
       "priority": null,
-      "summary": "Documentation identifies 0.9.2 as pre-release policy work and does not imply v1 authorization.",
+      "summary": "Documentation identifies 0.9.3 as pre-v1 state hardening and does not imply stable or v1 authorization.",
       "evidence": [
         "README.md Current Status",
-        "RELEASE_NOTES.md 0.9.2 entry",
-        "backend/app/changelog.py 0.9.2 entry",
+        "RELEASE_NOTES.md 0.9.3 entry",
+        "backend/app/changelog.py 0.9.3 entry",
         "docs/release/v1.0-gap-audit.md NOT READY verdict"
       ],
       "gap": "",
@@ -229,21 +229,20 @@
     {
       "id": "V1-SCAN-006",
       "area": "Core scanning correctness",
-      "status": "PARTIAL",
-      "priority": "P1",
-      "summary": "Baselines and profiles are scoped and sanitized, but complete persistence-failure coverage is missing.",
+      "status": "PASS",
+      "priority": null,
+      "summary": "Scoped scan, profile, baseline, review, checkpoint, and history persistence has migration and representative rollback evidence.",
       "evidence": [
-        "backend/app/trusted_dependency_baseline.py",
-        "backend/app/trusted_scan_baseline.py",
-        "backend/app/main.py Trust Profile persistence",
-        "backend/tests/test_trusted_dependency_baseline.py",
-        "backend/tests/test_project_lifecycle.py"
+        "docs/release/state-lifecycle-policy.md mutation inventory",
+        "backend/tests/test_database_lifecycle.py legacy and malformed fixtures",
+        "backend/tests/test_activity.py review/profile/dependency rollback",
+        "backend/tests/test_trusted_scan_baseline.py replacement rollback",
+        "backend/tests/test_review_checkpoints.py checkpoint rollback"
       ],
-      "gap": "No complete fault-injection matrix proves interruption cannot leave all related scan, baseline, profile, and history state contradictory.",
-      "recommended_remediation": "Inventory mutations and add rollback tests for scan persistence and baseline/profile updates.",
+      "gap": "",
+      "recommended_remediation": "",
       "closure_evidence": [
-        "Passing fault-injection tests.",
-        "Before/after database snapshots."
+        "Retain focused fault tests and repeat artifact interruption acceptance under V1-DATA-002."
       ],
       "waiver_permitted": false
     },
@@ -365,19 +364,19 @@
     {
       "id": "V1-DATA-001",
       "area": "Data integrity and state lifecycle",
-      "status": "PARTIAL",
-      "priority": "P1",
-      "summary": "Transactions and atomic publications exist, but the complete mutation set lacks rollback evidence.",
+      "status": "PASS",
+      "priority": null,
+      "summary": "Every persistent mutation is inventoried and representative multi-record actions have explicit rollback evidence.",
       "evidence": [
-        "backend/app/database.py connection contexts",
-        "Explicit BEGIN transactions in backend/app/main.py and review/baseline modules",
-        "Atomic writers and release publication"
+        "docs/release/state-lifecycle-policy.md complete mutation inventory",
+        "Explicit BEGIN IMMEDIATE transactions in state migrations and coupled route mutations",
+        "Injected unregister, review, profile, baseline, checkpoint, and migration failures",
+        "Existing atomic AGENTS.md, package, and release publication tests"
       ],
-      "gap": "Transaction boundaries are not centrally inventoried and rollback tests do not cover every multi-record action.",
-      "recommended_remediation": "Document every mutation transaction and add one focused rollback test per multi-record action.",
+      "gap": "",
+      "recommended_remediation": "",
       "closure_evidence": [
-        "Mutation inventory.",
-        "Passing rollback and fault tests."
+        "Keep the mutation inventory current and retain the representative rollback cases."
       ],
       "waiver_permitted": false
     },
@@ -386,17 +385,17 @@
       "area": "Data integrity and state lifecycle",
       "status": "PARTIAL",
       "priority": "P1",
-      "summary": "Component cleanup exists, but forced interruption and recovery have not been accepted.",
+      "summary": "Migration rollback, integrity, and cleanup are tested, but real forced interruption and edition recovery remain unaccepted.",
       "evidence": [
-        "SQLite transactional persistence",
+        "backend/tests/test_database_lifecycle.py integrity, rollback, and retry recovery",
         "backend/tests/test_agents.py failure cleanup",
         "frontend/src-tauri/src/backend.rs startup cleanup"
       ],
-      "gap": "No controlled process or power interruption record proves conservative recovery and database integrity for installed and portable editions.",
-      "recommended_remediation": "Exercise controlled termination at startup and write boundaries against disposable state.",
+      "gap": "No controlled process, parent-crash, filesystem-interruption, power-loss, or installed/portable record proves conservative recovery at real interruption boundaries.",
+      "recommended_remediation": "Exercise controlled termination at startup and representative write boundaries against disposable installed and portable state.",
       "closure_evidence": [
-        "SQLite integrity checks.",
-        "Conservative recovery and readback record."
+        "Dated SQLite integrity checks.",
+        "Installed and portable conservative recovery/readback record."
       ],
       "waiver_permitted": false
     },
@@ -422,37 +421,38 @@
     {
       "id": "V1-DATA-004",
       "area": "Data integrity and state lifecycle",
-      "status": "PARTIAL",
-      "priority": "P1",
-      "summary": "Some legacy state is conservative, but there is no complete versioned migration policy.",
+      "status": "PASS",
+      "priority": null,
+      "summary": "Schema version 1 has an explicit compatibility policy, verified legacy migration, recovery backup, and fail-closed future/corrupt behavior.",
       "evidence": [
-        "backend/app/database.py additive column migration",
-        "Legacy scan and Trust Profile normalization",
-        "Schema-version checks in frontend and baseline/checkpoint modules"
+        "backend/app/state_lifecycle.py DATABASE_SCHEMA_VERSION and ordered migration registry",
+        "SQLite PRAGMA user_version as authoritative schema version",
+        "backend/tests/test_database_lifecycle.py predecessor, future, corrupt, backup, rollback, and readback tests",
+        "docs/release/state-lifecycle-policy.md compatibility, downgrade, backup, and restore policy"
       ],
-      "gap": "No explicit database schema version, supported-upgrade matrix, predecessor fixtures, backup process, or downgrade policy exists.",
-      "recommended_remediation": "Add versioned migrations, compatibility policy, upgrade fixtures, and backup/recovery instructions.",
+      "gap": "",
+      "recommended_remediation": "",
       "closure_evidence": [
-        "Upgrade/readback tests from every supported predecessor.",
-        "Future-schema rejection tests."
+        "Retain every supported predecessor fixture and add migrations/tests before future schema publication."
       ],
       "waiver_permitted": false
     },
     {
       "id": "V1-DATA-005",
       "area": "Data integrity and state lifecycle",
-      "status": "FAIL",
+      "status": "PARTIAL",
       "priority": "P1",
-      "summary": "Application-state retention, reset, and uninstall behavior is not defined or accepted.",
+      "summary": "State retention, reset, backup, restore, and uninstall policy is explicit, but desktop flows and artifact acceptance remain incomplete.",
       "evidence": [
         "frontend/src-tauri/src/backend.rs app-local data and log path source",
-        "README.md development database note"
+        "docs/release/state-lifecycle-policy.md complete state-family inventory and lifecycle policy",
+        "backend/app/state_lifecycle.py verified automatic migration backups"
       ],
-      "gap": "Installed and portable state locations, retention, reset, backup, uninstall preservation/removal, and cleanup are undocumented and untested.",
-      "recommended_remediation": "Define and implement exact lifecycle policy for every state and log family.",
+      "gap": "No complete supported reset flow or installed/portable path, upgrade, reset, and uninstall acceptance exists; exact NSIS retention/removal is unproven.",
+      "recommended_remediation": "Implement and accept the explicit reset/backup flow and verify exact retained/removed paths on installed and portable artifacts.",
       "closure_evidence": [
-        "User documentation.",
-        "Installed and portable reset/uninstall path inventory."
+        "User-facing lifecycle documentation.",
+        "G048/G055 installed and portable path, reset, and uninstall acceptance."
       ],
       "waiver_permitted": false
     },
@@ -573,18 +573,19 @@
       "area": "Agent remediation outputs",
       "status": "PASS",
       "priority": null,
-      "summary": "Brief and package formats have independent versions plus an approved compatibility, reader, retention, and deprecation policy.",
+      "summary": "Versioned remediation formats have an approved compatibility/retention policy and a conditional mandatory test contract for any future reader.",
       "evidence": [
         "docs/release/v1.0-owner-decisions.md V1-DEC-002",
         "docs/release/agent-remediation-format-policy.md",
         "REMEDIATION_BRIEF_SCHEMA_VERSION",
         "PACKAGE_FORMAT_VERSION and FINDINGS_SCHEMA_VERSION",
-        "No current Glacial remediation-archive reader or importer"
+        "Generation-time format and package validation",
+        "No current Glacial remediation-archive reader, importer, or validator"
       ],
       "gap": "",
       "recommended_remediation": "",
       "closure_evidence": [
-        "Any future owned reader must add supported-major acceptance and unsupported-major rejection tests before shipment."
+        "Before shipment, any future owned reader must add supported-major, additive same-major, unsupported-future-major, and failure-without-project/state-mutation tests."
       ],
       "waiver_permitted": true
     },
@@ -674,7 +675,7 @@
         "frontend/src-tauri/src/backend.rs app-local data/log resolution",
         "Installer and portable build scripts only"
       ],
-      "gap": "No v0.9.2 installed or portable artifact or clean-machine lifecycle record exists.",
+      "gap": "No v0.9.3 installed or portable artifact or clean-machine lifecycle record exists.",
       "recommended_remediation": "Produce an RC after upstream blockers close and execute the edition lifecycle matrix.",
       "closure_evidence": [
         "Exact path inventory.",
@@ -822,13 +823,33 @@
       "waiver_permitted": false
     },
     {
+      "id": "V1-SEC-007",
+      "area": "Security and privacy posture",
+      "status": "FAIL",
+      "priority": "P1",
+      "summary": "The mandatory clean pre-RC repository-wide Codex Security Deep Security Scan and reportable-finding closure have not occurred.",
+      "evidence": [
+        "docs/release/v1.0-readiness-contract.md permanent V1-SEC-007 gate",
+        "docs/release/v1.0-remediation-sequence.md G052 Deep Security Scan and G053 closure handoffs",
+        "G046 explicitly did not run a Deep Security Scan"
+      ],
+      "gap": "No canonical G052 threat model, repeated discovery, coverage ledger, validation, attack-path/severity analysis, finding write-ups, hardening portfolio, generated report, or G053 remediation/closure evidence exists.",
+      "recommended_remediation": "Run G052 without repository edits, then close every reportable finding and material deferred surface through bounded G053 remediation with post-fix validation.",
+      "closure_evidence": [
+        "Exact clean pre-RC source commit and complete canonical Codex Security Deep Security Scan artifacts.",
+        "Explicit deferred/incomplete coverage ledger.",
+        "Post-fix validation and attack-path closure for every reportable finding before G054."
+      ],
+      "waiver_permitted": false
+    },
+    {
       "id": "V1-REL-001",
       "area": "Release engineering and supply-chain integrity",
       "status": "PARTIAL",
       "priority": "P1",
       "summary": "Release preflight and lockfiles are exact, but the npm manifest retains loose production dependency ranges.",
       "evidence": [
-        "G045 starting state: clean main at 39e284d with local, origin, and remote alignment",
+        "G046 starting state: clean main at cfd8fd7 with local, origin, and direct remote alignment",
         "Exact npm, Python, and Cargo locks",
         "scripts/desktop/Build-SignedWindowsRelease.mjs clean-source preflight"
       ],
@@ -870,7 +891,7 @@
         "Identical application capture requirement",
         "Inventory exclusion and portable re-extraction tests"
       ],
-      "gap": "No v0.9.2 or v1 candidate installer/portable inventory exists.",
+      "gap": "No v0.9.3 or v1 candidate installer/portable inventory exists.",
       "recommended_remediation": "Construct one bounded public-RC candidate after upstream blockers close.",
       "closure_evidence": [
         "Candidate artifact inventory.",
@@ -943,7 +964,7 @@
       "evidence": [
         "README.md",
         "SECURITY.md",
-        "RELEASE_NOTES.md 0.9.2 entry",
+        "RELEASE_NOTES.md 0.9.3 entry",
         "Readiness document links and disclaimer"
       ],
       "gap": "",
