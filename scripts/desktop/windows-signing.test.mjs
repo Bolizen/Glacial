@@ -71,7 +71,7 @@ const TEST_ROOT = join(DESKTOP_BUILD_ROOT, "release-signing-tests");
 const PORTABLE_ZIP_TEST_ROOT = join(DESKTOP_BUILD_ROOT, "portable-zip-tests", String(process.pid));
 const FAILED_RC = join(DESKTOP_BUILD_ROOT, "release-candidates", "Glacial-0.4.0-fbf96d568350-20260719T065059Z");
 const THUMBPRINT = "A".repeat(40);
-const RELEASE_ID = "Glacial-0.9.1-ffffffffffff-20260720T120000Z";
+const RELEASE_ID = "Glacial-0.9.2-ffffffffffff-20260720T120000Z";
 
 function cleanTestRoot() {
   removeSafeTree(DESKTOP_BUILD_ROOT, TEST_ROOT, { pathInspector: false });
@@ -132,9 +132,9 @@ function sourceState(overrides = {}) {
     branch: "main",
     commit: "f".repeat(40),
     originMain: "f".repeat(40),
-    version: "0.9.1",
+    version: "0.9.2",
     status: "",
-    versions: { packageJson: "0.9.1", tauri: "0.9.1" },
+    versions: { packageJson: "0.9.2", tauri: "0.9.2" },
     ...overrides,
   };
 }
@@ -238,7 +238,7 @@ test("command provider keeps the file as one direct argument and forwards only n
     AZURE_CLIENT_SECRET: "not-allowed",
     AWS_SECRET_ACCESS_KEY: "not-allowed-either",
   });
-  const releaseEnvironment = signingEnvironment(source, "Glacial-0.9.1-ffffffffffff-20260719T120000Z");
+  const releaseEnvironment = signingEnvironment(source, "Glacial-0.9.2-ffffffffffff-20260719T120000Z");
   assert.equal(releaseEnvironment.AZURE_CLIENT_ID, "allowed-value");
   assert.equal("AZURE_CLIENT_SECRET" in releaseEnvironment, false);
   assert.equal("AWS_SECRET_ACCESS_KEY" in releaseEnvironment, false);
@@ -441,7 +441,7 @@ test("application capture validation rejects missing, duplicate, unrelated, and 
 test("Tauri signing evidence requires one transient uninstaller between plugins and final installer", () => {
   const capture = join(TEST_ROOT, "capture-evidence", "Glacial.exe");
   const target = join(TEST_ROOT, "target-evidence", "glacial.exe");
-  const installer = join(TEST_ROOT, "bundle", "Glacial_0.9.1_x64-setup.exe");
+  const installer = join(TEST_ROOT, "bundle", "Glacial_0.9.2_x64-setup.exe");
   mkdirSync(dirname(capture), { recursive: true });
   writeFileSync(capture, minimalPe());
   const config = { expectedThumbprint: THUMBPRINT, applicationTarget: target, applicationCapture: capture };
@@ -511,7 +511,7 @@ test("release source revalidation rejects every mutable provenance field", () =>
     { originMain: "e".repeat(40) },
     { status: " M file" },
     { version: "0.9.2" },
-    { versions: { packageJson: "0.9.1", tauri: "0.9.2" } },
+    { versions: { packageJson: "0.9.2", tauri: "0.9.3" } },
   ]) assert.throws(() => assertSameReleaseSource(before, sourceState(changed)), /changed/);
 });
 
@@ -629,7 +629,7 @@ test("dry-run plans and manifest fields report profile trust requirements honest
   );
 });
 
-test("release package commands and established version sources identify 0.9.1", () => {
+test("release package commands and established version sources identify 0.9.2", () => {
   const packageJson = JSON.parse(readFileSync(join(REPOSITORY, "frontend", "package.json"), "utf8"));
   const packageLock = JSON.parse(readFileSync(join(REPOSITORY, "frontend", "package-lock.json"), "utf8"));
   const tauri = JSON.parse(readFileSync(join(REPOSITORY, "frontend", "src-tauri", "tauri.conf.json"), "utf8"));
@@ -658,15 +658,15 @@ test("release package commands and established version sources identify 0.9.1", 
   });
   assert.deepEqual(
     [packageJson.version, packageLock.version, packageLock.packages[""].version, tauri.version],
-    ["0.9.1", "0.9.1", "0.9.1", "0.9.1"],
+    ["0.9.2", "0.9.2", "0.9.2", "0.9.2"],
   );
-  assert.match(cargo, /^version = "0\.9\.1"$/m);
-  assert.match(cargoLock, /\[\[package\]\]\r?\nname = "glacial"\r?\nversion = "0\.9\.1"/);
-  assert.match(releaseTool, /expected 0\.9\.1/);
-  assert.match(signingTool, /\^Glacial-0\\\.9\\\.1-/);
-  assert.match(changelog, /"version": "0\.9\.1"/);
-  assert.match(readme, /Glacial v0\.9\.1 is licensed/);
-  assert.match(signingDocs, /Glacial v0\.9\.1 is intended/);
+  assert.match(cargo, /^version = "0\.9\.2"$/m);
+  assert.match(cargoLock, /\[\[package\]\]\r?\nname = "glacial"\r?\nversion = "0\.9\.2"/);
+  assert.match(releaseTool, /expected 0\.9\.2/);
+  assert.match(signingTool, /\^Glacial-0\\\.9\\\.2-/);
+  assert.match(changelog, /"version": "0\.9\.2"/);
+  assert.match(readme, /Glacial v0\.9\.2 is licensed/);
+  assert.match(signingDocs, /Glacial v0\.9\.2 is intended/);
 });
 
 test("candidate publication is failure-atomic and never overwrites existing candidates", () => {

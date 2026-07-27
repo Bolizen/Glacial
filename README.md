@@ -18,13 +18,15 @@ Glacial is an early stage local-first project focused on project scanning, safet
 - [v1.0 readiness contract](docs/release/v1.0-readiness-contract.md)
 - [current v1.0 gap audit](docs/release/v1.0-gap-audit.md)
 - [machine-readable audit snapshot](docs/release/v1.0-gap-audit.json)
+- [v1.0 owner decisions](docs/release/v1.0-owner-decisions.md)
+- [Agent Remediation format policy](docs/release/agent-remediation-format-policy.md)
 - [recommended remediation sequence](docs/release/v1.0-remediation-sequence.md)
 
 These are planning and release-governance artifacts. They are not proof that Glacial is secure, complete, or ready for v1.0 release.
 
 ## Licensing
 
-Glacial v0.9.1 is licensed under the Functional Source License, Version 1.1, ALv2 Future License (`FSL-1.1-ALv2`). It is Fair Source and source-available, but it is not presently OSI open source.
+Glacial v0.9.2 is licensed under the Functional Source License, Version 1.1, ALv2 Future License (`FSL-1.1-ALv2`). It is Fair Source and source-available, but it is not presently OSI open source.
 
 Internal use, study, modification, and redistribution are permitted subject to the license. Offering Glacial, or substantially similar functionality, to others as a competing commercial product or service is not permitted under the public license. Separate commercial licensing may be available from the copyright holder.
 
@@ -145,6 +147,7 @@ The standalone debugging port remains `8000`; Tauri development uses an ephemera
 - Review shows current checkpoint state, bounded eligibility reasons, explicit checkpoint confirmation when eligible, and the newest three immutable checkpoint records. Readiness and checkpoints document available evidence and manual review; they are not certifications or security guarantees.
 - Review can generate an **Agent Remediation Brief**, the human-readable preview used for explicit copy or standalone Markdown download. The backend deterministically reconstructs bounded scanner explanations for unresolved findings and preserves redaction and coverage limitations.
 - From the same immutable preview snapshot, a user can explicitly download an **Agent Remediation Package**, a deterministic data-only ZIP handoff for a human-selected external coding agent. It contains `README.md`, `AGENT_TASK.md`, `findings.json`, `manifest.json`, and `CHECKSUMS.sha256`; it contains no project source files, executable content, scripts, or symlinks.
+- The Brief and Package include at most the first 100 unresolved findings in canonical severity-first order while reporting exact unresolved, included, and omitted counts. This is the accepted v1.0 single-handoff boundary, not a scan, storage, review, or display limit. See the [format compatibility and retention policy](docs/release/agent-remediation-format-policy.md).
 - Neither remediation feature edits code autonomously, launches an agent, executes project content, installs dependencies, or writes into the scanned project.
 - Successful scans now open Review so the user can follow the canonical next action. The older guided checklist is reduced to a compact, locally dismissible Review link.
 - Glacial stores its SQLite database at `backend/data/glacial.db`.

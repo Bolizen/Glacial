@@ -18,7 +18,7 @@ from app import database, main
 from app.finding_explainability import build_finding_explainability
 from app.finding_reviews import finding_fingerprint
 from app.remediation_brief import MAX_REMEDIATION_FINDINGS, build_remediation_snapshot
-from app.remediation_package import PACKAGE_MEMBERS
+from app.remediation_package import PACKAGE_MEMBERS, build_remediation_package
 from app.schemas import RemediationBriefRequest, RemediationPackageRequest
 
 
@@ -175,13 +175,13 @@ class RemediationBriefTests(unittest.TestCase):
         first = build_remediation_snapshot(
             project_name="Same display name",
             project_identity="C:\\workspace\\project-a",
-            generator_version="0.9.1",
+            generator_version="0.9.2",
             scan=scan,
         )
         second = build_remediation_snapshot(
             project_name="Same display name",
             project_identity="C:\\workspace\\project-b",
-            generator_version="0.9.1",
+            generator_version="0.9.2",
             scan=scan,
         )
 
@@ -302,18 +302,105 @@ class RemediationBriefTests(unittest.TestCase):
         self.assertEqual(indeterminate["coverageStatus"], "indeterminate")
         self.assertIn("Coverage metadata is unavailable or invalid", indeterminate["markdown"])
 
-    def test_finding_count_is_bounded_and_omissions_are_explicit(self) -> None:
-        findings = [
-            self.canonical_finding(path=f"src/finding-{index:03}.ps1")
-            for index in range(MAX_REMEDIATION_FINDINGS + 1)
+    def test_cap_boundaries_are_deterministic_and_brief_package_counts_agree(self) -> None:
+        severity_order = {"high": 4, "medium": 3, "low": 2, "none": 1, "unknown": 0}
+        mixed = [
+            self.canonical_finding(
+                path=f"src/mixed-{index:03}.ps1",
+                severity=("low", "high", "unknown", "medium", "none")[index % 5],
+            )
+            for index in range(137)
         ]
-        result = self.generate(self.insert_scan(findings))
+        cases = [
+            ("below", [
+                self.canonical_finding(path=f"src/below-{index:03}.ps1")
+                for index in range(99)
+            ]),
+            ("exact", [
+                self.canonical_finding(path=f"src/exact-{index:03}.ps1")
+                for index in range(100)
+            ]),
+            ("one-over", [
+                self.canonical_finding(path=f"src/over-{index:03}.ps1")
+                for index in range(101)
+            ]),
+            ("mixed", list(reversed(mixed))),
+        ]
 
-        self.assertEqual(result["unresolvedFindingCount"], MAX_REMEDIATION_FINDINGS + 1)
-        self.assertEqual(result["includedFindingCount"], MAX_REMEDIATION_FINDINGS)
-        self.assertEqual(result["omittedFindingCount"], 1)
-        self.assertIn("1 additional unresolved findings were omitted", result["markdown"])
-        self.assertNotIn(f"src/finding-{MAX_REMEDIATION_FINDINGS:03}.ps1", result["markdown"])
+        for scan_id, (label, findings) in enumerate(cases, start=1):
+            with self.subTest(label=label):
+                scan = {
+                    "id": scan_id,
+                    "scan_date": "2026-07-27T12:00:00Z",
+                    "findings": findings,
+                    "scanCompleteness": {"complete": True, "issueCount": 0},
+                    "scanMetadataReliable": True,
+                }
+                snapshot = build_remediation_snapshot(
+                    project_name="Cap boundary",
+                    project_identity="cap-boundary-project",
+                    generator_version="0.9.2",
+                    scan=scan,
+                )
+                brief = snapshot["brief"]
+                package = build_remediation_package(
+                    project_name="Cap boundary",
+                    project_identity="cap-boundary-project",
+                    scan=scan,
+                    expected_snapshot_digest=snapshot["snapshotDigest"],
+                )
+                expected_order = sorted(
+                    findings,
+                    key=lambda finding: (
+                        -severity_order[str(finding["severity"])],
+                        str(finding["path"]),
+                        str(finding["type"]),
+                    ),
+                )[:MAX_REMEDIATION_FINDINGS]
+                expected_paths = [str(finding["path"]) for finding in expected_order]
+                included_count = min(len(findings), MAX_REMEDIATION_FINDINGS)
+                omitted_count = len(findings) - included_count
+
+                self.assertEqual(brief["unresolvedFindingCount"], len(findings))
+                self.assertEqual(brief["includedFindingCount"], included_count)
+                self.assertEqual(brief["omittedFindingCount"], omitted_count)
+                self.assertEqual(
+                    [finding["affected_path"] for finding in snapshot["includedFindings"]],
+                    expected_paths,
+                )
+                markdown_positions = [str(brief["markdown"]).index(path) for path in expected_paths]
+                self.assertEqual(markdown_positions, sorted(markdown_positions))
+                if omitted_count:
+                    self.assertIn(
+                        f"{omitted_count} additional unresolved findings were omitted",
+                        brief["markdown"],
+                    )
+                else:
+                    self.assertNotIn("additional unresolved findings were omitted", brief["markdown"])
+
+                archive_bytes = base64.b64decode(str(package["packageBase64"]), validate=True)
+                with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
+                    findings_json = json.loads(archive.read("findings.json"))
+                    manifest = json.loads(archive.read("manifest.json"))
+                self.assertEqual(
+                    [finding["affected_path"] for finding in findings_json["findings"]],
+                    expected_paths,
+                )
+                self.assertEqual(findings_json["scope"]["finding_count"], included_count)
+                self.assertEqual(findings_json["scope"]["unresolved_finding_count"], len(findings))
+                self.assertEqual(findings_json["scope"]["omitted_finding_count"], omitted_count)
+                self.assertEqual(manifest["scope"]["included_finding_count"], included_count)
+                self.assertEqual(manifest["scope"]["unresolved_finding_count"], len(findings))
+                self.assertEqual(manifest["scope"]["omitted_finding_count"], omitted_count)
+
+                if label == "mixed":
+                    repeated = build_remediation_package(
+                        project_name="Cap boundary",
+                        project_identity="cap-boundary-project",
+                        scan=scan,
+                        expected_snapshot_digest=snapshot["snapshotDigest"],
+                    )
+                    self.assertEqual(package["packageBase64"], repeated["packageBase64"])
 
     def test_ownership_latest_scan_and_identifier_checks_fail_closed(self) -> None:
         historical_id = self.insert_scan([], date="2026-07-24T12:00:00+00:00")

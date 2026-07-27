@@ -2,6 +2,16 @@ from __future__ import annotations
 
 CHANGELOG_ENTRIES = [
     {
+        "version": "0.9.2",
+        "date": "2026-07-27",
+        "title": "Remediation policy closure and PostCSS remediation",
+        "changes": [
+            "Accepted the bounded 100-finding v1 remediation preview and package policy with explicit unresolved, included, and omitted counts and focused boundary evidence.",
+            "Published independent Agent Remediation Brief and Package format compatibility, reader, retention, and deprecation rules while retaining package format 1.0.0.",
+            "Narrowly remediated the PostCSS advisory through an exact transitive override; Glacial remains NOT READY for v1.0 while P1 work remains.",
+        ],
+    },
+    {
         "version": "0.9.1",
         "date": "2026-07-27",
         "title": "v1.0 readiness contract and gap audit",

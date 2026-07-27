@@ -1,3 +1,14 @@
+# Glacial 0.9.2 Remediation Policy Closure and PostCSS Remediation
+
+Glacial 0.9.2 closes the three P2 owner decisions from the v1.0 readiness audit. The overall verdict remains `NOT READY` because 27 P1 requirements remain unresolved.
+
+## Remediation policy and dependency security
+
+- Accepts at most 100 unresolved findings in one Agent Remediation Brief or Package as the v1.0 handoff boundary while preserving exact unresolved, included, and omitted counts.
+- Publishes patch, minor, and major compatibility rules plus reader, retention, deprecation, and v1-line generation support for remediation package format `1.0.0`.
+- Resolves Vite's transitive PostCSS path to exact version 8.5.18, the first patched version for `GHSA-r28c-9q8g-f849`, without upgrading Vite or changing unrelated dependency resolutions.
+- Keeps the readiness verdict candid: this policy milestone does not authorize v1.0, create a release candidate, or complete remaining P1 work.
+
 # Glacial 0.9.1 v1.0 Readiness Contract and Gap Audit
 
 Glacial 0.9.1 adds release-governance evidence for planning the path to v1.0.0. It does not claim that the v1.0 requirements are complete or authorize a stable release.
