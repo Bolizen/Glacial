@@ -115,6 +115,15 @@ const EMPTY_ACTIVITY_STATE = Object.freeze({
   loading: false,
   error: "",
 });
+const EMPTY_REMEDIATION_BRIEF = Object.freeze({
+  open: false,
+  loading: false,
+  packageLoading: false,
+  stale: false,
+  data: null,
+  error: "",
+  status: "",
+});
 export function App() {
   const [projectRoot, setProjectRoot] = useState("");
   const [projectRootMessage, setProjectRootMessage] = useState("");
@@ -140,13 +149,7 @@ export function App() {
   const [reviewCheckpoints, setReviewCheckpoints] = useState(EMPTY_REVIEW_CHECKPOINTS);
   const [reviewCheckpointMutation, setReviewCheckpointMutation] = useState({ saving: false, error: "", success: "" });
   const [reviewCheckpointPreview, setReviewCheckpointPreview] = useState(null);
-  const [remediationBrief, setRemediationBrief] = useState({
-    open: false,
-    loading: false,
-    data: null,
-    error: "",
-    status: "",
-  });
+  const [remediationBrief, setRemediationBrief] = useState(EMPTY_REMEDIATION_BRIEF);
   const [notes, setNotes] = useState([]);
   const [noteBody, setNoteBody] = useState("");
   const [changelog, setChangelog] = useState([]);
@@ -169,6 +172,8 @@ export function App() {
   const [toastTop, setToastTop] = useState(112);
   const topbarRef = useRef(null);
   const remediationBriefTriggerRef = useRef(null);
+  const remediationPackageDownloadingRef = useRef(false);
+  const remediationPackageRequestRef = useRef(0);
   const selectedPathRef = useRef("");
   const projectGenerationRef = useRef(0);
   const projectsRequestRef = useRef({ id: 0, controller: null });
@@ -375,7 +380,9 @@ export function App() {
     setReviewCheckpoints(EMPTY_REVIEW_CHECKPOINTS);
     setReviewCheckpointMutation({ saving: false, error: "", success: "" });
     setReviewCheckpointPreview(null);
-    setRemediationBrief({ open: false, loading: false, data: null, error: "", status: "" });
+    remediationPackageDownloadingRef.current = false;
+    remediationPackageRequestRef.current += 1;
+    setRemediationBrief(EMPTY_REMEDIATION_BRIEF);
     setNotes([]);
     setNoteBody("");
     setCopyStatus("");
@@ -399,7 +406,9 @@ export function App() {
       remediationBriefTriggerRef.current = event?.currentTarget || document.activeElement;
     }
     const requestId = beginScopedProjectRequest("remediationBrief");
-    setRemediationBrief({ open: true, loading: true, data: null, error: "", status: "" });
+    remediationPackageDownloadingRef.current = false;
+    remediationPackageRequestRef.current += 1;
+    setRemediationBrief({ ...EMPTY_REMEDIATION_BRIEF, open: true, loading: true });
     try {
       const data = await api("/api/remediation-brief", {
         method: "POST",
@@ -409,17 +418,19 @@ export function App() {
       if (typeof data?.markdown !== "string" || !data.markdown || data.scanId !== scanId) {
         throw new Error("The backend returned an invalid remediation brief.");
       }
-      setRemediationBrief({ open: true, loading: false, data, error: "", status: "" });
+      setRemediationBrief({ ...EMPTY_REMEDIATION_BRIEF, open: true, data });
     } catch (error) {
       if (!isAbortError(error) && scopedProjectRequestIsCurrent("remediationBrief", requestId, projectPath, generation)) {
-        setRemediationBrief({ open: true, loading: false, data: null, error: error.message, status: "" });
+        setRemediationBrief({ ...EMPTY_REMEDIATION_BRIEF, open: true, error: error.message });
       }
     }
   }
 
   function closeRemediationBrief() {
     beginScopedProjectRequest("remediationBrief");
-    setRemediationBrief({ open: false, loading: false, data: null, error: "", status: "" });
+    remediationPackageDownloadingRef.current = false;
+    remediationPackageRequestRef.current += 1;
+    setRemediationBrief(EMPTY_REMEDIATION_BRIEF);
     const trigger = remediationBriefTriggerRef.current;
     window.setTimeout(() => trigger?.focus?.(), 0);
   }
@@ -447,6 +458,74 @@ export function App() {
       setRemediationBrief((current) => ({ ...current, status: "Brief download started." }));
     } catch {
       setRemediationBrief((current) => ({ ...current, status: "Could not download the brief." }));
+    }
+  }
+
+  async function downloadRemediationPackage() {
+    const data = remediationBrief.data;
+    const projectPath = selectedPathRef.current;
+    const generation = projectGenerationRef.current;
+    if (
+      remediationPackageDownloadingRef.current
+      || remediationBrief.stale
+      || data?.packageAvailable !== true
+      || !projectPath
+      || !Number.isInteger(data.scanId)
+      || !/^[0-9a-f]{64}$/.test(String(data.snapshotDigest || ""))
+    ) return;
+    remediationPackageDownloadingRef.current = true;
+    const packageRequestId = remediationPackageRequestRef.current + 1;
+    remediationPackageRequestRef.current = packageRequestId;
+    const snapshotDigest = data.snapshotDigest;
+    setRemediationBrief((current) => ({
+      ...current,
+      packageLoading: true,
+      status: "Preparing data-only package…",
+    }));
+    try {
+      const result = await api("/api/remediation-package", {
+        method: "POST",
+        body: {
+          project_path: projectPath,
+          scan_id: data.scanId,
+          snapshot_digest: snapshotDigest,
+        },
+      });
+      if (
+        remediationPackageRequestRef.current !== packageRequestId
+        || !projectRequestIsCurrent(projectPath, generation)
+        || remediationBrief.data?.snapshotDigest !== snapshotDigest
+      ) return;
+      if (
+        result?.snapshotDigest !== snapshotDigest
+        || result?.mediaType !== "application/zip"
+        || typeof result?.packageBase64 !== "string"
+      ) {
+        throw new Error("The backend returned an invalid remediation package.");
+      }
+      const bytes = decodeBase64(result.packageBase64);
+      exportBlob(
+        new Blob([bytes], { type: "application/zip" }),
+        safeRemediationPackageFileName(result.fileName, data.scanId),
+      );
+      setRemediationBrief((current) => ({
+        ...current,
+        status: `Package download started. SHA-256: ${result.sha256}`,
+      }));
+    } catch (error) {
+      if (remediationPackageRequestRef.current !== packageRequestId) return;
+      const stale = /stale|regenerate the preview/i.test(String(error?.message || ""));
+      setRemediationBrief((current) => ({
+        ...current,
+        stale: current.stale || stale,
+        status: stale
+          ? "Preview is stale. Regenerate it before downloading the package."
+          : `Could not download the package. ${error?.message || ""}`.trim(),
+      }));
+    } finally {
+      if (remediationPackageRequestRef.current !== packageRequestId) return;
+      remediationPackageDownloadingRef.current = false;
+      setRemediationBrief((current) => ({ ...current, packageLoading: false }));
     }
   }
 
@@ -1316,6 +1395,15 @@ export function App() {
   function applyFindingReview(fingerprint, review) {
     setScanResult((current) => applyFindingReviewToScan(current, fingerprint, review));
     setScanHistory((current) => current.map((scan) => applyFindingReviewToScan(scan, fingerprint, review)));
+    remediationPackageDownloadingRef.current = false;
+    remediationPackageRequestRef.current += 1;
+    setRemediationBrief((current) => current.open && current.data
+      ? {
+        ...current,
+        stale: true,
+        status: "Review state changed. Regenerate the preview before downloading the package.",
+      }
+      : current);
   }
 
   async function changeWorkspaceRoot(nextRoot) {
@@ -1822,6 +1910,7 @@ export function App() {
           value={remediationBrief}
           onCopy={copyRemediationBrief}
           onDownload={downloadRemediationBrief}
+          onDownloadPackage={downloadRemediationPackage}
           onClose={closeRemediationBrief}
           onRetry={openRemediationBrief}
         />
@@ -1962,7 +2051,7 @@ function ReviewWorkspace({
   );
 }
 
-function RemediationBriefPreview({ value, onCopy, onDownload, onClose, onRetry }) {
+function RemediationBriefPreview({ value, onCopy, onDownload, onDownloadPackage, onClose, onRetry }) {
   const closeRef = useRef(null);
   const panelRef = useRef(null);
 
@@ -2038,10 +2127,36 @@ function RemediationBriefPreview({ value, onCopy, onDownload, onClose, onRetry }
             </>
           ) : null}
         </div>
+        {data ? (
+          <div className="remediation-package-summary" aria-label="Agent Remediation Package summary">
+            <strong>Agent Remediation Package</strong>
+            <span>{data.packageFileCount || 5} files</span>
+            <span>{data.includedFindingCount} unresolved findings</span>
+            <span>{formatSeverityCounts(data.severityCounts)}</span>
+            <span>Data-only</span>
+            <span>No project files</span>
+            <span>Format {data.packageFormatVersion || "1.0.0"}</span>
+            {!data.packageAvailable && data.packageUnavailableReason
+              ? <span className="remediation-package-unavailable">{data.packageUnavailableReason}</span>
+              : null}
+            {value.stale
+              ? <span className="remediation-package-unavailable">Preview is stale. Regenerate it to export a package.</span>
+              : null}
+          </div>
+        ) : null}
         <div className="modal-actions remediation-brief-actions">
           <span className="remediation-brief-status" role="status" aria-live="polite">{value.status}</span>
           <button type="button" className="secondary-button" onClick={onCopy} disabled={!data?.markdown || value.loading}>Copy brief</button>
           <button type="button" className="secondary-button" onClick={onDownload} disabled={!data?.markdown || value.loading}>Download .md</button>
+          <button
+            type="button"
+            className="secondary-button"
+            aria-label="Download Agent Remediation Package ZIP"
+            onClick={onDownloadPackage}
+            disabled={!data?.packageAvailable || value.loading || value.packageLoading || value.stale}
+          >
+            {value.packageLoading ? "Preparing package…" : "Download package (.zip)"}
+          </button>
           <button type="button" className="tertiary-button" onClick={onClose}>Close</button>
         </div>
       </section>
@@ -4424,6 +4539,10 @@ function exportScanReport(content) {
 
 function exportMarkdown(content, fileName) {
   const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
+  exportBlob(blob, fileName);
+}
+
+function exportBlob(blob, fileName) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -4438,6 +4557,25 @@ function safeRemediationBriefFileName(value, scanId) {
   const fileName = typeof value === "string" ? value : "";
   if (/^glacial-agent-remediation-brief-scan-[1-9][0-9]*\.md$/.test(fileName)) return fileName;
   return `glacial-agent-remediation-brief-scan-${Number.isInteger(scanId) && scanId > 0 ? scanId : "latest"}.md`;
+}
+
+function safeRemediationPackageFileName(value, scanId) {
+  const fileName = typeof value === "string" ? value : "";
+  if (/^glacial-agent-remediation-package-scan-[1-9][0-9]*\.zip$/.test(fileName)) return fileName;
+  return `glacial-agent-remediation-package-scan-${Number.isInteger(scanId) && scanId > 0 ? scanId : "latest"}.zip`;
+}
+
+function decodeBase64(value) {
+  const decoded = window.atob(value);
+  return Uint8Array.from(decoded, (character) => character.charCodeAt(0));
+}
+
+function formatSeverityCounts(value) {
+  const counts = value && typeof value === "object" ? value : {};
+  return ["high", "medium", "low", "none", "unknown"]
+    .filter((severity) => Number(counts[severity] || 0) > 0)
+    .map((severity) => `${severity} ${counts[severity]}`)
+    .join(" · ") || "No severity counts";
 }
 
 function formatDate(value) {

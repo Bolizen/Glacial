@@ -1,3 +1,16 @@
+# Glacial 0.9.0 Agent Remediation Package
+
+Glacial 0.9.0 adds a deterministic, integrity-verifiable, data-only ZIP handoff for a human-selected external coding agent.
+
+## Agent Remediation Package
+
+- Exports exactly `README.md`, `AGENT_TASK.md`, `findings.json`, `manifest.json`, and `CHECKSUMS.sha256` from the same immutable snapshot as the visible Agent Remediation Brief.
+- Includes only the preview's priority-ordered unresolved findings, with versioned machine-readable data, provenance, inventory, safety declarations, and exact-byte SHA-256 checksums.
+- Produces byte-identical ZIPs for identical project, scan, canonical finding, review-state, and Glacial-version snapshots.
+- Rejects incomplete scans, empty unresolved scopes, and stale previews rather than silently packaging changed evidence.
+- Preserves the Agent Remediation Brief as the human-readable preview, copy, and standalone Markdown export.
+- Neither feature autonomously edits code, launches an agent, reads project files for export, or mutates project or Glacial review state.
+
 # Glacial 0.8.2 Public Release Candidate Trust Gate
 
 Glacial 0.8.2 adds an explicit fail-closed trust boundary between internal signed previews and public release candidates.

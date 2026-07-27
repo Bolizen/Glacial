@@ -1820,6 +1820,31 @@ pre {
   word-break: break-word;
 }
 
+.remediation-package-summary {
+  align-items: center;
+  background: var(--color-surface-inset);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-3);
+}
+
+.remediation-package-summary strong {
+  flex-basis: 100%;
+}
+
+.remediation-package-summary span {
+  color: var(--color-text-secondary);
+  font-size: 0.76rem;
+}
+
+.remediation-package-summary .remediation-package-unavailable {
+  color: var(--color-danger);
+  flex-basis: 100%;
+}
+
 .remediation-brief-actions {
   align-items: center;
   border-top: 1px solid var(--color-border-subtle);

@@ -2,6 +2,16 @@ from __future__ import annotations
 
 CHANGELOG_ENTRIES = [
     {
+        "version": "0.9.0",
+        "date": "2026-07-26",
+        "title": "Agent Remediation Package",
+        "changes": [
+            "Added a deterministic data-only ZIP export containing a versioned machine-readable finding set, package manifest, and exact-byte checksums.",
+            "Bound package generation to the immutable Agent Remediation Brief preview snapshot and fail closed when scan, project, finding, coverage, or review state becomes stale.",
+            "Preserved the existing human-readable brief preview, copy, and standalone Markdown export without launching an agent or modifying the selected project.",
+        ],
+    },
+    {
         "version": "0.8.2",
         "title": "Public release candidate trust gate",
         "changes": [

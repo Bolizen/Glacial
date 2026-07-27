@@ -755,6 +755,7 @@ test("Agent Remediation Brief uses the latest Review scan and previews, copies, 
   let copied = "";
   let downloadedName = "";
   let downloadedBlob = null;
+  let downloadCount = 0;
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
     value: { writeText: async (value) => { copied = value; } },
@@ -765,6 +766,7 @@ test("Agent Remediation Brief uses the latest Review scan and previews, copies, 
   const originalAnchorClick = anchorPrototype.click;
   URL.createObjectURL = (blob) => {
     downloadedBlob = blob;
+    downloadCount += 1;
     return "blob:remediation-brief";
   };
   URL.revokeObjectURL = () => {};
@@ -821,6 +823,12 @@ test("Agent Remediation Brief uses the latest Review scan and previews, copies, 
     empty: false,
     fileName: "glacial-agent-remediation-brief-scan-152.md",
     markdown,
+    snapshotDigest: "a".repeat(64),
+    severityCounts: { high: 1, medium: 0, low: 0, none: 0, unknown: 0 },
+    packageFormatVersion: "1.0.0",
+    packageFileCount: 5,
+    packageAvailable: true,
+    packageUnavailableReason: "",
   });
 
   modal = document.querySelector(".remediation-brief-preview");
@@ -836,9 +844,61 @@ test("Agent Remediation Brief uses the latest Review scan and previews, copies, 
   assert.equal(downloadedName, "glacial-agent-remediation-brief-scan-152.md");
   assert.equal(await downloadedBlob.text(), markdown);
   assert.match(modal.textContent, /Brief download started/);
+  assert.match(modal.textContent, /5 files/);
+  assert.match(modal.textContent, /1 unresolved findings/);
+  assert.match(modal.textContent, /high 1/);
+  assert.match(modal.textContent, /Data-only/);
+  assert.match(modal.textContent, /No project files/);
+  assert.match(modal.textContent, /Format 1\.0\.0/);
 
+  const packageButton = buttonWithText("Download package (.zip)");
+  await click(packageButton);
+  const packageRequest = await fetchHarness.next("/api/remediation-package", { method: "POST" });
+  assert.deepEqual(packageRequest.body, {
+    project_path: PROJECT_A_PATH,
+    scan_id: 152,
+    snapshot_digest: "a".repeat(64),
+  });
+  assert.equal(packageButton.disabled, true);
+  await click(packageButton);
+  assert.equal(fetchHarness.count("/api/remediation-package", "POST"), 1);
+  await respond(packageRequest, {
+    fileName: "glacial-agent-remediation-package-scan-152.zip",
+    mediaType: "application/zip",
+    packageBase64: Buffer.from("deterministic-zip-bytes").toString("base64"),
+    sha256: "b".repeat(64),
+    sizeBytes: 23,
+    snapshotDigest: "a".repeat(64),
+  });
+  assert.equal(downloadedName, "glacial-agent-remediation-package-scan-152.zip");
+  assert.equal(downloadedBlob.type, "application/zip");
+  assert.equal(await downloadedBlob.text(), "deterministic-zip-bytes");
+  assert.match(modal.textContent, new RegExp(`SHA-256: ${"b".repeat(64)}`));
+  assert.equal(buttonWithText("Download package (.zip)").disabled, false);
+  await click(buttonWithText("Download package (.zip)"));
+  await respond(
+    await fetchHarness.next("/api/remediation-package", { method: "POST" }),
+    { detail: "Package generation failed safely." },
+    500,
+  );
+  assert.match(modal.textContent, /Could not download the package/);
+  assert.equal(buttonWithText("Download package (.zip)").disabled, false);
+  assert.equal(modal.querySelector('[aria-label="Generated remediation brief Markdown"]').textContent, markdown);
+
+  const downloadsBeforeInterruptedRequest = downloadCount;
+  await click(buttonWithText("Download package (.zip)"));
+  const interruptedPackageRequest = await fetchHarness.next("/api/remediation-package", { method: "POST" });
   await click([...modal.querySelectorAll("button")].find((button) => button.textContent === "Close"));
   assert.equal(document.querySelector(".remediation-brief-preview"), null);
+  await respond(interruptedPackageRequest, {
+    fileName: "glacial-agent-remediation-package-scan-152.zip",
+    mediaType: "application/zip",
+    packageBase64: Buffer.from("must-not-download").toString("base64"),
+    sha256: "d".repeat(64),
+    sizeBytes: 17,
+    snapshotDigest: "a".repeat(64),
+  });
+  assert.equal(downloadCount, downloadsBeforeInterruptedRequest);
   await act(async () => new Promise((resolve) => window.setTimeout(resolve, 0)));
   assert.equal(document.activeElement, trigger);
   assert.equal(primaryAction.disabled, false);
@@ -855,7 +915,24 @@ test("Agent Remediation Brief uses the latest Review scan and previews, copies, 
     empty: false,
     fileName: "glacial-agent-remediation-brief-scan-152.md",
     markdown,
+    snapshotDigest: "c".repeat(64),
+    severityCounts: { high: 1, medium: 0, low: 0, none: 0, unknown: 0 },
+    packageFormatVersion: "1.0.0",
+    packageFileCount: 5,
+    packageAvailable: true,
+    packageUnavailableReason: "",
   });
+  modal = document.querySelector(".remediation-brief-preview");
+  await click(buttonWithText("Download package (.zip)"));
+  await respond(
+    await fetchHarness.next("/api/remediation-package", { method: "POST" }),
+    { detail: "This remediation preview is stale. Regenerate the preview before downloading the package." },
+    409,
+  );
+  assert.match(modal.textContent, /Preview is stale/);
+  assert.equal(modal.querySelector('[aria-label="Download Agent Remediation Package ZIP"]').disabled, true);
+  await click(buttonWithText("Copy brief"));
+  assert.equal(copied, markdown);
   await act(async () => {
     window.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await flushMicrotasks();

@@ -55,10 +55,12 @@ from .review_checkpoints import (
     checkpoint_page,
     create_checkpoint,
 )
-from .remediation_brief import build_remediation_brief
-from .schemas import AgentPreviewRequest, FindingReviewDelete, FindingReviewRequest, NoteCreate, ProjectCreate, ProjectMetadataUpdate, ProjectPathRequest, ProjectRegister, ProjectRootUpdate, RemediationBriefRequest, ReviewCheckpointCreate, TrustProfileRequest, TrustedDependencyBaselineApprove, TrustedDependencyBaselineNote, TrustedScanBaselineSet
+from .remediation_brief import build_remediation_snapshot
+from .remediation_package import build_remediation_package
+from .schemas import AgentPreviewRequest, FindingReviewDelete, FindingReviewRequest, NoteCreate, ProjectCreate, ProjectMetadataUpdate, ProjectPathRequest, ProjectRegister, ProjectRootUpdate, RemediationBriefRequest, RemediationPackageRequest, ReviewCheckpointCreate, TrustProfileRequest, TrustedDependencyBaselineApprove, TrustedDependencyBaselineNote, TrustedScanBaselineSet
 from .trusted_dependency_baseline import BASELINE_SCHEMA_VERSION, BaselineError, approval_for_analysis, enrich_scan as enrich_trusted_baseline, public_baseline, snapshot_from_analysis, snapshot_json, valid_fingerprint as valid_baseline_fingerprint
 from .trusted_scan_baseline import PROVENANCE_MANUAL, trusted_scan_baseline_state
+from .version import GLACIAL_VERSION
 
 
 app = FastAPI(title="Glacial API")
@@ -438,6 +440,36 @@ def scan_history(project_path: str = Query(min_length=1, max_length=1000)) -> di
 
 @app.post("/api/remediation-brief")
 def remediation_brief(payload: RemediationBriefRequest) -> dict[str, object]:
+    project, project_name, scan = _remediation_source(payload)
+    try:
+        return build_remediation_snapshot(
+            project_name=project_name,
+            project_identity=str(project),
+            scan=scan,
+            generator_version=GLACIAL_VERSION,
+        )["brief"]
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/remediation-package")
+def remediation_package(payload: RemediationPackageRequest) -> dict[str, object]:
+    project, project_name, scan = _remediation_source(payload)
+    try:
+        return build_remediation_package(
+            project_name=project_name,
+            project_identity=str(project),
+            scan=scan,
+            expected_snapshot_digest=payload.snapshot_digest,
+        )
+    except ValueError as exc:
+        status_code = 409 if "stale" in str(exc).lower() else 422
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+
+
+def _remediation_source(
+    payload: RemediationBriefRequest,
+) -> tuple[Path, str, dict[str, object]]:
     project = _ensure_project(payload.project_path)
     with get_connection() as connection:
         connection.execute("BEGIN")
@@ -464,13 +496,7 @@ def remediation_brief(payload: RemediationBriefRequest) -> dict[str, object]:
     if latest_id != payload.scan_id:
         raise HTTPException(status_code=409, detail="Only the selected project's latest scan can generate a remediation brief.")
     scan = enrich_scan(row_to_scan(row), reviews)
-    try:
-        return build_remediation_brief(
-            project_name=project_name,
-            scan=scan,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return project, project_name, scan
 
 
 @app.get("/api/scans/comparison-options")

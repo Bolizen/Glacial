@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import io
 import json
 import sqlite3
 import tempfile
 import unittest
+import zipfile
 from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
@@ -13,8 +17,9 @@ from fastapi import HTTPException
 from app import database, main
 from app.finding_explainability import build_finding_explainability
 from app.finding_reviews import finding_fingerprint
-from app.remediation_brief import MAX_REMEDIATION_FINDINGS
-from app.schemas import RemediationBriefRequest
+from app.remediation_brief import MAX_REMEDIATION_FINDINGS, build_remediation_snapshot
+from app.remediation_package import PACKAGE_MEMBERS
+from app.schemas import RemediationBriefRequest, RemediationPackageRequest
 
 
 class RemediationBriefTests(unittest.TestCase):
@@ -120,6 +125,20 @@ class RemediationBriefTests(unittest.TestCase):
                 RemediationBriefRequest(project_path=str(self.project_path), scan_id=scan_id)
             )
 
+    def generate_package(
+        self,
+        scan_id: int,
+        snapshot_digest: str,
+    ) -> dict[str, object]:
+        with patch.object(main, "_ensure_project", return_value=self.project_path):
+            return main.remediation_package(
+                RemediationPackageRequest(
+                    project_path=str(self.project_path),
+                    scan_id=scan_id,
+                    snapshot_digest=snapshot_digest,
+                )
+            )
+
     def test_output_is_deterministic_priority_ordered_and_only_unresolved(self) -> None:
         low = self.canonical_finding(path="z/low.txt", severity="low", type="lockfile")
         high = self.canonical_finding(path="a/high.ps1")
@@ -144,6 +163,30 @@ class RemediationBriefTests(unittest.TestCase):
         self.assertLess(first["markdown"].index("a/high.ps1"), first["markdown"].index("z/low.txt"))
         self.assertNotIn("reviewed.ps1", first["markdown"])
         self.assertNotIn("expected.ps1", first["markdown"])
+
+    def test_snapshot_identity_changes_with_selected_project_without_exposing_the_path(self) -> None:
+        scan = {
+            "id": 1,
+            "scan_date": "2026-07-26T00:00:00Z",
+            "findings": [self.canonical_finding()],
+            "scanCompleteness": {"complete": True, "issueCount": 0},
+            "scanMetadataReliable": True,
+        }
+        first = build_remediation_snapshot(
+            project_name="Same display name",
+            project_identity="C:\\workspace\\project-a",
+            generator_version="0.9.0",
+            scan=scan,
+        )
+        second = build_remediation_snapshot(
+            project_name="Same display name",
+            project_identity="C:\\workspace\\project-b",
+            generator_version="0.9.0",
+            scan=scan,
+        )
+
+        self.assertNotEqual(first["snapshotDigest"], second["snapshotDigest"])
+        self.assertNotIn("C:\\workspace", json.dumps(first["brief"]))
 
     def test_canonical_reconstruction_is_used_and_altered_or_legacy_prose_falls_back(self) -> None:
         canonical = self.canonical_finding()
@@ -300,6 +343,142 @@ class RemediationBriefTests(unittest.TestCase):
         self.generate(scan_id)
 
         self.assertEqual(self.database_snapshot(), before)
+
+    def test_package_is_deterministic_exact_ordered_and_checksum_verified(self) -> None:
+        sentinel = self.project_path / "source.txt"
+        sentinel.write_text("PROJECT SOURCE MUST NOT BE COPIED", encoding="utf-8")
+        sentinel_before = sentinel.read_bytes()
+        low = self.canonical_finding(path="z/low.txt", severity="low", type="lockfile")
+        high = self.canonical_finding(path="a/high.ps1")
+        reviewed = self.canonical_finding(path="reviewed.ps1")
+        scan_id = self.insert_scan([low, reviewed, high])
+        with database.get_connection() as connection:
+            connection.execute(
+                "INSERT INTO finding_reviews (project_path, fingerprint, status, note, created_at, updated_at) "
+                "VALUES (?, ?, 'reviewed', '', ?, ?)",
+                (
+                    str(self.project_path),
+                    finding_fingerprint(reviewed),
+                    "2026-07-25T00:00:00Z",
+                    "2026-07-25T00:00:00Z",
+                ),
+            )
+        brief = self.generate(scan_id)
+        before = self.database_snapshot()
+
+        first = self.generate_package(scan_id, str(brief["snapshotDigest"]))
+        second = self.generate_package(scan_id, str(brief["snapshotDigest"]))
+        first_bytes = base64.b64decode(str(first["packageBase64"]), validate=True)
+        second_bytes = base64.b64decode(str(second["packageBase64"]), validate=True)
+
+        self.assertEqual(first_bytes, second_bytes)
+        self.assertEqual(first["sha256"], hashlib.sha256(first_bytes).hexdigest())
+        self.assertEqual(first["mediaType"], "application/zip")
+        self.assertEqual(sentinel.read_bytes(), sentinel_before)
+        self.assertEqual(
+            first["fileName"],
+            f"glacial-agent-remediation-package-scan-{scan_id}.zip",
+        )
+        self.assertEqual(self.database_snapshot(), before)
+        with zipfile.ZipFile(io.BytesIO(first_bytes)) as archive:
+            self.assertEqual(tuple(archive.namelist()), PACKAGE_MEMBERS)
+            self.assertTrue(all(not info.is_dir() for info in archive.infolist()))
+            checksums = archive.read("CHECKSUMS.sha256").decode("ascii").splitlines()
+            self.assertEqual(
+                [line.split("  ", 1)[1] for line in checksums],
+                list(PACKAGE_MEMBERS[:-1]),
+            )
+            for line in checksums:
+                digest, name = line.split("  ", 1)
+                self.assertEqual(digest, hashlib.sha256(archive.read(name)).hexdigest())
+            findings = json.loads(archive.read("findings.json"))
+            manifest = json.loads(archive.read("manifest.json"))
+            agent_task = archive.read("AGENT_TASK.md").decode("utf-8")
+            self.assertEqual(findings["schema_version"], "1.0.0")
+            self.assertEqual([item["affected_path"] for item in findings["findings"]], ["a/high.ps1", "z/low.txt"])
+            self.assertNotIn("reviewed.ps1", json.dumps(findings))
+            self.assertEqual(manifest["scope"]["included_finding_count"], 2)
+            self.assertEqual(
+                [item["name"] for item in manifest["members"]],
+                list(PACKAGE_MEMBERS),
+            )
+            self.assertTrue(agent_task.startswith(str(brief["markdown"]).rstrip()))
+            self.assertIn("Receiving-agent execution contract", agent_task)
+            self.assertNotIn(str(self.project_path), "\n".join(
+                archive.read(name).decode("utf-8")
+                for name in PACKAGE_MEMBERS
+            ))
+            self.assertNotIn(
+                "PROJECT SOURCE MUST NOT BE COPIED",
+                "\n".join(archive.read(name).decode("utf-8") for name in PACKAGE_MEMBERS),
+            )
+
+    def test_package_keeps_hostile_evidence_inert_and_paths_relative(self) -> None:
+        finding = self.canonical_finding(
+            path="src/prompt.md",
+            type="suspicious-text-pattern",
+            pattern="eval(",
+            explanation="A suspicious text pattern was recorded.",
+            evidence={
+                "line": 4,
+                "matchCount": 1,
+                "pattern": "eval(",
+                "excerpt": "<script>run('../escape')</script>\nC:\\Users\\alice\\private.txt",
+                "additionalMatchesOmitted": False,
+            },
+        )
+        finding["explainability"] = build_finding_explainability(finding)
+        scan_id = self.insert_scan([finding])
+        brief = self.generate(scan_id)
+        package = self.generate_package(scan_id, str(brief["snapshotDigest"]))
+
+        with zipfile.ZipFile(io.BytesIO(base64.b64decode(str(package["packageBase64"])))) as archive:
+            findings_text = archive.read("findings.json").decode("utf-8")
+            findings = json.loads(findings_text)
+        self.assertIn("<script>", findings_text)
+        self.assertIn("[REDACTED HOST PATH]", findings_text)
+        self.assertNotIn("C:\\Users\\alice", findings_text)
+        self.assertEqual(findings["findings"][0]["affected_path"], "src/prompt.md")
+
+    def test_package_rejects_zero_incomplete_and_stale_snapshots(self) -> None:
+        empty_id = self.insert_scan([])
+        empty_brief = self.generate(empty_id)
+        with self.assertRaises(HTTPException) as empty_error:
+            self.generate_package(empty_id, str(empty_brief["snapshotDigest"]))
+        self.assertEqual(empty_error.exception.status_code, 422)
+
+        incomplete_id = self.insert_scan(
+            [self.canonical_finding()],
+            date="2026-07-26T12:00:00+00:00",
+            complete=False,
+            issue_count=1,
+        )
+        incomplete_brief = self.generate(incomplete_id)
+        with self.assertRaises(HTTPException) as incomplete_error:
+            self.generate_package(incomplete_id, str(incomplete_brief["snapshotDigest"]))
+        self.assertEqual(incomplete_error.exception.status_code, 422)
+
+        complete_id = self.insert_scan(
+            [self.canonical_finding()],
+            date="2026-07-27T12:00:00+00:00",
+        )
+        complete_brief = self.generate(complete_id)
+        finding = self.canonical_finding()
+        with database.get_connection() as connection:
+            connection.execute(
+                "INSERT INTO finding_reviews (project_path, fingerprint, status, note, created_at, updated_at) "
+                "VALUES (?, ?, 'reviewed', '', ?, ?)",
+                (
+                    str(self.project_path),
+                    finding_fingerprint(finding),
+                    "2026-07-27T13:00:00Z",
+                    "2026-07-27T13:00:00Z",
+                ),
+            )
+        with self.assertRaises(HTTPException) as stale_error:
+            self.generate_package(complete_id, str(complete_brief["snapshotDigest"]))
+        self.assertEqual(stale_error.exception.status_code, 409)
+        self.assertIn("stale", stale_error.exception.detail.lower())
 
     def database_snapshot(self) -> dict[str, list[tuple[object, ...]]]:
         with database.get_connection() as connection:

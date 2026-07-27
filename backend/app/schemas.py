@@ -38,6 +38,10 @@ class RemediationBriefRequest(ProjectPathRequest):
         extra = "forbid"
 
 
+class RemediationPackageRequest(RemediationBriefRequest):
+    snapshot_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class AgentPreviewRequest(ProjectPathRequest):
     project_purpose: str = Field(default="", max_length=4000)
     project_rules: str = Field(default="", max_length=4000)
