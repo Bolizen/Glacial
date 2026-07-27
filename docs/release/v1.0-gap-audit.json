@@ -1,9 +1,9 @@
 {
   "schema_version": "1.0.0",
   "product": "Glacial",
-  "audited_version": "0.9.4",
-  "audited_commit": "4f112580f8ec82e4670a4487ce3c839a4f9fd5d5",
-  "generated_at_utc": "2026-07-27T18:49:00Z",
+  "audited_version": "0.9.5",
+  "audited_commit": "a0349dda4ff34b2ec84f60eead981720f8b7d82e",
+  "generated_at_utc": "2026-07-27T20:39:36Z",
   "overall_verdict": "NOT READY",
   "scope_decision": "Glacial v1 supports only the installed Windows x64 NSIS edition; the retired portable edition does not close any installed lifecycle or release requirement.",
   "classification_changes": [],
@@ -46,7 +46,7 @@
       "area": "Product identity and version integrity",
       "status": "PASS",
       "priority": null,
-      "summary": "Authoritative source versions agree on 0.9.4 and are machine-validated.",
+      "summary": "Authoritative source versions agree on 0.9.5 and are machine-validated.",
       "evidence": [
         "frontend/package.json and package-lock.json",
         "frontend/src-tauri/tauri.conf.json, Cargo.toml, and Cargo.lock",
@@ -116,11 +116,11 @@
       "area": "Product identity and version integrity",
       "status": "PASS",
       "priority": null,
-      "summary": "Documentation identifies 0.9.4 as pre-v1 installed-only scope hardening and does not imply stable or v1 authorization.",
+      "summary": "Documentation identifies 0.9.5 as pre-v1 privacy-boundary hardening and does not imply stable or v1 authorization.",
       "evidence": [
         "README.md Current Status",
-        "RELEASE_NOTES.md 0.9.4 entry",
-        "backend/app/changelog.py 0.9.4 entry",
+        "RELEASE_NOTES.md 0.9.5 entry",
+        "backend/app/changelog.py 0.9.5 entry",
         "docs/release/v1.0-gap-audit.md NOT READY verdict"
       ],
       "gap": "",
@@ -347,19 +347,23 @@
       "area": "Filesystem and project safety",
       "status": "PARTIAL",
       "priority": "P1",
-      "summary": "Major exports and diagnostics are bounded, but no complete cross-surface disclosure inventory exists.",
+      "summary": "The cross-surface privacy boundary is inventoried and enforced, but native installed-WebView readback remains incomplete.",
       "evidence": [
-        "backend/app/finding_evidence.py",
-        "backend/app/remediation_package.py",
-        "frontend/src-tauri/src/backend.rs diagnostics",
-        "backend/tests/test_remediation_brief.py",
-        "backend/tests/test_project_lifecycle.py unavailable registration behavior"
+        "docs/release/data-privacy-boundary.md field-level sink inventory",
+        "backend/app/privacy.py persistence and disclosure controls",
+        "frontend/src/privacy.js legacy report and error controls",
+        "frontend/src-tauri/src/backend.rs bounded diagnostic controls",
+        "scripts/desktop/windows-signing.mjs build/release diagnostic and path controls",
+        "backend/tests/test_privacy_boundary.py hostile persistence/export inspection",
+        "frontend, Rust, and Node hostile disclosure tests",
+        "G048 development Reports computer-use inspection"
       ],
-      "gap": "Reports, logs, SQLite fields, release logs, and future exports have not been audited as one complete sensitive-data surface.",
-      "recommended_remediation": "Create a data-classification inventory and add redaction and host-path tests for every persisted/exported surface.",
+      "gap": "The native installed Tauri WebView and its real installed app-data, SQLite, startup-log, download/clipboard-history, and temporary-output surfaces were not inspected with the hostile fixture.",
+      "recommended_remediation": "Repeat the bounded hostile workflow against an internal installed candidate and search those exact native surfaces without expanding into lifecycle acceptance.",
       "closure_evidence": [
-        "Reviewed cross-surface inventory.",
-        "Hostile fixture inspection of every persisted and exported surface."
+        "Native installed application-state, database, and startup-log readback.",
+        "Installed report, download, clipboard, package, generated-file, and temporary-output canary search.",
+        "Documented safe fields retained across every inspected native sink."
       ],
       "waiver_permitted": false
     },
@@ -677,7 +681,7 @@
         "frontend/src-tauri/src/backend.rs app-local data/log resolution without executable-location inference",
         "NSIS-only Tauri and release configuration"
       ],
-      "gap": "No v0.9.4 installed artifact or clean-machine lifecycle record exists.",
+      "gap": "No v0.9.5 installed artifact or clean-machine lifecycle record exists.",
       "recommended_remediation": "Produce an installed RC after upstream blockers close and execute the installed lifecycle matrix.",
       "closure_evidence": [
         "Exact path inventory.",
@@ -728,18 +732,21 @@
       "area": "Security and privacy posture",
       "status": "PASS",
       "priority": null,
-      "summary": "Current token, dependency, scanner, diagnostic, and remediation paths minimize or redact sensitive values.",
+      "summary": "Current token, persistence, dependency, scanner, diagnostic, report, remediation, generated-file, and release paths minimize or redact sensitive values.",
       "evidence": [
-        "frontend/src-tauri/src/backend.rs token redaction",
-        "backend/app/finding_evidence.py",
+        "frontend/src-tauri/src/backend.rs token and diagnostic redaction",
+        "backend/app/privacy.py central secret, path, control, excerpt, exception, and recursive scan sanitization",
+        "frontend/src/privacy.js disclosure-sink sanitization",
         "backend/app/dependency_trust.py selector sanitization",
-        "backend/app/remediation_brief.py relative paths",
-        "Relevant targeted tests"
+        "backend/app/remediation_brief.py relative paths and bounded evidence",
+        "scripts/desktop/windows-signing.mjs sanitized build/release diagnostics",
+        "Hostile Python, frontend, Rust, and Node targeted tests"
       ],
       "gap": "",
       "recommended_remediation": "",
       "closure_evidence": [
-        "Final log, report, and export inspection."
+        "Repeat hostile secret tests.",
+        "Final installed log, report, and export inspection under V1-FS-006."
       ],
       "waiver_permitted": false
     },
@@ -833,7 +840,7 @@
       "evidence": [
         "docs/release/v1.0-readiness-contract.md permanent V1-SEC-007 gate",
         "docs/release/v1.0-remediation-sequence.md G053 Deep Security Scan and G054 closure handoffs",
-        "G047 explicitly did not run a Deep Security Scan"
+        "G048 explicitly did not run a Deep Security Scan"
       ],
       "gap": "No canonical G053 threat model, repeated discovery, coverage ledger, validation, attack-path/severity analysis, finding write-ups, hardening portfolio, generated report, or G054 remediation/closure evidence exists.",
       "recommended_remediation": "Run G053 without repository edits, then close every reportable finding and material deferred surface through bounded G054 remediation with post-fix validation.",
@@ -851,7 +858,7 @@
       "priority": "P1",
       "summary": "Release preflight and lockfiles are exact, but the npm manifest retains loose production dependency ranges.",
       "evidence": [
-        "G047 starting state: clean main at 422f3bf with local, origin, and direct remote alignment",
+        "G048 starting state: clean main at d4bfe1413f987a7d4f08a1e6adcfd0549bb33b53 with local, origin, and direct remote alignment",
         "Exact npm, Python, and Cargo locks",
         "scripts/desktop/Build-SignedWindowsRelease.mjs clean-source preflight"
       ],
@@ -893,7 +900,7 @@
         "Signed application capture retained as installer evidence",
         "One-artifact manifest, checksum, and release tests"
       ],
-      "gap": "No v0.9.4 or v1 candidate installer inventory or installed-payload readback exists.",
+      "gap": "No v0.9.5 or v1 candidate installer inventory or installed-payload readback exists.",
       "recommended_remediation": "Construct one bounded public-RC installer after upstream blockers close.",
       "closure_evidence": [
         "Candidate installer inventory.",
@@ -966,7 +973,7 @@
       "evidence": [
         "README.md",
         "SECURITY.md",
-        "RELEASE_NOTES.md 0.9.4 entry",
+        "RELEASE_NOTES.md 0.9.5 entry",
         "Readiness document links and disclaimer"
       ],
       "gap": "",
