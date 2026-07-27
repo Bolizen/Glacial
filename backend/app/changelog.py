@@ -2,6 +2,16 @@ from __future__ import annotations
 
 CHANGELOG_ENTRIES = [
     {
+        "version": "0.9.1",
+        "date": "2026-07-27",
+        "title": "v1.0 readiness contract and gap audit",
+        "changes": [
+            "Added a measurable v1.0 readiness contract with permanent requirement identifiers across product, scanning, filesystem, data, remediation, desktop, security, release, documentation, and usability boundaries.",
+            "Audited current evidence into matching human-readable and machine-readable gap snapshots without treating unknowns, accepted limitations, or unrun release acceptance as passes.",
+            "Published a bounded G045-and-later remediation sequence for the remaining release blockers and explicit owner decisions; this planning milestone does not claim v1.0 readiness.",
+        ],
+    },
+    {
         "version": "0.9.0",
         "date": "2026-07-26",
         "title": "Agent Remediation Package",

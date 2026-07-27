@@ -13,9 +13,18 @@ AI coding agents are more useful when generated work is easy to review before ex
 
 Glacial is an early stage local-first project focused on project scanning, safety review, and safe AGENTS.md generation.
 
+### Maintainer v1.0 readiness artifacts
+
+- [v1.0 readiness contract](docs/release/v1.0-readiness-contract.md)
+- [current v1.0 gap audit](docs/release/v1.0-gap-audit.md)
+- [machine-readable audit snapshot](docs/release/v1.0-gap-audit.json)
+- [recommended remediation sequence](docs/release/v1.0-remediation-sequence.md)
+
+These are planning and release-governance artifacts. They are not proof that Glacial is secure, complete, or ready for v1.0 release.
+
 ## Licensing
 
-Glacial v0.9.0 is licensed under the Functional Source License, Version 1.1, ALv2 Future License (`FSL-1.1-ALv2`). It is Fair Source and source-available, but it is not presently OSI open source.
+Glacial v0.9.1 is licensed under the Functional Source License, Version 1.1, ALv2 Future License (`FSL-1.1-ALv2`). It is Fair Source and source-available, but it is not presently OSI open source.
 
 Internal use, study, modification, and redistribution are permitted subject to the license. Offering Glacial, or substantially similar functionality, to others as a competing commercial product or service is not permitted under the public license. Separate commercial licensing may be available from the copyright holder.
 

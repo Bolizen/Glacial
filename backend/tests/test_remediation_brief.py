@@ -175,13 +175,13 @@ class RemediationBriefTests(unittest.TestCase):
         first = build_remediation_snapshot(
             project_name="Same display name",
             project_identity="C:\\workspace\\project-a",
-            generator_version="0.9.0",
+            generator_version="0.9.1",
             scan=scan,
         )
         second = build_remediation_snapshot(
             project_name="Same display name",
             project_identity="C:\\workspace\\project-b",
-            generator_version="0.9.0",
+            generator_version="0.9.1",
             scan=scan,
         )
 

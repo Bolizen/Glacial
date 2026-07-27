@@ -1,0 +1,1156 @@
+{
+  "schema_version": "1.0.0",
+  "product": "Glacial",
+  "audited_version": "0.9.1",
+  "audited_commit": "4f100a22f634bc2e2817f669b518d6f6224aa5be",
+  "generated_at_utc": "2026-07-27T04:24:42Z",
+  "overall_verdict": "NOT READY",
+  "status_counts": {
+    "PASS": 30,
+    "PARTIAL": 21,
+    "FAIL": 6,
+    "UNKNOWN": 3,
+    "NOT_APPLICABLE": 0
+  },
+  "priority_counts": {
+    "P0": 0,
+    "P1": 27,
+    "P2": 3,
+    "P3": 0
+  },
+  "requirements": [
+    {
+      "id": "V1-VER-001",
+      "area": "Product identity and version integrity",
+      "status": "PASS",
+      "priority": null,
+      "summary": "Current user-facing and release-critical identity is Glacial by Icefields.",
+      "evidence": [
+        "README.md",
+        "frontend/package.json",
+        "frontend/src-tauri/Cargo.toml",
+        "frontend/src-tauri/tauri.conf.json",
+        "scripts/desktop/Build-SignedWindowsRelease.mjs"
+      ],
+      "gap": "",
+      "recommended_remediation": "",
+      "closure_evidence": [
+        "Repeat source and candidate artifact identity scans."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-VER-002",
+      "area": "Product identity and version integrity",
+      "status": "PASS",
+      "priority": null,
+      "summary": "Authoritative source versions agree on 0.9.1 and are machine-validated.",
+      "evidence": [
+        "frontend/package.json and package-lock.json",
+        "frontend/src-tauri/tauri.conf.json, Cargo.toml, and Cargo.lock",
+        "backend/app/version.py and changelog.py",
+        "scripts/desktop/windows-signing.test.mjs targeted version check"
+      ],
+      "gap": "",
+      "recommended_remediation": "",
+      "closure_evidence": [
+        "Passing version-source validation on the release commit."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-VER-003",
+      "area": "Product identity and version integrity",
+      "status": "PASS",
+      "priority": null,
+      "summary": "Release metadata and publication source checks fail closed on mismatch.",
+      "evidence": [
+        "scripts/desktop/Build-SignedWindowsRelease.mjs verifyReleaseSource and manifest assembly",
+        "scripts/desktop/windows-signing.test.mjs source revalidation and atomic publication tests"
+      ],
+      "gap": "",
+      "recommended_remediation": "",
+      "closure_evidence": [
+        "Candidate manifest readback tied to the release commit."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-VER-004",
+      "area": "Product identity and version integrity",
+      "status": "PARTIAL",
+      "priority": "P1",
+      "summary": "Release profiles are honest in scripts, but complete visible runtime profile identity is absent.",
+      "evidence": [
+        "docs/windows-release-signing.md",
+        "scripts/desktop/Build-SignedWindowsRelease.mjs profile and trust fields",
+        "frontend/src-tauri/src/backend.rs development data separation"
+      ],
+      "gap": "The running UI does not expose a complete build profile/version/trust identity, and no stable candidate exists for end-to-end inspection.",
+      "recommended_remediation": "Add a bounded About or diagnostic identity and verify every supported profile.",
+      "closure_evidence": [
+        "Runtime and generated metadata readback for development, signed preview, public RC, and stable candidate."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-VER-005",
+      "area": "Product identity and version integrity",
+      "status": "PASS",
+      "priority": null,
+      "summary": "No obsolete CodexForge identity is present in current user-facing or release-critical files.",
+      "evidence": [
+        "Case-insensitive repository search on 2026-07-27 returned no CodexForge matches."
+      ],
+      "gap": "",
+      "recommended_remediation": "",
+      "closure_evidence": [
+        "Repeat source and artifact string scans for the final candidate."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-VER-006",
+      "area": "Product identity and version integrity",
+      "status": "PASS",
+      "priority": null,
+      "summary": "Documentation identifies 0.9.1 as pre-release governance work and does not imply v1 authorization.",
+      "evidence": [
+        "README.md Current Status",
+        "RELEASE_NOTES.md 0.9.1 entry",
+        "backend/app/changelog.py 0.9.1 entry",
+        "docs/release/v1.0-gap-audit.md NOT READY verdict"
+      ],
+      "gap": "",
+      "recommended_remediation": "",
+      "closure_evidence": [
+        "Final release notes change lifecycle language only after authorization."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-SCAN-001",
+      "area": "Core scanning correctness",
+      "status": "PASS",
+      "priority": null,
+      "summary": "Project registration and selection are workspace-confined and unavailable registrations remain explicit.",
+      "evidence": [
+        "backend/app/safety.py",
+        "backend/app/main.py project routes",
+        "backend/tests/test_safety.py",
+        "backend/tests/test_project_lifecycle.py",
+        "frontend/src/projectRequests.test.js"
+      ],
+      "gap": "",
+      "recommended_remediation": "",
+      "closure_evidence": [
+        "Current targeted path and project-lifecycle tests."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-SCAN-002",
+      "area": "Core scanning correctness",
+      "status": "PASS",
+      "priority": null,
+      "summary": "Scans are append-only project-bound evidence and later judgement is stored separately.",
+      "evidence": [
+        "backend/app/database.py scans and review tables",
+        "backend/app/main.py scan creation/history routes",
+        "backend/app/finding_reviews.py",
+        "backend/app/review_checkpoints.py"
+      ],
+      "gap": "",
+      "recommended_remediation": "",
+      "closure_evidence": [
+        "Before/after database snapshots during final acceptance."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-SCAN-003",
+      "area": "Core scanning correctness",
+      "status": "PASS",
+      "priority": null,
+      "summary": "Canonical finding identity, severity, explainability, and ordering are scanner-owned and deterministic.",
+      "evidence": [
+        "backend/app/scanner.py",
+        "backend/app/finding_explainability.py",
+        "backend/app/finding_reviews.py",
+        "backend/tests/test_finding_explainability.py",
+        "backend/tests/test_finding_reviews.py"
+      ],
+      "gap": "",
+      "recommended_remediation": "",
+      "closure_evidence": [
+        "Current detector and normalizer test selection."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-SCAN-004",
+      "area": "Core scanning correctness",
+      "status": "PASS",
+      "priority": null,
+      "summary": "Review, expected, reopen, and unresolved transitions are project-scoped and separate from scan evidence.",
+      "evidence": [
+        "backend/app/finding_reviews.py",
+        "backend/app/main.py finding-review routes",
+        "backend/tests/test_finding_reviews.py",
+        "frontend/src/findingReviews.test.js"
+      ],
+      "gap": "",
+      "recommended_remediation": "",
+      "closure_evidence": [
+        "Current backend and focused UI review tests."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-SCAN-005",
+      "area": "Core scanning correctness",
+      "status": "PASS",
+      "priority": null,
+      "summary": "Coverage is conservative, bounded, and never presented as proof of project safety.",
+      "evidence": [
+        "backend/app/scanner.py coverage and resource ceilings",
+        "backend/app/database.py legacy unknown handling",
+        "backend/tests/test_scanner.py",
+        "backend/tests/test_scan_completeness.py",
+        "SECURITY.md"
+      ],
+      "gap": "",
+      "recommended_remediation": "",
+      "closure_evidence": [
+        "Current targeted scanner and coverage tests."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-SCAN-006",
+      "area": "Core scanning correctness",
+      "status": "PARTIAL",
+      "priority": "P1",
+      "summary": "Baselines and profiles are scoped and sanitized, but complete persistence-failure coverage is missing.",
+      "evidence": [
+        "backend/app/trusted_dependency_baseline.py",
+        "backend/app/trusted_scan_baseline.py",
+        "backend/app/main.py Trust Profile persistence",
+        "backend/tests/test_trusted_dependency_baseline.py",
+        "backend/tests/test_project_lifecycle.py"
+      ],
+      "gap": "No complete fault-injection matrix proves interruption cannot leave all related scan, baseline, profile, and history state contradictory.",
+      "recommended_remediation": "Inventory mutations and add rollback tests for scan persistence and baseline/profile updates.",
+      "closure_evidence": [
+        "Passing fault-injection tests.",
+        "Before/after database snapshots."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-FS-001",
+      "area": "Filesystem and project safety",
+      "status": "PASS",
+      "priority": null,
+      "summary": "Project read and write paths reject traversal, injection, malformed roots, and canonical escapes.",
+      "evidence": [
+        "backend/app/safety.py",
+        "backend/tests/test_safety.py",
+        "SECURITY.md workspace-root boundary"
+      ],
+      "gap": "",
+      "recommended_remediation": "",
+      "closure_evidence": [
+        "Current Windows containment tests."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-FS-002",
+      "area": "Filesystem and project safety",
+      "status": "PASS",
+      "priority": null,
+      "summary": "Linked, reparse, and unsafe hardlinked inputs are rejected for scanning and writing.",
+      "evidence": [
+        "backend/app/safety.py",
+        "backend/app/scanner.py",
+        "backend/app/agents_write.py",
+        "backend/tests/test_safety.py",
+        "backend/tests/test_scanner.py",
+        "backend/tests/test_agents.py"
+      ],
+      "gap": "",
+      "recommended_remediation": "",
+      "closure_evidence": [
+        "Deterministic tests and practical candidate-host link integration."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-FS-003",
+      "area": "Filesystem and project safety",
+      "status": "PASS",
+      "priority": null,
+      "summary": "Selected-project analysis uses filesystem APIs and does not execute project content.",
+      "evidence": [
+        "backend/app/scanner.py source audit",
+        "Repository process-spawn inventory",
+        "README.md Safety Model",
+        "SECURITY.md hostile-repository policy"
+      ],
+      "gap": "",
+      "recommended_remediation": "",
+      "closure_evidence": [
+        "Repeat process-spawn inventory and hostile fixture scan."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-FS-004",
+      "area": "Filesystem and project safety",
+      "status": "PASS",
+      "priority": null,
+      "summary": "The only project-content write is confirmed root AGENTS.md creation or replacement.",
+      "evidence": [
+        "backend/app/agents_write.py",
+        "backend/app/agents.py",
+        "backend/tests/test_agents.py",
+        "AGENTS.md Glacial Golden Rule"
+      ],
+      "gap": "",
+      "recommended_remediation": "",
+      "closure_evidence": [
+        "Current writer tests and desktop confirmation acceptance."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-FS-005",
+      "area": "Filesystem and project safety",
+      "status": "PASS",
+      "priority": null,
+      "summary": "AGENTS.md publication is atomic and cleans temporary files on supported failures.",
+      "evidence": [
+        "backend/app/agents_write.py",
+        "backend/tests/test_agents.py collision, ENOSPC, fsync, replace, and cleanup tests"
+      ],
+      "gap": "",
+      "recommended_remediation": "",
+      "closure_evidence": [
+        "Current writer fault tests."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-FS-006",
+      "area": "Filesystem and project safety",
+      "status": "PARTIAL",
+      "priority": "P1",
+      "summary": "Major exports and diagnostics are bounded, but no complete cross-surface disclosure inventory exists.",
+      "evidence": [
+        "backend/app/finding_evidence.py",
+        "backend/app/remediation_package.py",
+        "frontend/src-tauri/src/backend.rs diagnostics",
+        "backend/tests/test_remediation_brief.py",
+        "backend/tests/test_project_lifecycle.py unavailable registration behavior"
+      ],
+      "gap": "Reports, logs, SQLite fields, release logs, and future exports have not been audited as one complete sensitive-data surface.",
+      "recommended_remediation": "Create a data-classification inventory and add redaction and host-path tests for every persisted/exported surface.",
+      "closure_evidence": [
+        "Reviewed cross-surface inventory.",
+        "Hostile fixture inspection of every persisted and exported surface."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-DATA-001",
+      "area": "Data integrity and state lifecycle",
+      "status": "PARTIAL",
+      "priority": "P1",
+      "summary": "Transactions and atomic publications exist, but the complete mutation set lacks rollback evidence.",
+      "evidence": [
+        "backend/app/database.py connection contexts",
+        "Explicit BEGIN transactions in backend/app/main.py and review/baseline modules",
+        "Atomic writers and release publication"
+      ],
+      "gap": "Transaction boundaries are not centrally inventoried and rollback tests do not cover every multi-record action.",
+      "recommended_remediation": "Document every mutation transaction and add one focused rollback test per multi-record action.",
+      "closure_evidence": [
+        "Mutation inventory.",
+        "Passing rollback and fault tests."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-DATA-002",
+      "area": "Data integrity and state lifecycle",
+      "status": "PARTIAL",
+      "priority": "P1",
+      "summary": "Component cleanup exists, but forced interruption and recovery have not been accepted.",
+      "evidence": [
+        "SQLite transactional persistence",
+        "backend/tests/test_agents.py failure cleanup",
+        "frontend/src-tauri/src/backend.rs startup cleanup"
+      ],
+      "gap": "No controlled process or power interruption record proves conservative recovery and database integrity for installed and portable editions.",
+      "recommended_remediation": "Exercise controlled termination at startup and write boundaries against disposable state.",
+      "closure_evidence": [
+        "SQLite integrity checks.",
+        "Conservative recovery and readback record."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-DATA-003",
+      "area": "Data integrity and state lifecycle",
+      "status": "PASS",
+      "priority": null,
+      "summary": "Critical asynchronous and preview actions reject stale project, scan, review, and duplicate state.",
+      "evidence": [
+        "frontend/src/projectRequests.js and tests",
+        "frontend/src/main.jsx AbortController and request generations",
+        "backend remediation snapshot digest",
+        "Baseline and checkpoint stale transaction tests"
+      ],
+      "gap": "",
+      "recommended_remediation": "",
+      "closure_evidence": [
+        "Current targeted stale and duplicate tests."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-DATA-004",
+      "area": "Data integrity and state lifecycle",
+      "status": "PARTIAL",
+      "priority": "P1",
+      "summary": "Some legacy state is conservative, but there is no complete versioned migration policy.",
+      "evidence": [
+        "backend/app/database.py additive column migration",
+        "Legacy scan and Trust Profile normalization",
+        "Schema-version checks in frontend and baseline/checkpoint modules"
+      ],
+      "gap": "No explicit database schema version, supported-upgrade matrix, predecessor fixtures, backup process, or downgrade policy exists.",
+      "recommended_remediation": "Add versioned migrations, compatibility policy, upgrade fixtures, and backup/recovery instructions.",
+      "closure_evidence": [
+        "Upgrade/readback tests from every supported predecessor.",
+        "Future-schema rejection tests."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-DATA-005",
+      "area": "Data integrity and state lifecycle",
+      "status": "FAIL",
+      "priority": "P1",
+      "summary": "Application-state retention, reset, and uninstall behavior is not defined or accepted.",
+      "evidence": [
+        "frontend/src-tauri/src/backend.rs app-local data and log path source",
+        "README.md development database note"
+      ],
+      "gap": "Installed and portable state locations, retention, reset, backup, uninstall preservation/removal, and cleanup are undocumented and untested.",
+      "recommended_remediation": "Define and implement exact lifecycle policy for every state and log family.",
+      "closure_evidence": [
+        "User documentation.",
+        "Installed and portable reset/uninstall path inventory."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-DATA-006",
+      "area": "Data integrity and state lifecycle",
+      "status": "PASS",
+      "priority": null,
+      "summary": "Review, baseline, comparison, checkpoint, and export actions do not rewrite scan evidence.",
+      "evidence": [
+        "Separate SQLite tables in backend/app/database.py",
+        "backend/tests/test_remediation_brief.py no-mutation assertions",
+        "backend/tests/test_project_lifecycle.py project-file preservation"
+      ],
+      "gap": "",
+      "recommended_remediation": "",
+      "closure_evidence": [
+        "Before/after database snapshot in final acceptance."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-AGENT-001",
+      "area": "Agent remediation outputs",
+      "status": "PASS",
+      "priority": null,
+      "summary": "The Brief is snapshot-bound, unresolved-only, ordered, and shared across visible and standalone Markdown.",
+      "evidence": [
+        "backend/app/remediation_brief.py",
+        "backend/app/main.py remediation source transaction",
+        "backend/tests/test_remediation_brief.py",
+        "G043 desktop acceptance at audited commit"
+      ],
+      "gap": "",
+      "recommended_remediation": "",
+      "closure_evidence": [
+        "Repeat focused tests and candidate desktop comparison."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-AGENT-002",
+      "area": "Agent remediation outputs",
+      "status": "PASS",
+      "priority": null,
+      "summary": "The Package uses the exact preview snapshot and rejects every material stale-state dimension.",
+      "evidence": [
+        "backend/app/remediation_brief.py snapshot source",
+        "backend/app/remediation_package.py expected digest check",
+        "backend/tests/test_remediation_brief.py stale tests",
+        "frontend/src/App.integration.test.js stale and interrupted package tests"
+      ],
+      "gap": "",
+      "recommended_remediation": "",
+      "closure_evidence": [
+        "Current stale tests and project/review invalidation acceptance."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-AGENT-003",
+      "area": "Agent remediation outputs",
+      "status": "PARTIAL",
+      "priority": "P2",
+      "summary": "The 100-finding cap and omissions are explicit, but v1 acceptance is undecided.",
+      "evidence": [
+        "backend/app/remediation_brief.py MAX_INCLUDED_FINDINGS",
+        "Brief and package included/unresolved/omitted metadata",
+        "G043 documentation and tests"
+      ],
+      "gap": "No owner decision accepts or changes the cap for v1.",
+      "recommended_remediation": "Record acceptance with rationale or change the bounded design.",
+      "closure_evidence": [
+        "Committed owner decision.",
+        "Cap-boundary tests."
+      ],
+      "waiver_permitted": true
+    },
+    {
+      "id": "V1-AGENT-004",
+      "area": "Agent remediation outputs",
+      "status": "PASS",
+      "priority": null,
+      "summary": "Package bytes, inventory, manifest, and checksums are deterministic within the supported runtime/version.",
+      "evidence": [
+        "backend/app/remediation_package.py fixed member and ZIP metadata",
+        "backend/tests/test_remediation_brief.py deterministic/checksum tests",
+        "G043 equal download SHA-256 values"
+      ],
+      "gap": "",
+      "recommended_remediation": "",
+      "closure_evidence": [
+        "Two-download and checksum acceptance on the final candidate."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-AGENT-005",
+      "area": "Agent remediation outputs",
+      "status": "PASS",
+      "priority": null,
+      "summary": "Brief and Package outputs remain inert and exclude source files, executables, links, absolute paths, and autonomous action.",
+      "evidence": [
+        "backend/app/remediation_package.py fixed allowlist and safety manifest",
+        "backend/tests/test_remediation_brief.py hostile/sentinel tests",
+        "README.md remediation disclaimers",
+        "G043 extracted archive inspection"
+      ],
+      "gap": "",
+      "recommended_remediation": "",
+      "closure_evidence": [
+        "Hostile archive and before/after state tests."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-AGENT-006",
+      "area": "Agent remediation outputs",
+      "status": "PARTIAL",
+      "priority": "P2",
+      "summary": "Formats are versioned, but long-term compatibility and retention policy is absent.",
+      "evidence": [
+        "REMEDIATION_BRIEF_SCHEMA_VERSION",
+        "PACKAGE_FORMAT_VERSION and FINDINGS_SCHEMA_VERSION",
+        "Request schema validation"
+      ],
+      "gap": "Compatibility duration, future-reader behavior, retention, and deprecation are not published.",
+      "recommended_remediation": "Approve a small remediation-format compatibility policy.",
+      "closure_evidence": [
+        "Published policy.",
+        "Unsupported-future-format tests."
+      ],
+      "waiver_permitted": true
+    },
+    {
+      "id": "V1-DESKTOP-001",
+      "area": "Desktop application lifecycle",
+      "status": "PASS",
+      "priority": null,
+      "summary": "Normal desktop startup owns one authenticated loopback backend with a fresh token and fail-closed health.",
+      "evidence": [
+        "frontend/src-tauri/src/backend.rs BackendSupervisor",
+        "frontend/src-tauri/src/main.rs",
+        "backend/app/desktop_entry.py",
+        "backend/tests/test_desktop_runtime.py",
+        "G043 real Tauri launch"
+      ],
+      "gap": "",
+      "recommended_remediation": "",
+      "closure_evidence": [
+        "Current tests and final artifact startup readback."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-DESKTOP-002",
+      "area": "Desktop application lifecycle",
+      "status": "PARTIAL",
+      "priority": "P1",
+      "summary": "Owned-backend termination and console suppression exist, but artifact lifecycle evidence is incomplete.",
+      "evidence": [
+        "frontend/src-tauri/src/windows_job.rs kill-on-close",
+        "frontend/src-tauri/src/backend.rs bounded kill/wait",
+        "frontend/src-tauri/src/main.rs windows_subsystem",
+        "G043 development shutdown observation"
+      ],
+      "gap": "Installed and portable graceful/forced exit, orphan, and console-flash observations are absent.",
+      "recommended_remediation": "Run process-tree and visual lifecycle acceptance on both artifacts.",
+      "closure_evidence": [
+        "No orphan after graceful, forced, parent-crash, and startup-failure cases."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-DESKTOP-003",
+      "area": "Desktop application lifecycle",
+      "status": "PARTIAL",
+      "priority": "P1",
+      "summary": "Single-instance controls exist but repeated-launch artifact acceptance is absent.",
+      "evidence": [
+        "frontend/src-tauri/src/main.rs tauri_plugin_single_instance",
+        "frontend/src-tauri/src/backend.rs DuplicateSpawn guard"
+      ],
+      "gap": "No installed or portable two-launch observation proves one backend and safe shared state.",
+      "recommended_remediation": "Add a bounded repeated-launch acceptance case.",
+      "closure_evidence": [
+        "Window, process, and database observation for both editions."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-DESKTOP-004",
+      "area": "Desktop application lifecycle",
+      "status": "PARTIAL",
+      "priority": "P1",
+      "summary": "Startup failures are handled in source, but real candidate failure and recovery evidence is missing.",
+      "evidence": [
+        "frontend/src-tauri/src/backend.rs StartupError paths and bounded diagnostics",
+        "frontend/src-tauri/src/main.rs startup-error URL",
+        "frontend/public/startup-error.js inert textContent rendering"
+      ],
+      "gap": "Controlled candidate failure paths and resource recovery have not been accepted.",
+      "recommended_remediation": "Exercise safe synthetic startup failures without weakening Windows controls.",
+      "closure_evidence": [
+        "Error screenshots.",
+        "Redacted log readback.",
+        "Clean process and resource state."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-DESKTOP-005",
+      "area": "Desktop application lifecycle",
+      "status": "UNKNOWN",
+      "priority": "P1",
+      "summary": "Installed and portable first-run, state, upgrade, reset, and uninstall behavior lacks current evidence.",
+      "evidence": [
+        "frontend/src-tauri/src/backend.rs app-local data/log resolution",
+        "Installer and portable build scripts only"
+      ],
+      "gap": "No v0.9.1 installed or portable artifact or clean-machine lifecycle record exists.",
+      "recommended_remediation": "Produce an RC after upstream blockers close and execute the edition lifecycle matrix.",
+      "closure_evidence": [
+        "Exact path inventory.",
+        "Dated clean-machine first-run, upgrade, reset, and uninstall acceptance."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-DESKTOP-006",
+      "area": "Desktop application lifecycle",
+      "status": "PARTIAL",
+      "priority": "P1",
+      "summary": "Remediation modal usability is evidenced, but whole-product minimum-window and keyboard coverage is incomplete.",
+      "evidence": [
+        "frontend/src-tauri/tauri.conf.json 960x640 minimum",
+        "frontend/src/App.integration.test.js modal behavior",
+        "G043 normal and 760x760 remediation modal observation"
+      ],
+      "gap": "Primary workflows, long/error states, keyboard order, and display scaling lack complete evidence.",
+      "recommended_remediation": "Execute a concise screen and workflow accessibility checklist.",
+      "closure_evidence": [
+        "Dated screenshots.",
+        "Keyboard and focus observations for every primary screen."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-SEC-001",
+      "area": "Security and privacy posture",
+      "status": "PASS",
+      "priority": null,
+      "summary": "Current Glacial behavior is local-first, non-elevated, loopback-only, and has no telemetry, cloud, or updater path.",
+      "evidence": [
+        "README.md Safety Model",
+        "SECURITY.md supported deployment and privilege model",
+        "frontend/src-tauri/tauri.conf.json CSP and disabled updater artifacts",
+        "backend/app/desktop_entry.py loopback binding"
+      ],
+      "gap": "",
+      "recommended_remediation": "",
+      "closure_evidence": [
+        "Runtime network observation on the final candidate."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-SEC-002",
+      "area": "Security and privacy posture",
+      "status": "PASS",
+      "priority": null,
+      "summary": "Current token, dependency, scanner, diagnostic, and remediation paths minimize or redact sensitive values.",
+      "evidence": [
+        "frontend/src-tauri/src/backend.rs token redaction",
+        "backend/app/finding_evidence.py",
+        "backend/app/dependency_trust.py selector sanitization",
+        "backend/app/remediation_brief.py relative paths",
+        "Relevant targeted tests"
+      ],
+      "gap": "",
+      "recommended_remediation": "",
+      "closure_evidence": [
+        "Final log, report, and export inspection."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-SEC-003",
+      "area": "Security and privacy posture",
+      "status": "PASS",
+      "priority": null,
+      "summary": "Untrusted repository and finding text remains inert and is never executed.",
+      "evidence": [
+        "Scanner data-only source audit",
+        "Tauri CSP",
+        "startup-error textContent rendering",
+        "Markdown/JSON hostile-input tests",
+        "No selected-project process-spawn path"
+      ],
+      "gap": "",
+      "recommended_remediation": "",
+      "closure_evidence": [
+        "Repeat process-spawn and renderer checks."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-SEC-004",
+      "area": "Security and privacy posture",
+      "status": "PARTIAL",
+      "priority": "P2",
+      "summary": "The sole open Dependabot alert is statically non-reachable in shipped Glacial, but remains open and undecided.",
+      "evidence": [
+        "GitHub REST 2026-07-27: Dependabot alert #2, GHSA-r28c-9q8g-f849, postcss 8.5.16, high",
+        "frontend/package-lock.json Vite to PostCSS dependency edge",
+        "No repository PostCSS API or selected-project CSS path",
+        "Tauri ships frontend/dist and release inventory excludes node_modules",
+        "Codex Security triage verdict not_actionable with high confidence"
+      ],
+      "gap": "No owner, expiry, fixed lockfile, or waiver exists; final artifact absence remains to be confirmed.",
+      "recommended_remediation": "Prefer a narrow reviewed update, or record a time-bounded owner waiver and re-triage on build-path changes.",
+      "closure_evidence": [
+        "Closed alert or committed waiver.",
+        "Final artifact inventory proving PostCSS is not shipped."
+      ],
+      "waiver_permitted": true
+    },
+    {
+      "id": "V1-SEC-005",
+      "area": "Security and privacy posture",
+      "status": "PARTIAL",
+      "priority": "P1",
+      "summary": "Provenance, signing, timestamps, and hashes are designed fail-closed, but no public candidate evidence exists.",
+      "evidence": [
+        "scripts/desktop/Build-SignedWindowsRelease.mjs",
+        "scripts/desktop/windows-signing.mjs",
+        "scripts/desktop/windows-signing.test.mjs",
+        "docs/windows-release-signing.md"
+      ],
+      "gap": "No public signer, signed candidate, timestamps, manifest, hashes, or independent publication evidence exists.",
+      "recommended_remediation": "Close through RC construction and signing verification.",
+      "closure_evidence": [
+        "Signed candidate verification report.",
+        "Independent hash and signer references."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-SEC-006",
+      "area": "Security and privacy posture",
+      "status": "FAIL",
+      "priority": "P1",
+      "summary": "Security claims are bounded, but no private vulnerability-reporting workflow exists.",
+      "evidence": [
+        "SECURITY.md states no private reporting address or confirmed private advisory workflow is documented."
+      ],
+      "gap": "Coordinated private reporting and response ownership are absent.",
+      "recommended_remediation": "Configure and publish a private reporting channel, acknowledgement, ownership, and response process.",
+      "closure_evidence": [
+        "Live private-reporting verification.",
+        "Committed response policy."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-REL-001",
+      "area": "Release engineering and supply-chain integrity",
+      "status": "PARTIAL",
+      "priority": "P1",
+      "summary": "Release preflight and lockfiles are exact, but the npm manifest retains loose production dependency ranges.",
+      "evidence": [
+        "G044 starting state: clean main at 4f100a2 with local, origin, and remote alignment",
+        "Exact npm, Python, and Cargo locks",
+        "scripts/desktop/Build-SignedWindowsRelease.mjs clean-source preflight"
+      ],
+      "gap": "frontend/package.json uses ^ ranges for four production dependency declarations, contrary to the repository dependency-security rule, although npm ci consumes the exact lockfile.",
+      "recommended_remediation": "Decide and apply exact reviewed manifest versions without unrelated upgrades, then review lockfile parity and rerun the clean preflight.",
+      "closure_evidence": [
+        "Exact manifest declarations.",
+        "Reviewed lockfile parity.",
+        "Captured fail-closed preflight on the final candidate commit."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-REL-002",
+      "area": "Release engineering and supply-chain integrity",
+      "status": "PASS",
+      "priority": null,
+      "summary": "Release scripts constrain paths, credentials, tools, outputs, failures, and publication.",
+      "evidence": [
+        "scripts/desktop/Build-SignedWindowsRelease.mjs",
+        "scripts/desktop/windows-signing.mjs",
+        "scripts/desktop/windows-signing.test.mjs hostile path, environment, reparse, failure, and publication tests"
+      ],
+      "gap": "",
+      "recommended_remediation": "",
+      "closure_evidence": [
+        "Current script tests and candidate execution log."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-REL-003",
+      "area": "Release engineering and supply-chain integrity",
+      "status": "PARTIAL",
+      "priority": "P1",
+      "summary": "Installer and portable construction is implemented, but no current candidate artifacts prove it.",
+      "evidence": [
+        "NSIS and portable scripts",
+        "Identical application capture requirement",
+        "Inventory exclusion and portable re-extraction tests"
+      ],
+      "gap": "No v0.9.1 or v1 candidate installer/portable inventory exists.",
+      "recommended_remediation": "Construct one bounded public-RC candidate after upstream blockers close.",
+      "closure_evidence": [
+        "Candidate artifact inventory.",
+        "Identical application payload and hash evidence."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-REL-004",
+      "area": "Release engineering and supply-chain integrity",
+      "status": "FAIL",
+      "priority": "P1",
+      "summary": "The public-trust gate exists, but no publicly trusted signer is configured.",
+      "evidence": [
+        "docs/windows-release-signing.md states the existing certificate is self-signed",
+        "Public-RC script rejects non-public trust before build"
+      ],
+      "gap": "No approved public signer can produce a passing public v1 candidate.",
+      "recommended_remediation": "Obtain an approved public signing service or certificate without weakening the gate.",
+      "closure_evidence": [
+        "Public-chain preflight.",
+        "Per-PE Authenticode and RFC 3161 verification."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-REL-005",
+      "area": "Release engineering and supply-chain integrity",
+      "status": "PARTIAL",
+      "priority": "P1",
+      "summary": "Manifest and checksum generation is strong, but there is no candidate metadata to verify.",
+      "evidence": [
+        "Release manifest and SHA256SUMS generation",
+        "Post-publication hash verification",
+        "Source revalidation tests",
+        "Traceable-build metadata wording"
+      ],
+      "gap": "No actual candidate metadata or independent publication channel exists.",
+      "recommended_remediation": "Generate and independently verify RC metadata after artifact construction.",
+      "closure_evidence": [
+        "Cross-check of names, sizes, hashes, commit, version, profile, signer, and inventory."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-REL-006",
+      "area": "Release engineering and supply-chain integrity",
+      "status": "FAIL",
+      "priority": "P1",
+      "summary": "The complete stable release, lifecycle acceptance, and withdrawal procedure is absent.",
+      "evidence": [
+        "Partial release notes and signing verification guidance"
+      ],
+      "gap": "No complete clean-machine install/portable/upgrade/uninstall acceptance, GitHub Release contents procedure, stable authorization checklist, or rollback/withdrawal procedure exists.",
+      "recommended_remediation": "Define the release playbook and execute it against the final RC.",
+      "closure_evidence": [
+        "Dated lifecycle acceptance.",
+        "Rollback drill.",
+        "Final GitHub Release contents plan.",
+        "Owner authorization."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-DOC-001",
+      "area": "Documentation, legal, and support readiness",
+      "status": "PASS",
+      "priority": null,
+      "summary": "Current top-level documentation accurately describes early-stage, local-first, non-autonomous behavior and scan limits.",
+      "evidence": [
+        "README.md",
+        "SECURITY.md",
+        "RELEASE_NOTES.md 0.9.1 entry",
+        "Readiness document links and disclaimer"
+      ],
+      "gap": "",
+      "recommended_remediation": "",
+      "closure_evidence": [
+        "Final documentation-to-product review."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-DOC-002",
+      "area": "Documentation, legal, and support readiness",
+      "status": "FAIL",
+      "priority": "P1",
+      "summary": "Only developer setup exists; stable user installation and troubleshooting documentation is absent.",
+      "evidence": [
+        "README.md developer clone, Python, npm, Tauri setup",
+        "README.md manual test notes"
+      ],
+      "gap": "No installer/portable first-run, normal update, reset/uninstall, or user troubleshooting instructions independent of developer tooling.",
+      "recommended_remediation": "Write task-oriented stable user documentation and validate it on clean machines.",
+      "closure_evidence": [
+        "Clean-reader review.",
+        "Clean-machine completion of every instruction."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-DOC-003",
+      "area": "Documentation, legal, and support readiness",
+      "status": "PARTIAL",
+      "priority": "P1",
+      "summary": "Major scan and remediation concepts are documented, but no complete interpretation guide exists.",
+      "evidence": [
+        "README.md Notes",
+        "RELEASE_NOTES.md",
+        "SECURITY.md",
+        "UI labels and explanations"
+      ],
+      "gap": "Findings, severity, evidence, review/expected/reopen semantics, baselines, limitations, and the 100-item cap are not consolidated for users.",
+      "recommended_remediation": "Add a concise evidence, review, baseline, and remediation interpretation guide.",
+      "closure_evidence": [
+        "Feature-by-feature documentation review.",
+        "User checklist."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-DOC-004",
+      "area": "Documentation, legal, and support readiness",
+      "status": "UNKNOWN",
+      "priority": "P1",
+      "summary": "The exact supported Windows, runtime, architecture, display, and upgrade matrix is not declared or proved.",
+      "evidence": [
+        "Release scripts target Windows x64.",
+        "Tauri config has a minimum window."
+      ],
+      "gap": "Supported Windows versions, WebView prerequisites, scaling, architecture, and upgrade boundaries are absent and untested as a matrix.",
+      "recommended_remediation": "Declare a conservative support matrix after representative clean-machine acceptance.",
+      "closure_evidence": [
+        "Published matrix.",
+        "Dated results per supported environment."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-DOC-005",
+      "area": "Documentation, legal, and support readiness",
+      "status": "PARTIAL",
+      "priority": "P1",
+      "summary": "Primary license and selected provenance exist, but third-party notice obligations are not fully reviewed.",
+      "evidence": [
+        "LICENSE",
+        "README.md licensing summary",
+        "third_party/rust/glib-0.18.5-patched provenance and licenses",
+        "Dependency lockfiles"
+      ],
+      "gap": "No completed third-party notices and bundled-license obligation review or shipped notice inventory exists.",
+      "recommended_remediation": "Perform a bounded legal and third-party notices inventory.",
+      "closure_evidence": [
+        "Maintainer or legal sign-off.",
+        "Artifact notice and license readback."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-DOC-006",
+      "area": "Documentation, legal, and support readiness",
+      "status": "FAIL",
+      "priority": "P1",
+      "summary": "Privacy, private security reporting, support response, and compatibility policies are incomplete.",
+      "evidence": [
+        "README.md Icefields link",
+        "GitHub issue surface",
+        "SECURITY.md public-report warning"
+      ],
+      "gap": "No consolidated privacy/network disclosure, live private security channel, support response expectation, or stable upgrade/compatibility policy exists.",
+      "recommended_remediation": "Publish and verify user-facing policies and contact paths.",
+      "closure_evidence": [
+        "Live-link readback.",
+        "Named owner confirmation."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-UX-001",
+      "area": "Accessibility and usability baseline",
+      "status": "PARTIAL",
+      "priority": "P1",
+      "summary": "Keyboard-capable controls and modal tests exist, but no whole-critical-workflow keyboard record exists.",
+      "evidence": [
+        "Native control use in frontend/src/main.jsx",
+        "frontend/src/App.integration.test.js modal tests",
+        "G043 Escape and keyboard package acceptance"
+      ],
+      "gap": "Registration, selection, scan, review, settings, exports, errors, and destructive confirmations lack end-to-end keyboard-only evidence.",
+      "recommended_remediation": "Execute a bounded critical-workflow keyboard checklist.",
+      "closure_evidence": [
+        "Dated tab-order, activation, and no-trap checklist."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-UX-002",
+      "area": "Accessibility and usability baseline",
+      "status": "PASS",
+      "priority": null,
+      "summary": "Critical modal mechanics provide visible focus, trapping/restoration, and safe Escape behavior.",
+      "evidence": [
+        "frontend/src/main.jsx modal focus implementation",
+        "frontend/src/App.integration.test.js remediation modal focus and Escape tests",
+        "Visible focus styling"
+      ],
+      "gap": "",
+      "recommended_remediation": "",
+      "closure_evidence": [
+        "Repeat focused automated and desktop modal checks."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-UX-003",
+      "area": "Accessibility and usability baseline",
+      "status": "PASS",
+      "priority": null,
+      "summary": "Critical controls have accessible names and text feedback with duplicate-safe disabled/in-progress states.",
+      "evidence": [
+        "Native and labelled controls in frontend/src/main.jsx",
+        "Agent package accessible name",
+        "frontend/src/App.integration.test.js loading, duplicate, success, failure, and stale tests"
+      ],
+      "gap": "",
+      "recommended_remediation": "",
+      "closure_evidence": [
+        "Current focused DOM and integration tests."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-UX-004",
+      "area": "Accessibility and usability baseline",
+      "status": "UNKNOWN",
+      "priority": "P1",
+      "summary": "Whole-product contrast, scaling, and minimum-size legibility have not been measured.",
+      "evidence": [
+        "frontend/src-tauri/tauri.conf.json 960x640 minimum",
+        "G043 one-modal normal and narrow screenshots"
+      ],
+      "gap": "No complete contrast measurement, scaling declaration, or all-screen clipping and overlap evidence exists.",
+      "recommended_remediation": "Perform a bounded visual and contrast pass across primary screens and long/error states.",
+      "closure_evidence": [
+        "Screenshots.",
+        "Contrast results at declared minimum and scaling."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-UX-005",
+      "area": "Accessibility and usability baseline",
+      "status": "PARTIAL",
+      "priority": "P1",
+      "summary": "Most status and action meaning uses text, but no complete non-color/non-pointer inventory exists.",
+      "evidence": [
+        "Frontend status labels and native buttons",
+        "Textual risk and progress states",
+        "No identified critical drag-only workflow"
+      ],
+      "gap": "Every critical meaning and action has not been checked for color-only, hover-only, drag-only, or fine-pointer dependence.",
+      "recommended_remediation": "Review interaction and status semantics screen by screen and fix confirmed blockers.",
+      "closure_evidence": [
+        "Completed interaction inventory.",
+        "Desktop verification."
+      ],
+      "waiver_permitted": false
+    },
+    {
+      "id": "V1-UX-006",
+      "area": "Accessibility and usability baseline",
+      "status": "PASS",
+      "priority": null,
+      "summary": "Glacial makes no unsupported formal WCAG conformance claim.",
+      "evidence": [
+        "Repository claim search found no WCAG conformance claim.",
+        "The readiness contract defines a pragmatic baseline and records unknowns."
+      ],
+      "gap": "",
+      "recommended_remediation": "",
+      "closure_evidence": [
+        "Claim search and final accessibility baseline link."
+      ],
+      "waiver_permitted": true
+    }
+  ]
+}

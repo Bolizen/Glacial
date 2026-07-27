@@ -1,3 +1,15 @@
+# Glacial 0.9.1 v1.0 Readiness Contract and Gap Audit
+
+Glacial 0.9.1 adds release-governance evidence for planning the path to v1.0.0. It does not claim that the v1.0 requirements are complete or authorize a stable release.
+
+## v1.0 readiness governance
+
+- Defines 60 permanent, measurable readiness requirements across product identity, scanning, filesystem safety, data lifecycle, remediation outputs, desktop lifecycle, security/privacy, release engineering, documentation/legal/support, and usability.
+- Publishes matching human-readable and machine-readable audits with explicit `PASS`, `PARTIAL`, `FAIL`, `UNKNOWN`, and `NOT_APPLICABLE` statuses.
+- Records a `NOT READY` verdict, the remaining P1 blockers, three P2 owner decisions, and the evidence required to close every non-passing requirement.
+- Proposes bounded G045-and-later handoffs for remediation, release-candidate construction, installed/portable acceptance, signing verification, and final release authorization.
+- Preserves Glacial 0.9.0's deterministic Agent Remediation Package without creating a v1.0 tag, release, installer, portable archive, or signing output.
+
 # Glacial 0.9.0 Agent Remediation Package
 
 Glacial 0.9.0 adds a deterministic, integrity-verifiable, data-only ZIP handoff for a human-selected external coding agent.
