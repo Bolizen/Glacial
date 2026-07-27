@@ -15,6 +15,8 @@ const sequence = readFileSync(sequencePath, "utf8");
 const idPattern = /^V1-(VER|SCAN|FS|DATA|AGENT|DESKTOP|SEC|REL|DOC|UX)-\d{3}$/;
 const allowedStatuses = new Set(["PASS", "PARTIAL", "FAIL", "UNKNOWN", "NOT_APPLICABLE"]);
 const allowedPriorities = new Set(["P0", "P1", "P2", "P3"]);
+const expectedSequenceHeadings = ["G047", "G048", "G049", "G050", "G051", "G052", "G053", "G054", "G055", "G056", "G057"];
+const installedOnlyDecision = "Glacial v1 does not provide or support a portable binary edition. The supported Windows product is the installed NSIS edition.";
 
 function fail(message) {
   throw new Error(`v1 readiness audit validation failed: ${message}`);
@@ -101,6 +103,9 @@ for (const requirement of snapshot.requirements) {
   calculatedStatusCounts[requirement.status] += 1;
   if (requirement.status === "PASS" || requirement.status === "NOT_APPLICABLE") {
     if (requirement.priority !== null) fail(`${requirement.id} must use null priority`);
+    if (requirement.status === "NOT_APPLICABLE" && !requirement.evidence.some((item) => /installed-only product decision/i.test(String(item)))) {
+      fail(`${requirement.id} NOT_APPLICABLE lacks explicit installed-only product-decision evidence`);
+    }
   } else {
     if (!allowedPriorities.has(requirement.priority)) fail(`${requirement.id} lacks a valid priority`);
     calculatedPriorityCounts[requirement.priority] += 1;
@@ -132,14 +137,24 @@ const verdictMatches = [...audit.matchAll(/\*\*Overall verdict: (READY|CONDITION
 if (verdictMatches.length !== 1) fail(`expected exactly one Markdown overall verdict, found ${verdictMatches.length}`);
 if (verdictMatches[0][1] !== snapshot.overall_verdict) fail("Markdown and JSON verdicts differ");
 if (snapshot.overall_verdict !== "NOT READY") fail("current evidence requires NOT READY");
+if (!Array.isArray(snapshot.classification_changes) || snapshot.classification_changes.length !== 0) {
+  fail("G047 must report no readiness classification changes");
+}
 
 const versionMatches = [...audit.matchAll(/^- Audited product version: `([^`]+)`$/gm)];
 if (versionMatches.length !== 1) fail(`expected one Markdown audited version, found ${versionMatches.length}`);
 if (versionMatches[0][1] !== snapshot.audited_version) fail("Markdown and JSON audited versions differ");
+if (snapshot.audited_version !== "0.9.4") fail(`expected audited version 0.9.4, found ${snapshot.audited_version}`);
 
 const commitMatches = [...audit.matchAll(/^- Audited behavioral baseline commit: `([0-9a-f]{40})`$/gm)];
 if (commitMatches.length !== 1) fail(`expected one Markdown audited commit, found ${commitMatches.length}`);
 if (commitMatches[0][1] !== snapshot.audited_commit) fail("Markdown and JSON audited commits differ");
+
+if (!contract.includes(installedOnlyDecision)) fail("readiness contract lacks the permanent installed-only product decision");
+const sequenceHeadings = [...sequence.matchAll(/^## (G\d{3}) —/gm)].map((match) => match[1]);
+if (JSON.stringify(sequenceHeadings) !== JSON.stringify(expectedSequenceHeadings)) {
+  fail(`remediation heading sequence is ${sequenceHeadings.join(", ")}; expected ${expectedSequenceHeadings.join(", ")}`);
+}
 
 const sequenceIds = new Set(sequence.match(/V1-[A-Z]+-\d{3}/g) ?? []);
 const uncoveredBlockers = snapshot.requirements

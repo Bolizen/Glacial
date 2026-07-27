@@ -2,6 +2,16 @@ from __future__ import annotations
 
 CHANGELOG_ENTRIES = [
     {
+        "version": "0.9.4",
+        "date": "2026-07-27",
+        "title": "Installed-only Windows product scope",
+        "changes": [
+            "Retired the portable binary distribution and narrowed the supported v1 Windows product to the installed NSIS edition.",
+            "Removed portable archive construction, signing, hashing, validation, publication, development commands, and duplicate artifact acceptance while preserving internal unpacked build staging.",
+            "Reduced ambiguous state locations, relocation behavior, filesystem compatibility problems, duplicate artifact testing, and unclear upgrade/uninstall semantics; Glacial remains pre-v1 and NOT READY while installed-edition lifecycle acceptance is incomplete.",
+        ],
+    },
+    {
         "version": "0.9.3",
         "date": "2026-07-27",
         "title": "Versioned state lifecycle and recovery",

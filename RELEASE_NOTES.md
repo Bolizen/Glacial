@@ -1,3 +1,16 @@
+# Glacial 0.9.4 Installed-Only Windows Product Scope
+
+Glacial 0.9.4 formally retires the portable binary distribution and narrows the supported v1 Windows product to the installed x64 application packaged through NSIS. Glacial remains pre-v1 and `NOT READY`; this scope decision does not authorize v1 or complete installed-edition lifecycle acceptance.
+
+## Distribution and lifecycle scope
+
+- Removes portable ZIP construction, signing, hashing, validation, manifest entries, publication branches, development commands, and duplicate artifact tests from the Windows release pipeline.
+- Keeps unpacked development builds, test fixtures, source checkouts, and build staging directories as internal inputs rather than treating them as portable product distributions.
+- Uses the installed application-data and log model already selected by production runtime code; unsupported copying or relocation of installed files does not create a supported edition.
+- Reduces ambiguous state locations, relocation behavior, filesystem compatibility problems, duplicate artifact testing, and unclear upgrade/uninstall semantics.
+- Reframes the permanent readiness contract around one installed NSIS edition without converting missing lifecycle, signing, release-candidate, reset, recovery, upgrade, or uninstall evidence into passes.
+- Rebaselines the remaining handoffs as G048 through G057; tagging and GitHub Release publication remain separately authorized after G057.
+
 # Glacial 0.9.3 Versioned State Lifecycle and Recovery
 
 Glacial 0.9.3 makes application-owned SQLite state versioned, recoverable, and inspectable. It remains a pre-v1 hardening release: the readiness verdict is still `NOT READY` while P1 work remains.

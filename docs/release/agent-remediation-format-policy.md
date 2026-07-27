@@ -8,7 +8,7 @@ couple remediation formats to the Glacial application release number.
 
 | Identity | Current value | Meaning |
 | --- | --- | --- |
-| Glacial application version | `0.9.3` | Version of the application that generated an output. |
+| Glacial application version | `0.9.4` | Version of the application that generated an output. |
 | Agent Remediation Brief schema version | `1` | Integer `schemaVersion` in the Brief response. |
 | Agent Remediation Package format version | `1.0.0` | Semantic version in `packageFormatVersion`, the package README/task, and `manifest.json` as `package_format_version`. |
 | `findings.json` schema version | `1.0.0` | Semantic version in `schema_version`. |
