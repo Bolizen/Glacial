@@ -1,3 +1,16 @@
+# Glacial 0.9.5 Data Privacy and Disclosure Boundary
+
+Glacial 0.9.5 establishes a source-backed privacy boundary for application state, reports, remediation outputs, generated files, diagnostics, build/release records, and loopback process communication. It remains a pre-v1 hardening release and `NOT READY` while unrelated P1 requirements remain unresolved.
+
+## Privacy boundary
+
+- Centralizes secret-value redaction, control-character normalization, safe host-path presentation, project-relative path handling, bounded excerpts, and safe diagnostic/error rendering.
+- Sanitizes project-derived and user-authored values before durable storage and enforces sanitization again at reports, briefs, packages, generated `AGENTS.md`, frontend errors, startup diagnostics, and build/release disclosure sinks.
+- Retains operational absolute workspace and project-registration paths only in application-owned local state and local operational API/UI flows; reports, exports, generated instructions, diagnostics, and release records use project-relative paths, basenames, or documented placeholders.
+- Adds deterministic hostile fixtures using fake canaries only and verifies retained rule IDs, line numbers, dependency identities, counts, fingerprints, checksums, provenance, ordering, and immutable scan evidence.
+- Documents that production project data has no external network destination: the desktop bridge and owned backend use authenticated loopback only. Explicit release tooling may contact a configured timestamp/signing service, but project content is not an input to that boundary.
+- Does not change SQLite schema version `1`, Agent Remediation Brief schema version `1`, package format `1.0.0`, or findings schema `1.0.0`.
+
 # Glacial 0.9.4 Installed-Only Windows Product Scope
 
 Glacial 0.9.4 formally retires the portable binary distribution and narrows the supported v1 Windows product to the installed x64 application packaged through NSIS. Glacial remains pre-v1 and `NOT READY`; this scope decision does not authorize v1 or complete installed-edition lifecycle acceptance.

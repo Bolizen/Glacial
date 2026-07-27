@@ -7,6 +7,8 @@ from collections import defaultdict
 from typing import Any, Iterable, Mapping
 from urllib.parse import urlsplit
 
+from .privacy import sanitize_private_text
+
 
 BASELINE_SCHEMA_VERSION = 2
 FINGERPRINT_PREFIX = "cfdb2_"
@@ -686,7 +688,7 @@ def _vcs_revision_identity(value: Any, selectors: set[str], *, multiple: bool = 
 def _text(value: Any, limit: int) -> str:
     if value is None:
         return ""
-    return " ".join(str(value).split())[:limit]
+    return sanitize_private_text(value, limit=limit)
 
 
 def _canonical_text(value: Any, limit: int, label: str) -> str:

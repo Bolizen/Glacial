@@ -86,9 +86,60 @@ test("exports every current and future finding with complete detailed evidence",
   ]) {
     assert.match(markdown, new RegExp(`^## ${escapeRegExp(heading)}$`, "m"));
   }
-  assert.match(markdown, /Project: `Z:\\workspace\\project`/);
+  assert.match(markdown, /Project: `<HOST_PATH>`/);
   assert.match(markdown, /- Approved package managers: npm/);
   assert.match(markdown, /- Risk: LOW to HIGH/);
+});
+
+test("report disclosure sanitizes legacy host paths credentials and control characters", () => {
+  const awsKey = "AKIAIOSFODNN7EXAMPLE";
+  const githubToken = "ghp_0123456789abcdefghijklmnopqrstuvwxyzAB";
+  const hostPath = "C:\\Users\\privacy-canary\\AppData\\Local\\Temp\\trace.txt";
+  const markdown = buildScanReportMarkdown(
+    {
+      ...scanResult([
+        finding(
+          "suspicious-text-pattern",
+          `src/${githubToken}.js`,
+          `Authorization: Bearer privacy-bearer-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ at ${hostPath}`,
+          {
+            pattern: "curl",
+            evidence: {
+              line: 17,
+              matchCount: 1,
+              pattern: "curl",
+              excerpt: `curl https://user:password@example.invalid/${awsKey}`,
+              additionalMatchesOmitted: false,
+            },
+          },
+        ),
+      ]),
+      project_path: hostPath,
+    },
+    reportFixture({
+      totalFindings: 1,
+      reviewedFiles: ["src/ordinary.js", hostPath],
+      zone: `private ${githubToken}`,
+    }),
+    comparisonFixture(),
+    trustContextFixture(),
+  );
+
+  for (const forbidden of [
+    awsKey,
+    githubToken,
+    "privacy-bearer-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    "privacy-canary",
+    "user:password",
+    "\u001b",
+  ]) {
+    assert.equal(markdown.includes(forbidden), false, forbidden);
+  }
+  assert.match(markdown, /\[REDACTED\]/);
+  assert.match(markdown, /<TEMP_DIR>|<HOST\\_PATH>|<HOST_PATH>/);
+  assert.match(markdown, /src\/ordinary\.js/);
+  assert.match(markdown, /Line|line 17|:17/);
+  assert.match(markdown, /curl/);
 });
 
 test("exports canonical scanner-owned finding explainability without frontend inference", () => {

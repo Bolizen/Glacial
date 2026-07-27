@@ -40,6 +40,7 @@ from .database import (
 )
 from .dependency_trust import SCHEMA_VERSION as DEPENDENCY_TRUST_SCHEMA_VERSION
 from .finding_reviews import enrich_scan, finding_fingerprint, valid_fingerprint
+from .privacy import sanitize_private_text, sanitize_scan_value
 from .safety import configured_root, ensure_inside_root, ensure_project_directory, existing_workspace_root, has_multiple_hardlinks, sanitize_folder_name
 from .scanner import scan_project
 from .scan_comparison import (
@@ -186,10 +187,10 @@ def list_projects() -> dict[str, object]:
         scan = scans.get(path)
         projects.append(
             {
-                "name": row["name"],
+                "name": sanitize_private_text(row["name"], limit=120) or "Registered project",
                 "path": path,
-                "description": row["description"],
-                "project_type": row["project_type"],
+                "description": sanitize_private_text(row["description"], limit=2000),
+                "project_type": sanitize_private_text(row["project_type"], limit=120),
                 "last_scan_time": scan["scan_date"] if scan else None,
                 "last_risk_level": scan["overall_risk"] if scan else "none",
                 "last_scan_completeness": scan_completeness_for_row(scan) if scan else None,
@@ -211,7 +212,8 @@ def list_projects() -> dict[str, object]:
 @app.post("/api/projects")
 def create_project(payload: ProjectCreate) -> dict[str, str]:
     root = _project_root()
-    folder_name = sanitize_folder_name(payload.project_name)
+    project_name = sanitize_private_text(payload.project_name, limit=120) or "Project"
+    folder_name = sanitize_folder_name(project_name)
     root.mkdir(parents=True, exist_ok=True)
 
     project_path = ensure_inside_root(root, root / folder_name)
@@ -223,30 +225,43 @@ def create_project(payload: ProjectCreate) -> dict[str, str]:
     with get_connection() as connection:
         connection.execute(
             "INSERT INTO projects (path, name, description, project_type, created_at) VALUES (?, ?, ?, ?, ?)",
-            (str(project_path), payload.project_name.strip(), payload.description.strip(), payload.project_type.strip(), now),
+            (
+                str(project_path),
+                project_name,
+                sanitize_private_text(payload.description, limit=2000),
+                sanitize_private_text(payload.project_type, limit=120),
+                now,
+            ),
         )
 
-    return {"name": payload.project_name.strip(), "path": str(project_path), "created_at": now}
+    return {"name": project_name, "path": str(project_path), "created_at": now}
 
 
 @app.post("/api/projects/register")
 def register_project(payload: ProjectRegister) -> dict[str, str]:
     project_path = ensure_project_directory(_project_root(), payload.project_path)
+    project_name = sanitize_private_text(project_path.name, limit=120) or "Registered project"
     now = _now()
     with get_connection() as connection:
         connection.execute(
             "INSERT INTO projects (path, name, description, project_type, created_at) VALUES (?, ?, ?, ?, ?) "
             "ON CONFLICT(path) DO UPDATE SET description = excluded.description, project_type = excluded.project_type",
-            (str(project_path), project_path.name, payload.description.strip(), payload.project_type.strip(), now),
+            (
+                str(project_path),
+                project_name,
+                sanitize_private_text(payload.description, limit=2000),
+                sanitize_private_text(payload.project_type, limit=120),
+                now,
+            ),
         )
-    return {"name": project_path.name, "path": str(project_path), "created_at": now}
+    return {"name": project_name, "path": str(project_path), "created_at": now}
 
 
 @app.put("/api/projects/metadata")
 def update_project_metadata(payload: ProjectMetadataUpdate) -> dict[str, object]:
     project = _ensure_project(payload.project_path)
-    description = payload.description.strip()
-    project_type = payload.project_type.strip()
+    description = sanitize_private_text(payload.description, limit=2000)
+    project_type = sanitize_private_text(payload.project_type, limit=120)
     with get_connection() as connection:
         cursor = connection.execute(
             "UPDATE projects SET description = ?, project_type = ? WHERE path = ?",
@@ -369,7 +384,10 @@ def run_scan(payload: ProjectPathRequest) -> dict[str, object]:
                     break
         finally:
             previous_rows.close()
-    result = scan_project(project, previous_dependency_trust=previous_dependency_trust)
+    result = sanitize_scan_value(
+        scan_project(project, previous_dependency_trust=previous_dependency_trust),
+        project_root=project,
+    )
     now = _now()
     finding_summary = _finding_summary(result["findings"])
     scan_metadata = _scan_metadata(result)
@@ -734,7 +752,7 @@ def approve_trusted_dependency_baseline(payload: TrustedDependencyBaselineApprov
     except BaselineError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     now = _now()
-    note = payload.note.strip()
+    note = sanitize_private_text(payload.note, limit=1000)
     values = (
         str(project), BASELINE_SCHEMA_VERSION, DEPENDENCY_TRUST_SCHEMA_VERSION, fingerprint,
         snapshot_json(snapshot), scan["id"], scan["scan_date"], note, now, now,
@@ -789,7 +807,7 @@ def update_trusted_dependency_baseline_note(payload: TrustedDependencyBaselineNo
     with get_connection() as connection:
         cursor = connection.execute(
             "UPDATE trusted_dependency_baselines SET note = ?, updated_at = ? WHERE project_path = ?",
-            (payload.note.strip(), _now(), str(project)),
+            (sanitize_private_text(payload.note, limit=1000), _now(), str(project)),
         )
         if cursor.rowcount != 1:
             raise HTTPException(status_code=404, detail="No trusted dependency baseline is configured for this project.")
@@ -817,7 +835,7 @@ def list_finding_reviews(project_path: str = Query(min_length=1, max_length=1000
 def update_finding_review(payload: FindingReviewRequest) -> dict[str, object]:
     project = _ensure_project(payload.project_path)
     fingerprint = _validated_fingerprint(payload.fingerprint)
-    note = payload.note.strip()
+    note = sanitize_private_text(payload.note, limit=1000)
     now = _now()
     activity_recorded = False
     with get_connection() as connection:
@@ -878,7 +896,19 @@ def list_notes(project_path: str = Query(min_length=1, max_length=1000)) -> dict
             "SELECT id, project_path, body, created_at FROM notes WHERE project_path = ? ORDER BY created_at DESC",
             (str(project),),
         ).fetchall()
-    return {"notes": [dict(row) for row in rows]}
+    return {
+        "notes": [
+            {
+                **dict(row),
+                "body": sanitize_private_text(
+                    row["body"],
+                    limit=4000,
+                    preserve_lines=True,
+                ),
+            }
+            for row in rows
+        ]
+    }
 
 
 @app.get("/api/trust-profile")
@@ -934,8 +964,8 @@ def update_trust_profile(payload: TrustProfileRequest) -> dict[str, object]:
         )
         if changed_categories or review_context_changed:
             context = payload.activity_context
-            adopted = context.adopted_value.strip() if context else ""
-            replaced = context.replaced_value.strip() if context else ""
+            adopted = sanitize_private_text(context.adopted_value, limit=1000) if context else ""
+            replaced = sanitize_private_text(context.replaced_value, limit=1000) if context else ""
             is_valid_adoption = bool(
                 context
                 and context.category in changed_categories
@@ -986,13 +1016,14 @@ def update_trust_profile(payload: TrustProfileRequest) -> dict[str, object]:
 @app.post("/api/notes")
 def add_note(payload: NoteCreate) -> dict[str, object]:
     project = _ensure_project(payload.project_path)
+    body = sanitize_private_text(payload.body, limit=4000, preserve_lines=True)
     now = _now()
     with get_connection() as connection:
         cursor = connection.execute(
             "INSERT INTO notes (project_path, body, created_at) VALUES (?, ?, ?)",
-            (str(project), payload.body.strip(), now),
+            (str(project), body, now),
         )
-    return {"id": cursor.lastrowid, "project_path": str(project), "body": payload.body.strip(), "created_at": now}
+    return {"id": cursor.lastrowid, "project_path": str(project), "body": body, "created_at": now}
 
 
 def _project_root_value() -> str:
@@ -1062,7 +1093,13 @@ def _finding_reviews_for_connection(
         "WHERE project_path = ? ORDER BY updated_at DESC, fingerprint",
         (project_path,),
     ).fetchall()
-    return [dict(row) for row in rows]
+    return [
+        {
+            **dict(row),
+            "note": sanitize_private_text(row["note"], limit=1000),
+        }
+        for row in rows
+    ]
 
 
 def _validated_fingerprint(value: str) -> str:
@@ -1274,7 +1311,11 @@ def _normalize_trust_profile(data: dict[str, object], project_path: str) -> dict
     risk_tolerance = risk_value.strip().lower() if isinstance(risk_value, str) else "normal"
     profile["riskTolerance"] = risk_tolerance if risk_tolerance in RISK_TOLERANCES else "normal"
     notes = data.get("notes")
-    profile["notes"] = notes.strip()[:4000] if isinstance(notes, str) else ""
+    profile["notes"] = sanitize_private_text(
+        notes,
+        limit=4000,
+        preserve_lines=True,
+    ) if isinstance(notes, str) else ""
     return profile
 
 
@@ -1292,7 +1333,7 @@ def _normalize_string_list(value: object) -> list[str]:
     for item in value:
         if not isinstance(item, str):
             continue
-        text = item.strip()
+        text = sanitize_private_text(item, limit=1000)
         if not text or text in seen:
             continue
         normalized.append(text)
@@ -1314,7 +1355,7 @@ def _normalize_expectation_provenance(
         approved = set(profile[field])
         entries: dict[str, str] = {}
         for item, source in field_value.items():
-            text = str(item).strip()
+            text = sanitize_private_text(item, limit=1000)
             source_text = str(source).strip().lower()
             if text in approved and source_text in EXPECTATION_PROVENANCE_TYPES:
                 entries[text] = source_text

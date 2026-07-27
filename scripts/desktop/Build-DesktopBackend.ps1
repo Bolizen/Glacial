@@ -25,4 +25,4 @@ if (-not (Test-Path -LiteralPath $backendExecutable -PathType Leaf) -or
     -not (Test-Path -LiteralPath $supportDirectory -PathType Container)) {
     throw "PyInstaller did not produce the expected onedir backend layout."
 }
-Write-Output $backendExecutable
+Write-Output "<REPOSITORY_ROOT>\.desktop-build\pyinstaller\dist\glacial-backend\glacial-backend.exe"

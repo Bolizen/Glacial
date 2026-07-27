@@ -2,6 +2,16 @@ from __future__ import annotations
 
 CHANGELOG_ENTRIES = [
     {
+        "version": "0.9.5",
+        "date": "2026-07-27",
+        "title": "Data privacy and disclosure boundary",
+        "changes": [
+            "Centralized secret redaction, safe path presentation, bounded evidence, and sanitized error/diagnostic handling across persisted scans, reports, remediation outputs, generated instructions, and release records.",
+            "Added hostile fake-canary coverage for credentials, host paths, control characters, filenames, dependency metadata, user-authored state, archives, and diagnostics while retaining useful relative paths, rule IDs, line numbers, counts, identities, hashes, and stable ordering.",
+            "Published the canonical privacy-surface inventory and network boundary; Glacial remains pre-v1 and NOT READY while other P1 requirements remain unresolved.",
+        ],
+    },
+    {
         "version": "0.9.4",
         "date": "2026-07-27",
         "title": "Installed-only Windows product scope",

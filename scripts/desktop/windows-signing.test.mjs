@@ -28,9 +28,11 @@ import {
   normalizeThumbprint,
   planBackendSigning,
   preflightSigningProvider,
+  privacySafePath,
   removeSafeTree,
   resolveNpmInvocation,
   runCommand,
+  sanitizeDiagnosticText,
   sha256,
   signOne,
   signingEnvironment,
@@ -62,7 +64,7 @@ const TEST_PATH = fileURLToPath(import.meta.url);
 const REPOSITORY = resolve(dirname(TEST_PATH), "..", "..");
 const TEST_ROOT = join(DESKTOP_BUILD_ROOT, "release-signing-tests");
 const THUMBPRINT = "A".repeat(40);
-const RELEASE_ID = "Glacial-0.9.4-ffffffffffff-20260720T120000Z";
+const RELEASE_ID = "Glacial-0.9.5-ffffffffffff-20260720T120000Z";
 
 function cleanTestRoot() {
   removeSafeTree(DESKTOP_BUILD_ROOT, TEST_ROOT, { pathInspector: false });
@@ -123,9 +125,9 @@ function sourceState(overrides = {}) {
     branch: "main",
     commit: "f".repeat(40),
     originMain: "f".repeat(40),
-    version: "0.9.4",
+    version: "0.9.5",
     status: "",
-    versions: { packageJson: "0.9.4", tauri: "0.9.4" },
+    versions: { packageJson: "0.9.5", tauri: "0.9.5" },
     ...overrides,
   };
 }
@@ -229,7 +231,7 @@ test("command provider keeps the file as one direct argument and forwards only n
     AZURE_CLIENT_SECRET: "not-allowed",
     AWS_SECRET_ACCESS_KEY: "not-allowed-either",
   });
-  const releaseEnvironment = signingEnvironment(source, "Glacial-0.9.4-ffffffffffff-20260719T120000Z");
+  const releaseEnvironment = signingEnvironment(source, "Glacial-0.9.5-ffffffffffff-20260719T120000Z");
   assert.equal(releaseEnvironment.AZURE_CLIENT_ID, "allowed-value");
   assert.equal("AZURE_CLIENT_SECRET" in releaseEnvironment, false);
   assert.equal("AWS_SECRET_ACCESS_KEY" in releaseEnvironment, false);
@@ -262,6 +264,32 @@ test("opt-in signing failure diagnostics are useful, bounded, and control-charac
       return true;
     },
   );
+});
+
+test("build and release diagnostics redact fake credentials and private host paths", () => {
+  const hostile = [
+    "C:\\Users\\privacy-canary\\AppData\\Local\\Temp\\trace.log",
+    "\\\\privacy-server\\share\\trace.log",
+    "Authorization: Bearer privacy-bearer-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    "password=privacy-password-canary",
+    "AKIAIOSFODNN7EXAMPLE",
+    "ghp_0123456789abcdefghijklmnopqrstuvwxyzAB",
+    "\u001b[31m",
+  ].join("\n");
+  const sanitized = sanitizeDiagnosticText(hostile);
+  for (const forbidden of [
+    "privacy-canary",
+    "privacy-server",
+    "privacy-bearer-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    "privacy-password-canary",
+    "AKIAIOSFODNN7EXAMPLE",
+    "ghp_0123456789abcdefghijklmnopqrstuvwxyzAB",
+    "\u001b",
+  ]) {
+    assert.equal(sanitized.includes(forbidden), false);
+  }
+  assert.match(sanitized, /\[REDACTED\]/);
+  assert.match(sanitized, /<HOST_PATH>|<TEMP_DIR>/);
 });
 
 test("Tauri overlay uses object-form direct arguments and no embedded certificate identity", () => {
@@ -394,7 +422,8 @@ test("signed application capture survives Tauri restoration and remains installe
   assert.notDeepEqual(capturedBytes, original);
   assert.equal(applicationEvent.beforeSha256, createHash("sha256").update(original).digest("hex").toUpperCase());
   assert.equal(applicationEvent.sha256, sha256(capture));
-  assert.equal(applicationEvent.applicationCapturePath, capture);
+  assert.equal(applicationEvent.applicationCapturePath, privacySafePath(capture));
+  assert.equal(applicationEvent.path, privacySafePath(workingApplication));
 
   writeFileSync(workingApplication, original);
   assert.equal(assertExpectedTauriRestoration(workingApplication, capture, { signature: { status: "NotSigned" } }).status, "NotSigned");
@@ -427,7 +456,7 @@ test("application capture validation rejects missing, duplicate, unrelated, and 
 test("Tauri signing evidence requires one transient uninstaller between plugins and final installer", () => {
   const capture = join(TEST_ROOT, "capture-evidence", "Glacial.exe");
   const target = join(TEST_ROOT, "target-evidence", "glacial.exe");
-  const installer = join(TEST_ROOT, "bundle", "Glacial_0.9.4_x64-setup.exe");
+  const installer = join(TEST_ROOT, "bundle", "Glacial_0.9.5_x64-setup.exe");
   mkdirSync(dirname(capture), { recursive: true });
   writeFileSync(capture, minimalPe());
   const config = { expectedThumbprint: THUMBPRINT, applicationTarget: target, applicationCapture: capture };
@@ -449,7 +478,7 @@ test("release source revalidation rejects every mutable provenance field", () =>
     { originMain: "e".repeat(40) },
     { status: " M file" },
     { version: "0.9.2" },
-    { versions: { packageJson: "0.9.4", tauri: "0.9.3" } },
+    { versions: { packageJson: "0.9.5", tauri: "0.9.4" } },
   ]) assert.throws(() => assertSameReleaseSource(before, sourceState(changed)), /changed/);
 });
 
@@ -567,7 +596,7 @@ test("dry-run plans and manifest fields report profile trust requirements honest
   );
 });
 
-test("release package commands and established version sources identify 0.9.4", () => {
+test("release package commands and established version sources identify 0.9.5", () => {
   const packageJson = JSON.parse(readFileSync(join(REPOSITORY, "frontend", "package.json"), "utf8"));
   const packageLock = JSON.parse(readFileSync(join(REPOSITORY, "frontend", "package-lock.json"), "utf8"));
   const tauri = JSON.parse(readFileSync(join(REPOSITORY, "frontend", "src-tauri", "tauri.conf.json"), "utf8"));
@@ -602,21 +631,21 @@ test("release package commands and established version sources identify 0.9.4", 
   });
   assert.deepEqual(
     [packageJson.version, packageLock.version, packageLock.packages[""].version, tauri.version],
-    ["0.9.4", "0.9.4", "0.9.4", "0.9.4"],
+    ["0.9.5", "0.9.5", "0.9.5", "0.9.5"],
   );
-  assert.match(cargo, /^version = "0\.9\.4"$/m);
-  assert.match(cargoLock, /\[\[package\]\]\r?\nname = "glacial"\r?\nversion = "0\.9\.4"/);
-  assert.match(releaseTool, /expected 0\.9\.4/);
-  assert.match(signingTool, /\^Glacial-0\\\.9\\\.4-/);
-  assert.match(backendVersion, /^GLACIAL_VERSION = "0\.9\.4"$/m);
-  assert.match(changelog, /"version": "0\.9\.4"/);
-  assert.match(readme, /Glacial v0\.9\.4 is licensed/);
-  assert.match(releaseNotes, /^# Glacial 0\.9\.4 /);
-  assert.match(signingDocs, /Glacial v0\.9\.4 is intended/);
-  assert.match(formatPolicy, /Glacial application version \| `0\.9\.4`/);
-  assert.match(lifecyclePolicy, /Status: v1 policy baseline for Glacial 0\.9\.4\./);
-  assert.match(readinessAudit, /Audited product version: `0\.9\.4`/);
-  assert.equal(readinessSnapshot.audited_version, "0.9.4");
+  assert.match(cargo, /^version = "0\.9\.5"$/m);
+  assert.match(cargoLock, /\[\[package\]\]\r?\nname = "glacial"\r?\nversion = "0\.9\.5"/);
+  assert.match(releaseTool, /expected 0\.9\.5/);
+  assert.match(signingTool, /\^Glacial-0\\\.9\\\.5-/);
+  assert.match(backendVersion, /^GLACIAL_VERSION = "0\.9\.5"$/m);
+  assert.match(changelog, /"version": "0\.9\.5"/);
+  assert.match(readme, /Glacial v0\.9\.5 is licensed/);
+  assert.match(releaseNotes, /^# Glacial 0\.9\.5 /);
+  assert.match(signingDocs, /Glacial v0\.9\.5 is intended/);
+  assert.match(formatPolicy, /Glacial application version \| `0\.9\.5`/);
+  assert.match(lifecyclePolicy, /Status: v1 policy baseline for Glacial 0\.9\.5\./);
+  assert.match(readinessAudit, /Audited product version: `0\.9\.5`/);
+  assert.equal(readinessSnapshot.audited_version, "0.9.5");
 });
 
 test("candidate publication is failure-atomic and never overwrites existing candidates", () => {
@@ -664,13 +693,13 @@ test("manifest and SHA256SUMS verification detects post-packaging mutation", () 
   const root = join(TEST_ROOT, "hashes");
   const artifacts = join(root, "artifacts");
   mkdirSync(artifacts, { recursive: true });
-  const artifact = join(artifacts, "Glacial_0.9.4_x64-setup.exe");
+  const artifact = join(artifacts, "Glacial_0.9.5_x64-setup.exe");
   writeFileSync(artifact, "final bytes");
   const hash = sha256(artifact);
   const manifestPath = join(root, "release-candidate-manifest.json");
   const sumsPath = join(root, "SHA256SUMS.txt");
-  writeFileSync(manifestPath, JSON.stringify({ artifacts: [{ filename: "Glacial_0.9.4_x64-setup.exe", path: "artifacts/Glacial_0.9.4_x64-setup.exe", bytes: 11, sha256: hash }] }));
-  writeFileSync(sumsPath, `${hash}  Glacial_0.9.4_x64-setup.exe\n`);
+  writeFileSync(manifestPath, JSON.stringify({ artifacts: [{ filename: "Glacial_0.9.5_x64-setup.exe", path: "artifacts/Glacial_0.9.5_x64-setup.exe", bytes: 11, sha256: hash }] }));
+  writeFileSync(sumsPath, `${hash}  Glacial_0.9.5_x64-setup.exe\n`);
   assert.equal(verifyPublishedHashes(root, manifestPath, sumsPath), true);
   writeFileSync(artifact, "mutated");
   assert.throws(() => verifyPublishedHashes(root, manifestPath, sumsPath), /mismatch/);

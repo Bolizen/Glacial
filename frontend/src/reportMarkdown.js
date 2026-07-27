@@ -642,12 +642,13 @@ function isSafeProjectRelativePath(value) {
 }
 
 function formatCodeBlock(value) {
+  const safeValue = sanitizeDisclosureText(value, 500, { preserveLines: true });
   const longestFence = Math.max(
     0,
-    ...Array.from(value.matchAll(/`+/gu), (match) => match[0].length),
+    ...Array.from(safeValue.matchAll(/`+/gu), (match) => match[0].length),
   );
   const fence = "`".repeat(Math.max(3, longestFence + 1));
-  return [fence, value, fence];
+  return [fence, safeValue, fence];
 }
 
 function serializeMetadata(value) {
@@ -836,7 +837,7 @@ function escapeMarkdownText(value) {
 
 function presentText(value) {
   if (value === undefined || value === null) return "";
-  return String(value).replaceAll(/\s+/g, " ").trim();
+  return sanitizeDisclosureText(value);
 }
 
 function humanizeFindingType(type) {
@@ -875,4 +876,5 @@ import {
   normalizeDependencyTrust,
 } from "./dependencyTrust.js";
 import { findingReviewLabel, findingReviewSummary } from "./findingReviews.js";
+import { sanitizeDisclosureText } from "./privacy.js";
 import { shortBaselineFingerprint, trustedBaselineComparisonLabel } from "./trustedDependencyBaseline.js";

@@ -21,10 +21,13 @@ import {
   loadSigningConfig,
   minimalEnvironment,
   preflightSigningProvider,
+  privacySafePath,
   removeSafeTree,
+  resolvePrivacySafePath,
   resolveNpmInvocation,
   resolveToolExecutable,
   runCommand,
+  sanitizeDiagnosticText,
   sha256,
   signBackendTree,
   signingEnvironment,
@@ -58,17 +61,11 @@ const ACTUAL_RELEASE_STEPS = [
   "atomic-publish",
 ];
 
-function redact(text, secretValues = []) {
-  let value = String(text ?? "");
-  for (const secret of secretValues.filter((item) => typeof item === "string" && item.length > 0)) value = value.replaceAll(secret, "[REDACTED]");
-  return value;
-}
-
 function runVisible(command, args, options = {}) {
   const result = runCommand(command, args, { cwd: options.cwd, env: options.env, timeoutMs: options.timeoutMs ?? 900_000 });
   const secrets = options.secretValues ?? [];
-  if (result.stdout) process.stdout.write(redact(result.stdout, secrets));
-  if (result.stderr) process.stderr.write(redact(result.stderr, secrets));
+  if (result.stdout) process.stdout.write(sanitizeDiagnosticText(result.stdout, secrets));
+  if (result.stderr) process.stderr.write(sanitizeDiagnosticText(result.stderr, secrets));
   return result;
 }
 
@@ -194,10 +191,10 @@ export function verifyReleaseSource(gitPath) {
     cargo: cargoVersion(join(FRONTEND, "src-tauri", "Cargo.toml")),
     cargoLock: lockVersion(join(FRONTEND, "src-tauri", "Cargo.lock")),
   };
-  for (const [name, version] of Object.entries(versions)) if (version !== "0.9.4") throw new Error(`${name} identifies version ${version ?? "unknown"}; expected 0.9.4.`);
-  if (readFileSync(join(REPOSITORY, "backend", "app", "version.py"), "utf8").trim() !== 'GLACIAL_VERSION = "0.9.4"') throw new Error("Backend version constant does not identify 0.9.4.");
-  if (!readFileSync(join(REPOSITORY, "backend", "app", "changelog.py"), "utf8").includes('"version": "0.9.4"')) throw new Error("Backend release metadata does not identify 0.9.4.");
-  return { root, branch, commit, originMain, version: "0.9.4", versions, status: "" };
+  for (const [name, version] of Object.entries(versions)) if (version !== "0.9.5") throw new Error(`${name} identifies version ${version ?? "unknown"}; expected 0.9.5.`);
+  if (readFileSync(join(REPOSITORY, "backend", "app", "version.py"), "utf8").trim() !== 'GLACIAL_VERSION = "0.9.5"') throw new Error("Backend version constant does not identify 0.9.5.");
+  if (!readFileSync(join(REPOSITORY, "backend", "app", "changelog.py"), "utf8").includes('"version": "0.9.5"')) throw new Error("Backend release metadata does not identify 0.9.5.");
+  return { root, branch, commit, originMain, version: "0.9.5", versions, status: "" };
 }
 
 export function assertSameReleaseSource(before, after) {
@@ -326,8 +323,8 @@ export function requireApplicationCapture(events, config, expectedCanonicalSubje
   const captures = events.filter((event) => event.applicationCapturePath);
   if (captures.length !== 1) throw new Error(`Expected exactly one Glacial application capture; found ${captures.length}.`);
   const event = captures[0];
-  if (resolve(event.path).toLowerCase() !== resolve(config.applicationTarget).toLowerCase()) throw new Error("An unrelated executable was recorded as the Glacial application capture.");
-  if (resolve(event.applicationCapturePath).toLowerCase() !== resolve(config.applicationCapture).toLowerCase()) throw new Error("The Glacial application capture path is unexpected.");
+  if (resolvePrivacySafePath(event.path).toLowerCase() !== resolve(config.applicationTarget).toLowerCase()) throw new Error("An unrelated executable was recorded as the Glacial application capture.");
+  if (resolvePrivacySafePath(event.applicationCapturePath).toLowerCase() !== resolve(config.applicationCapture).toLowerCase()) throw new Error("The Glacial application capture path is unexpected.");
   if (!existsSync(config.applicationCapture) || event.sha256 !== sha256(config.applicationCapture)) throw new Error("The Glacial application capture hash does not match its signing event.");
   if (!/^[0-9A-F]{64}$/.test(String(event.beforeSha256 ?? ""))) throw new Error("The Glacial application signing event is missing its pre-signing hash.");
   requireSigningEventIdentity(event, config, expectedCanonicalSubject, "Glacial.exe");
@@ -362,7 +359,7 @@ export function requireSigningEvents(events, config, installer, expectedCanonica
   }
   const applicationEvent = requireApplicationCapture(events, config, expectedCanonicalSubject);
   const applicationIndex = events.indexOf(applicationEvent);
-  const installerEvent = events.find((event) => resolve(event.path).toLowerCase() === resolve(installer).toLowerCase());
+  const installerEvent = events.find((event) => resolvePrivacySafePath(event.path).toLowerCase() === resolve(installer).toLowerCase());
   if (!installerEvent) throw new Error("The final installer signing event path is unexpected.");
   const installerIndex = events.indexOf(installerEvent);
   if (applicationIndex < 0 || installerIndex <= applicationIndex) throw new Error("The Tauri application and installer signing event order is unexpected.");
@@ -411,7 +408,7 @@ function writeReleaseMetadata({ workRoot, source, releaseProfile, signerIdentity
       applicationSha256,
       installerApplicationEvidence,
       backend: backendSigningRecords.map((record) => ({ path: record.relativePath, classification: record.classification, beforeSha256: record.beforeSha256, afterSha256: record.afterSha256, signerThumbprint: record.signature.signerThumbprint })),
-      events: signingEvents.map(({ path, applicationCapturePath, ...event }) => ({ file: basename(path), applicationCapture: applicationCapturePath ? relative(DESKTOP_BUILD_ROOT, applicationCapturePath).replaceAll("\\", "/") : null, ...event })),
+      events: signingEvents.map(({ path, applicationCapturePath, ...event }) => ({ file: basename(path), applicationCapture: applicationCapturePath || null, ...event })),
     },
     artifacts,
     acceptance: { installedLifecycle: "NOT COMPLETED: deferred to frozen installed-edition acceptance.", pendingManualChecks: ["NSIS installation", "installed application launch", "backend startup and authentication", "upgrade, reset, recovery, and uninstall"] },
@@ -464,7 +461,7 @@ function formatTimestamp(date) {
 
 function dryRun(profile) {
   const config = loadSigningConfig(process.env, { dryRun: true });
-  process.stdout.write(`${JSON.stringify(buildDryRunPlan(profile, config), null, 2)}\n`);
+  process.stdout.write(`${sanitizeDiagnosticText(JSON.stringify(buildDryRunPlan(profile, config), null, 2))}\n`);
 }
 
 async function buildSignedRelease(releaseProfile) {
@@ -529,7 +526,7 @@ async function buildSignedRelease(releaseProfile) {
     },
   });
 
-  process.stdout.write(`${JSON.stringify({ releaseProfile, releaseCandidate: finalRoot, artifacts: state.metadata.artifacts, manifest: join(finalRoot, basename(state.metadata.manifestPath)), sha256Sums: join(finalRoot, basename(state.metadata.sumsPath)) }, null, 2)}\n`);
+  process.stdout.write(`${JSON.stringify({ releaseProfile, releaseCandidate: privacySafePath(finalRoot), artifacts: state.metadata.artifacts, manifest: privacySafePath(join(finalRoot, basename(state.metadata.manifestPath))), sha256Sums: privacySafePath(join(finalRoot, basename(state.metadata.sumsPath))) }, null, 2)}\n`);
 }
 
 async function main() {
@@ -539,5 +536,5 @@ async function main() {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(SCRIPT_PATH)) {
-  main().catch((error) => { process.stderr.write(`${error.message}\n`); process.exitCode = 1; });
+  main().catch((error) => { process.stderr.write(`${sanitizeDiagnosticText(error.message)}\n`); process.exitCode = 1; });
 }

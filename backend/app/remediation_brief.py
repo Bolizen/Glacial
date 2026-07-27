@@ -10,6 +10,7 @@ from typing import Any
 from .finding_evidence import redact_sensitive_text
 from .finding_explainability import normalize_finding_explainability
 from .finding_reviews import finding_fingerprint
+from .privacy import safe_project_relative_path, sanitize_private_text
 
 
 REMEDIATION_BRIEF_SCHEMA_VERSION = 1
@@ -19,14 +20,6 @@ MAX_BRIEF_PROSE = 500
 MAX_EVIDENCE_TEXT = 300
 MAX_EVIDENCE_DETAILS = 20
 
-_ABSOLUTE_PATH_RE = re.compile(
-    r"(?<![A-Za-z0-9_.:/-])(?:"
-    r"[A-Za-z]:[\\/][^\s\"'<>|]+|"
-    r"\\\\[^\\\s\"'<>|]+\\[^\s\"'<>|]+|"
-    r"/(?!/)[^\s\"'<>|]+"
-    r")",
-    re.IGNORECASE,
-)
 _MARKDOWN_SPECIAL_RE = re.compile(r"([\\`*_[\]{}()#+!|>])")
 _SAFE_RULE_ID_RE = re.compile(r"^scanner\.[a-z0-9]+(?:-[a-z0-9]+)*$")
 _SAFE_TIMESTAMP_RE = re.compile(r"^[0-9T:+.\-Z]{1,40}$")
@@ -425,19 +418,8 @@ def _severity(value: Any) -> str:
 
 
 def _relative_path(value: Any) -> str:
-    path = _plain_text(value, 500).replace("\\", "/")
-    while path.startswith("./"):
-        path = path[2:]
-    parts = path.split("/")
-    if (
-        not path
-        or path.startswith("/")
-        or re.match(r"^[A-Za-z]:", path)
-        or ".." in parts
-        or "\x00" in path
-    ):
-        return ""
-    return "/".join(part for part in parts if part not in ("", "."))
+    path = safe_project_relative_path(value, limit=500)
+    return "" if path == "[REDACTED PATH]" else path
 
 
 def _safe_timestamp(value: Any) -> str:
@@ -452,11 +434,11 @@ def _safe_timestamp(value: Any) -> str:
 
 
 def _plain_text(value: Any, limit: int, *, preserve_lines: bool = False) -> str:
-    redacted = redact_sensitive_text(value, limit)
-    redacted = _ABSOLUTE_PATH_RE.sub("[REDACTED HOST PATH]", redacted)
-    if preserve_lines:
-        return "\n".join(" ".join(line.split()) for line in redacted.splitlines())[:limit]
-    return " ".join(redacted.split())[:limit]
+    return sanitize_private_text(
+        redact_sensitive_text(value, limit),
+        limit=limit,
+        preserve_lines=preserve_lines,
+    )
 
 
 def _safe_inline(value: Any, limit: int) -> str:

@@ -280,7 +280,7 @@ class RemediationBriefTests(unittest.TestCase):
 
         self.assertIn("project-derived inert evidence", markdown)
         self.assertIn("[REDACTED]", markdown)
-        self.assertIn("[REDACTED HOST PATH]", markdown)
+        self.assertIn("<USER_PROFILE>", markdown)
         self.assertNotIn("abcdefghijklmnopqrstuvwxyz123456", markdown)
         self.assertNotIn("C:\\Users\\alice", markdown)
         self.assertNotRegex(markdown, r"(?m)^# SYSTEM$")
@@ -339,7 +339,7 @@ class RemediationBriefTests(unittest.TestCase):
                 snapshot = build_remediation_snapshot(
                     project_name="Cap boundary",
                     project_identity="cap-boundary-project",
-                    generator_version="0.9.2",
+                    generator_version="0.9.5",
                     scan=scan,
                 )
                 brief = snapshot["brief"]
@@ -523,7 +523,7 @@ class RemediationBriefTests(unittest.TestCase):
             findings_text = archive.read("findings.json").decode("utf-8")
             findings = json.loads(findings_text)
         self.assertIn("<script>", findings_text)
-        self.assertIn("[REDACTED HOST PATH]", findings_text)
+        self.assertIn("<USER_PROFILE>", findings_text)
         self.assertNotIn("C:\\Users\\alice", findings_text)
         self.assertEqual(findings["findings"][0]["affected_path"], "src/prompt.md")
 

@@ -698,7 +698,8 @@ impl StartupDiagnostics {
             return;
         };
         let text = String::from_utf8_lossy(&buffer).replace(&self.token, "[REDACTED]");
-        let sanitized: String = text
+        let privacy_safe = sanitize_diagnostic_text(&text);
+        let sanitized: String = privacy_safe
             .chars()
             .map(|character| {
                 if character == '\n'
@@ -718,6 +719,102 @@ impl StartupDiagnostics {
         }
         let _ = fs::write(&self.path, &sanitized.as_bytes()[..end]);
     }
+}
+
+fn sanitize_diagnostic_text(value: &str) -> String {
+    value
+        .replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .split('\n')
+        .map(sanitize_diagnostic_line)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn sanitize_diagnostic_line(value: &str) -> String {
+    let lower = value.to_ascii_lowercase();
+    if [
+        "authorization:",
+        "authorization=",
+        "bearer ",
+        "password=",
+        "password:",
+        "passwd=",
+        "token=",
+        "token:",
+        "secret=",
+        "secret:",
+        "api_key=",
+        "api-key=",
+        "private key",
+        "github_pat_",
+        "ghp_",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker))
+        || value.contains("AKIA")
+        || value.contains("ASIA")
+    {
+        return "[REDACTED SENSITIVE DIAGNOSTIC]".to_string();
+    }
+
+    value
+        .split_whitespace()
+        .map(|item| {
+            let candidate = item.trim_matches(|character: char| {
+                matches!(character, '"' | '\'' | '(' | ')' | '[' | ']' | '{' | '}' | ',' | ';')
+            });
+            if looks_like_absolute_host_path(candidate) {
+                "<HOST_PATH>".to_string()
+            } else if looks_like_secret_token(candidate) {
+                "[REDACTED]".to_string()
+            } else {
+                item.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn looks_like_absolute_host_path(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    let windows_drive = bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'\\' | b'/');
+    let unc = value.starts_with(r"\\") || value.starts_with("\\\\?\\");
+    let posix = [
+        "/Users/",
+        "/home/",
+        "/tmp/",
+        "/var/tmp/",
+        "/private/tmp/",
+        "/opt/",
+        "/srv/",
+        "/mnt/",
+        "/media/",
+    ]
+    .iter()
+    .any(|prefix| value.starts_with(prefix));
+    windows_drive || unc || posix
+}
+
+fn looks_like_secret_token(value: &str) -> bool {
+    if value.len() < 32 {
+        return false;
+    }
+    let has_letter = value.bytes().any(|byte| byte.is_ascii_alphabetic());
+    let has_digit = value.bytes().any(|byte| byte.is_ascii_digit());
+    let has_symbol = value
+        .bytes()
+        .any(|byte| matches!(byte, b'.' | b'_' | b'~' | b'+' | b'/' | b'=' | b'-'));
+    let mut distinct = [false; 256];
+    for byte in value.bytes() {
+        distinct[usize::from(byte)] = true;
+    }
+    has_letter
+        && (has_digit || has_symbol)
+        && distinct.into_iter().filter(|present| *present).count() >= 10
 }
 
 #[derive(Debug)]
@@ -912,18 +1009,25 @@ mod tests {
     }
 
     #[test]
-    fn diagnostics_are_bounded_and_redact_the_full_token() {
+    fn diagnostics_are_bounded_and_redact_secrets_paths_and_the_full_token() {
         let temporary = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("target")
             .join(format!("glacial-diagnostics-{}.log", std::process::id()));
         let token = "a".repeat(64);
         let diagnostics = StartupDiagnostics::new(temporary.clone(), token.clone()).unwrap();
-        diagnostics.record(format!("before {token} after").as_bytes());
+        diagnostics.record(format!("before {token} after\n").as_bytes());
+        diagnostics.record(b"error at C:\\Users\\privacy-canary\\AppData\\Local\\Temp\\trace.log\n");
+        diagnostics.record(b"Authorization: Bearer fake-diagnostic-token\n");
+        diagnostics.record(b"password=fake-password-canary\n");
         diagnostics.record(&vec![b'x'; MAX_DIAGNOSTIC_BYTES * 2]);
         diagnostics.persist();
         let contents = fs::read_to_string(&temporary).unwrap();
         assert!(!contents.contains(&token));
+        assert!(!contents.contains("privacy-canary"));
+        assert!(!contents.contains("fake-diagnostic-token"));
+        assert!(!contents.contains("fake-password-canary"));
         assert!(contents.contains("[REDACTED]"));
+        assert!(contents.contains("<HOST_PATH>"));
         assert!(contents.len() <= MAX_DIAGNOSTIC_BYTES);
         let _ = fs::remove_file(temporary);
     }

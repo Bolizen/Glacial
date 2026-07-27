@@ -8,6 +8,7 @@ from typing import Any
 
 from .finding_evidence import normalize_suspicious_text_evidence
 from .finding_explainability import normalize_finding_explainability
+from .privacy import sanitize_scan_value
 from .state_lifecycle import (
     DATABASE_SCHEMA_VERSION,
     configure_connection,
@@ -102,9 +103,15 @@ def note_counts() -> dict[str, int]:
 
 
 def row_to_scan(row: sqlite3.Row) -> dict[str, Any]:
-    findings = [_normalize_finding(finding) for finding in json.loads(row["findings_json"])]
+    findings = sanitize_scan_value(
+        [_normalize_finding(finding) for finding in json.loads(row["findings_json"])],
+        project_root=row["project_path"],
+    )
     finding_count = _row_value(row, "finding_count", len(findings))
-    metadata = _load_scan_metadata(row)
+    metadata = sanitize_scan_value(
+        _load_scan_metadata(row),
+        project_root=row["project_path"],
+    )
     if finding_count == 0 and findings:
         finding_count = len(findings)
     return {

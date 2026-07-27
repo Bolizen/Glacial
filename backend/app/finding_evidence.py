@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .privacy import normalize_control_characters, redact_secret_values
+
 
 SUSPICIOUS_TEXT_CONTEXT_LINES = 1
 SUSPICIOUS_TEXT_MAX_LINE_CHARS = 160
@@ -11,33 +13,6 @@ SUSPICIOUS_TEXT_MAX_EXCERPT_CHARS = (
     + SUSPICIOUS_TEXT_CONTEXT_LINES * 2
 )
 SUSPICIOUS_TEXT_MAX_PATTERN_CHARS = 120
-
-_PRIVATE_KEY_RE = re.compile(
-    r"-----BEGIN(?: [A-Z0-9]+)* PRIVATE KEY-----.*?"
-    r"(?:-----END(?: [A-Z0-9]+)* PRIVATE KEY-----|$)",
-    re.IGNORECASE | re.DOTALL,
-)
-_CREDENTIAL_URL_RE = re.compile(
-    r"([A-Z][A-Z0-9+.-]*://)([^/\s:@]+):([^@\s/]+)@",
-    re.IGNORECASE,
-)
-_AUTHORIZATION_RE = re.compile(
-    r"([\"']?\bauthorization\b[\"']?\s*[:=]\s*)[^\r\n]+",
-    re.IGNORECASE,
-)
-_BEARER_RE = re.compile(
-    r"\bbearer\s+[A-Z0-9._~+/=-]+",
-    re.IGNORECASE,
-)
-_CREDENTIAL_ASSIGNMENT_RE = re.compile(
-    r"([\"']?\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|"
-    r"password|passwd|secret|token)\b[\"']?\s*[:=]\s*)"
-    r"(?:\"[^\"\r\n]*\"|'[^'\r\n]*'|[^\s,;]+)",
-    re.IGNORECASE,
-)
-_KNOWN_ACCESS_KEY_RE = re.compile(r"\bAKIA[0-9A-Z]{16}\b")
-_LONG_TOKEN_RE = re.compile(r"[A-Z0-9._~+/=-]{32,}", re.IGNORECASE)
-
 
 def build_suspicious_text_evidence(text: str, pattern: str) -> dict[str, Any] | None:
     if not isinstance(text, str) or not isinstance(pattern, str):
@@ -123,19 +98,11 @@ def normalize_suspicious_text_evidence(value: Any) -> dict[str, Any] | None:
 
 
 def redact_sensitive_text(value: Any, limit: int) -> str:
-    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n")
-    bounded = "".join(
-        character if character in "\n\t" or ord(character) >= 32 else "�"
-        for character in text[:max(0, limit)]
-    )
-    return _redact_excerpt(bounded)
+    return _redact_excerpt(value)[:max(0, limit)]
 
 
 def _bounded_line(line: str, *, center: int | None) -> str:
-    clean = "".join(
-        character if character == "\t" or ord(character) >= 32 else "�"
-        for character in line
-    ).expandtabs(4)
+    clean = normalize_control_characters(line, preserve_lines=False).expandtabs(4)
     if len(clean) <= SUSPICIOUS_TEXT_MAX_LINE_CHARS:
         return clean
 
@@ -150,22 +117,5 @@ def _bounded_line(line: str, *, center: int | None) -> str:
     return f"{prefix}{clean[start:end]}{suffix}"
 
 
-def _redact_excerpt(excerpt: str) -> str:
-    redacted = _PRIVATE_KEY_RE.sub("[REDACTED PRIVATE KEY]", excerpt)
-    redacted = _CREDENTIAL_URL_RE.sub(r"\1[REDACTED]@", redacted)
-    redacted = _AUTHORIZATION_RE.sub(r"\1[REDACTED]", redacted)
-    redacted = _BEARER_RE.sub("Bearer [REDACTED]", redacted)
-    redacted = _CREDENTIAL_ASSIGNMENT_RE.sub(r"\1[REDACTED]", redacted)
-    redacted = _KNOWN_ACCESS_KEY_RE.sub("[REDACTED]", redacted)
-    return _LONG_TOKEN_RE.sub(_redact_long_token, redacted)
-
-
-def _redact_long_token(match: re.Match[str]) -> str:
-    value = match.group(0)
-    characters = set(value.lower())
-    has_letter = any(character.isalpha() for character in value)
-    has_digit = any(character.isdigit() for character in value)
-    has_token_symbol = any(character in "._~+/=-" for character in value)
-    if len(characters) >= 10 and has_letter and (has_digit or has_token_symbol):
-        return "[REDACTED]"
-    return value
+def _redact_excerpt(excerpt: Any) -> str:
+    return redact_secret_values(excerpt)

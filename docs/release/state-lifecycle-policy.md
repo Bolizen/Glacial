@@ -1,6 +1,6 @@
 # Glacial State Lifecycle and Recovery Policy
 
-Status: v1 policy baseline for Glacial 0.9.4. This document describes source-level behavior and required future acceptance. It is not evidence that installed, crash, power-loss, upgrade, reset, or uninstall behavior has passed.
+Status: v1 policy baseline for Glacial 0.9.5. This document describes source-level behavior and required future acceptance. It is not evidence that installed, crash, power-loss, upgrade, reset, or uninstall behavior has passed.
 
 ## Ownership boundary
 
@@ -9,7 +9,7 @@ Status: v1 policy baseline for Glacial 0.9.4. This document describes source-lev
 | State family | Storage | Contents and ownership |
 | --- | --- | --- |
 | SQLite database | `<Glacial data directory>/glacial.db` | The authoritative application database. Release desktop builds pass Tauri's application-local data directory plus `data`; development builds use the separated `development/data` directory. |
-| Database schema version | SQLite database header through `PRAGMA user_version` | The sole authoritative relational schema version. `DATABASE_SCHEMA_VERSION` is `1` in Glacial 0.9.4. It is not duplicated as an authoritative setting or JSON field. |
+| Database schema version | SQLite database header through `PRAGMA user_version` | The sole authoritative relational schema version. `DATABASE_SCHEMA_VERSION` is `1` in Glacial 0.9.5. It is not duplicated as an authoritative setting or JSON field. |
 | Settings | `settings` | Workspace-root selection. |
 | Projects and metadata | `projects` | Registration path, display name, description, type, and registration time. A row is a registration; it does not make the project directory application-owned. |
 | Immutable scans and scan metadata | `scans` | Append-only scan identity, time, risk, findings JSON, bounded counts, summary, coverage, reviewed/ignored-file metadata, dependency analysis, and related scanner metadata. |
@@ -46,7 +46,7 @@ Unregister, migration, backup, future reset, or uninstall logic must never reint
 
 Schema version `1` is the smallest honest first version: every database before Glacial 0.9.3 was unversioned and therefore reports `user_version = 0`.
 
-Glacial 0.9.4 supports:
+Glacial 0.9.5 supports:
 
 - a nonexistent, zero-byte, or valid table-empty database as new state;
 - schema version `0` when the database contains the historically evidenced core tables (`settings`, `projects`, `scans`, and `notes`), no unknown application tables, and only recognized later Glacial tables with their required historical columns and constraints;
@@ -93,8 +93,8 @@ Any exception before commit rolls back the whole migration. A verified pre-migra
 - Foreign keys: enabled on application connections and during initialization. Existing relationships are compatible with supported fixtures.
 - Busy timeout: 5,000 ms. A bounded lock wait is preferable to immediate spurious failure, but Glacial does not wait indefinitely.
 - Write transactions: `BEGIN IMMEDIATE` for migrations and state families that couple multiple writes or require stale-state revalidation.
-- Journal mode: not changed by Glacial 0.9.4. The existing database/runtime mode is retained because G046 found no artifact evidence justifying a mode migration.
-- Synchronous mode: not changed by Glacial 0.9.4. SQLite's existing/runtime default remains in force; G046 does not claim power-loss acceptance from this decision.
+- Journal mode: not changed by Glacial 0.9.5. The existing database/runtime mode is retained because G046 found no artifact evidence justifying a mode migration.
+- Synchronous mode: not changed by Glacial 0.9.5. SQLite's existing/runtime default remains in force; G046 does not claim power-loss acceptance from this decision.
 - Read/write connection context: normal single-statement writes use SQLite's implicit transaction and commit/rollback context. A Python `with connection:` block is not treated as proof; the fault tests exercise the effective transaction.
 
 ## Migration backups
@@ -172,7 +172,7 @@ Verified migration backups are retained indefinitely in the v1 policy unless a f
 
 ## Reset contract
 
-Glacial 0.9.4 does not expose a reset route or prominent reset UI. Any future supported reset must satisfy all of the following:
+Glacial 0.9.5 does not expose a reset route or prominent reset UI. Any future supported reset must satisfy all of the following:
 
 1. It is an explicit user action, never a response to startup, schema, integrity, migration, or content failure.
 2. Glacial and all concurrent state mutations are stopped before replacement.

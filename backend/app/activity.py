@@ -8,6 +8,7 @@ from datetime import datetime
 
 from .database import row_to_scan
 from .finding_reviews import enrich_scan
+from .privacy import sanitize_private_text
 
 
 EVENT_PROJECT_EXPECTATIONS_UPDATED = "project_expectations_updated"
@@ -339,7 +340,7 @@ def _bounded_details(value: dict[str, object]) -> dict[str, object]:
 
 
 def _bounded_text(value: object, limit: int) -> str:
-    return str(value or "").strip()[:limit]
+    return sanitize_private_text(value, limit=limit)
 
 
 def _timestamp(value: object) -> str:

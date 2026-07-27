@@ -20,6 +20,7 @@ Glacial is an early stage local-first project focused on project scanning, safet
 - [machine-readable audit snapshot](docs/release/v1.0-gap-audit.json)
 - [v1.0 owner decisions](docs/release/v1.0-owner-decisions.md)
 - [Agent Remediation format policy](docs/release/agent-remediation-format-policy.md)
+- [Data privacy and disclosure boundary](docs/release/data-privacy-boundary.md)
 - [recommended remediation sequence](docs/release/v1.0-remediation-sequence.md)
 
 These are planning and release-governance artifacts. They are not proof that Glacial is secure, complete, or ready for v1.0 release.
@@ -28,11 +29,13 @@ These are planning and release-governance artifacts. They are not proof that Gla
 
 Glacial v1 supports one Windows x64 product distribution: the installed application packaged through the NSIS installer. Application-owned mutable state uses the installed application-data and log locations documented in the [state lifecycle policy](docs/release/state-lifecycle-policy.md).
 
+Glacial 0.9.5 sanitizes project-derived and user-authored values before persistence and again at reports, remediation outputs, generated instructions, diagnostics, and release records. Operational absolute workspace/project paths remain local where required to reopen and validate registrations; exports use relative paths or documented placeholders. Production application traffic is authenticated loopback only. Explicitly invoked build/signing tools may use dependency, signer, or timestamp networks without receiving project content. See the canonical [data privacy and disclosure boundary](docs/release/data-privacy-boundary.md).
+
 Glacial does not provide or support a portable binary edition. Unpacked development builds, test fixtures, build staging directories, source checkouts, and GitHub-generated source archives are not portable product distributions. Copying or relocating files from an installation is unsupported and does not create a portable edition. Installed-edition upgrade, reset, recovery, and uninstall acceptance is still pre-v1 work; the repository remains `NOT READY`.
 
 ## Licensing
 
-Glacial v0.9.4 is licensed under the Functional Source License, Version 1.1, ALv2 Future License (`FSL-1.1-ALv2`). It is Fair Source and source-available, but it is not presently OSI open source.
+Glacial v0.9.5 is licensed under the Functional Source License, Version 1.1, ALv2 Future License (`FSL-1.1-ALv2`). It is Fair Source and source-available, but it is not presently OSI open source.
 
 Internal use, study, modification, and redistribution are permitted subject to the license. Offering Glacial, or substantially similar functionality, to others as a competing commercial product or service is not permitted under the public license. Separate commercial licensing may be available from the copyright holder.
 

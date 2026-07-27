@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .privacy import sanitize_private_text
+
 
 DEFAULT_PROJECT_RULES = """- Work only inside this project folder unless explicitly told otherwise.
 - Read files before editing and keep changes scoped to the requested task.
@@ -22,11 +24,31 @@ def generate_agents_md(
     test_commands: str,
     security_notes: str,
 ) -> str:
-    purpose = project_purpose.strip() or "Describe what this project is for."
-    rules = project_rules.strip() or DEFAULT_PROJECT_RULES
-    build = build_commands.strip() or "Document build commands here after verifying they are safe to run."
-    test = test_commands.strip() or "Document test commands here after verifying they are safe to run."
-    security = security_notes.strip() or "Review scripts, installers, environment files, and generated code before execution."
+    purpose = sanitize_private_text(
+        project_purpose,
+        limit=4000,
+        preserve_lines=True,
+    ) or "Describe what this project is for."
+    rules = sanitize_private_text(
+        project_rules,
+        limit=4000,
+        preserve_lines=True,
+    ) or DEFAULT_PROJECT_RULES
+    build = sanitize_private_text(
+        build_commands,
+        limit=4000,
+        preserve_lines=True,
+    ) or "Document build commands here after verifying they are safe to run."
+    test = sanitize_private_text(
+        test_commands,
+        limit=4000,
+        preserve_lines=True,
+    ) or "Document test commands here after verifying they are safe to run."
+    security = sanitize_private_text(
+        security_notes,
+        limit=4000,
+        preserve_lines=True,
+    ) or "Review scripts, installers, environment files, and generated code before execution."
 
     return f"""# AGENTS.md
 

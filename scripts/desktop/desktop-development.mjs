@@ -7,6 +7,7 @@ import {
   minimalEnvironment,
   removeSafeTree,
   runCommand,
+  sanitizeDiagnosticText,
 } from "./windows-signing.mjs";
 import { validateDesktopBuildEnvironment } from "./Build-SignedWindowsRelease.mjs";
 
@@ -17,8 +18,8 @@ const BACKEND_PAYLOAD = join(PYINSTALLER_ROOT, "dist", "glacial-backend");
 
 function runVisible(command, args, options = {}) {
   const result = runCommand(command, args, { cwd: options.cwd, env: options.env, timeoutMs: options.timeoutMs ?? 900_000 });
-  if (result.stdout) process.stdout.write(result.stdout);
-  if (result.stderr) process.stderr.write(result.stderr);
+  if (result.stdout) process.stdout.write(sanitizeDiagnosticText(result.stdout));
+  if (result.stderr) process.stderr.write(sanitizeDiagnosticText(result.stderr));
   return result;
 }
 
@@ -56,5 +57,5 @@ function main() {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(SCRIPT_PATH)) {
-  try { main(); } catch (error) { process.stderr.write(`${error.message}\n`); process.exitCode = 1; }
+  try { main(); } catch (error) { process.stderr.write(`${sanitizeDiagnosticText(error.message)}\n`); process.exitCode = 1; }
 }

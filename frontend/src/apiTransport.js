@@ -1,6 +1,7 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 
 import { API_BASE_URL } from "./apiConfig.js";
+import { safeErrorMessage } from "./privacy.js";
 
 
 const API_BRIDGE_COMMAND = "api_request";
@@ -30,26 +31,32 @@ export function createApiRequester(dependencies = {}) {
           throw error;
         }
         throw error instanceof Error
-          ? error
-          : new Error(typeof error === "string" && error ? error : "Request failed.");
+          ? new Error(safeErrorMessage(error.message))
+          : new Error(safeErrorMessage(error));
       }
       status = response?.status;
       data = response && Object.hasOwn(response, "body") ? response.body : {};
     } else {
       const fetchImpl = dependencies.fetchImpl || globalThis.fetch;
       const baseUrl = dependencies.baseUrl || API_BASE_URL;
-      const response = await fetchImpl(`${baseUrl}${path}`, {
-        method,
-        signal: options.signal,
-        headers: options.body ? { "Content-Type": "application/json" } : undefined,
-        body: options.body ? JSON.stringify(options.body) : undefined,
-      });
+      let response;
+      try {
+        response = await fetchImpl(`${baseUrl}${path}`, {
+          method,
+          signal: options.signal,
+          headers: options.body ? { "Content-Type": "application/json" } : undefined,
+          body: options.body ? JSON.stringify(options.body) : undefined,
+        });
+      } catch (error) {
+        if (error?.name === "AbortError") throw error;
+        throw new Error(safeErrorMessage(error?.message));
+      }
       status = response.status;
       data = await response.json().catch(() => ({}));
     }
 
     if (!Number.isInteger(status) || status < 200 || status > 299) {
-      throw new Error(data?.detail || "Request failed.");
+      throw new Error(safeErrorMessage(data?.detail));
     }
     return data;
   };

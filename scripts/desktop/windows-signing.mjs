@@ -150,10 +150,62 @@ export function minimalEnvironment(source = process.env, extras = {}, allowedNam
   return result;
 }
 
+export function privacySafePath(value) {
+  const target = resolve(String(value ?? ""));
+  for (const [root, placeholder] of [
+    [DESKTOP_BUILD_ROOT, "<DESKTOP_BUILD_ROOT>"],
+    [REPOSITORY_ROOT, "<REPOSITORY_ROOT>"],
+  ]) {
+    const child = relative(root, target);
+    if (!child || (!child.startsWith(`..${sep}`) && child !== ".." && !isAbsolute(child))) {
+      return child ? `${placeholder}/${child.replaceAll("\\", "/")}` : placeholder;
+    }
+  }
+  return `<HOST_PATH>/${basename(target)}`;
+}
+
+export function resolvePrivacySafePath(value) {
+  const text = String(value ?? "");
+  for (const [placeholder, root] of [
+    ["<DESKTOP_BUILD_ROOT>", DESKTOP_BUILD_ROOT],
+    ["<REPOSITORY_ROOT>", REPOSITORY_ROOT],
+  ]) {
+    if (text === placeholder) return root;
+    if (text.startsWith(`${placeholder}/`)) {
+      return resolve(root, text.slice(placeholder.length + 1));
+    }
+  }
+  return resolve(text);
+}
+
+export function sanitizeDiagnosticText(value, redactions = []) {
+  let text = String(value ?? "").replaceAll(/\r\n?/g, "\n");
+  for (const secret of redactions.filter((item) => typeof item === "string" && item.length > 0)) {
+    text = text.replaceAll(secret, "[REDACTED]");
+  }
+  text = text
+    .replace(/-----BEGIN(?: [A-Z0-9]+)* PRIVATE KEY-----[\s\S]*?(?:-----END(?: [A-Z0-9]+)* PRIVATE KEY-----|$)/gi, "[REDACTED PRIVATE KEY]")
+    .replace(/([A-Z][A-Z0-9+.-]*:\/\/)(?:[^/\s:@]+):(?:[^@\s/]+)@/gi, "$1[REDACTED]@")
+    .replace(/(["']?\bauthorization\b["']?\s*[:=]\s*)[^\r\n]+/gi, "$1[REDACTED]")
+    .replace(/\bbearer\s+[A-Z0-9._~+/=-]+/gi, "Bearer [REDACTED]")
+    .replace(/(["']?\b(?:[A-Z0-9_.-]*(?:api[_-]?key|access[_-]?token|refresh[_-]?token|auth[_-]?token|client[_-]?secret|password|passwd|pwd|secret|private[_-]?key)[A-Z0-9_.-]*)\b["']?\s*[:=]\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;}\])]+)/gim, "$1[REDACTED]")
+    .replace(/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g, "[REDACTED]")
+    .replace(/\b(?:gh[pousr]_[A-Za-z0-9]{20,255}|github_pat_[A-Za-z0-9_]{20,255})\b/gi, "[REDACTED]")
+    .replaceAll(REPOSITORY_ROOT, "<REPOSITORY_ROOT>")
+    .replaceAll(DESKTOP_BUILD_ROOT, "<DESKTOP_BUILD_ROOT>")
+    .replace(/(^|[^A-Za-z0-9])(?:[A-Za-z]:[\\/])Users[\\/][^\\/\s"'<>|]+/gi, "$1<USER_PROFILE>")
+    .replace(/<USER_PROFILE>[\\/]AppData[\\/]Local[\\/]Temp(?:[\\/][^\r\n\t"'<>|]*)?/gi, "<TEMP_DIR>")
+    .replace(/(^|[^A-Za-z0-9])\\\\[^\\/\s"'<>|]+\\[^\\/\s"'<>|]+(?:[\\/][^\r\n\t"'<>|]*)?/gi, "$1<HOST_PATH>")
+    .replace(/(^|[^A-Za-z0-9])(?:[A-Za-z]:[\\/])[^\r\n\t"'<>|]*/gi, "$1<HOST_PATH>")
+    .replace(/(^|[^A-Za-z0-9:])\/(?:Users|home|tmp|var\/tmp|private\/tmp|opt|srv|mnt|media)\/[^\r\n\t"'<>|]*/gi, "$1<HOST_PATH>")
+    .replaceAll(/\u001B\[[0-?]*[ -/]*[@-~]/g, "")
+    .replaceAll(/[^\t\n\x20-\x7E]/g, "");
+  return text;
+}
+
 function sanitizedFailureOutput(result, redactions = []) {
   let output = [result.stdout, result.stderr].filter(Boolean).join("\n");
-  for (const value of redactions.filter((item) => typeof item === "string" && item.length > 0)) output = output.replaceAll(value, "[REDACTED]");
-  output = output.replaceAll(/\u001B\[[0-?]*[ -/]*[@-~]/g, "").replaceAll(/[^\t\r\n\x20-\x7E]/g, "").trim();
+  output = sanitizeDiagnosticText(output, redactions).trim();
   if (output.length > 16_384) output = `${output.slice(0, 16_384)}\n[diagnostic output truncated]`;
   return output;
 }
@@ -243,7 +295,7 @@ function requireAbsoluteFile(path, name, dryRun) {
 
 function validateReleaseId(value) {
   if (!value) return null;
-  if (!/^Glacial-0\.9\.4-[0-9a-f]{12}-[0-9]{8}T[0-9]{6}Z$/i.test(value)) throw new Error("Invalid internal release id.");
+  if (!/^Glacial-0\.9\.5-[0-9a-f]{12}-[0-9]{8}T[0-9]{6}Z$/i.test(value)) throw new Error("Invalid internal release id.");
   return value;
 }
 
@@ -569,7 +621,14 @@ function appendAuditRecord(config, record) {
   if (!config.auditLog) return;
   const audit = assertSafePath(DESKTOP_BUILD_ROOT, config.auditLog);
   ensureSafeDirectory(DESKTOP_BUILD_ROOT, dirname(audit));
-  appendFileSync(audit, `${JSON.stringify(record)}\n`, { encoding: "utf8" });
+  const persisted = {
+    ...record,
+    path: privacySafePath(record.path),
+    applicationCapturePath: record.applicationCapturePath
+      ? privacySafePath(record.applicationCapturePath)
+      : null,
+  };
+  appendFileSync(audit, `${JSON.stringify(persisted)}\n`, { encoding: "utf8" });
 }
 
 function samePath(left, right) {
@@ -702,7 +761,7 @@ export function signingEnvironment(source, releaseId) {
 }
 
 function printDryRun(config) {
-  process.stdout.write(`${JSON.stringify({ provider: config.provider, expectedSubject: config.expectedSubject, expectedThumbprint: config.expectedThumbprint, signToolPath: config.signToolPath, timestampOrigin: new URL(config.timestampUrl).origin, timestampRequired: true, providerCommand: config.provider === "command" ? `${config.command} <reviewed argument array>` : null }, null, 2)}\n`);
+  process.stdout.write(`${JSON.stringify({ provider: config.provider, expectedSubject: config.expectedSubject, expectedThumbprint: config.expectedThumbprint, signToolPath: privacySafePath(config.signToolPath), timestampOrigin: new URL(config.timestampUrl).origin, timestampRequired: true, providerCommand: config.provider === "command" ? `${privacySafePath(config.command)} <reviewed argument array>` : null }, null, 2)}\n`);
 }
 
 async function main() {
@@ -716,5 +775,5 @@ async function main() {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(SIGNING_SCRIPT_PATH)) {
-  main().catch((error) => { process.stderr.write(`${error.message}\n`); process.exitCode = 1; });
+  main().catch((error) => { process.stderr.write(`${sanitizeDiagnosticText(error.message)}\n`); process.exitCode = 1; });
 }

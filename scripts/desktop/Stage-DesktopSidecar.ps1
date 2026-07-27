@@ -28,4 +28,4 @@ if (Test-Path -LiteralPath $stageRoot) {
 New-Item -ItemType Directory -Path $stageRoot | Out-Null
 Copy-Item -LiteralPath $sourceExecutable -Destination (Join-Path $stageRoot "glacial-backend-$targetTriple.exe")
 Copy-Item -LiteralPath $sourceSupport -Destination (Join-Path $stageRoot "_internal") -Recurse
-Write-Output $stageRoot
+Write-Output "<REPOSITORY_ROOT>\frontend\src-tauri\binaries"
