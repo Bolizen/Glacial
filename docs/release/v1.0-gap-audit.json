@@ -1,13 +1,13 @@
 {
   "schema_version": "1.0.0",
   "product": "Glacial",
-  "audited_version": "0.9.1",
-  "audited_commit": "4f100a22f634bc2e2817f669b518d6f6224aa5be",
-  "generated_at_utc": "2026-07-27T04:24:42Z",
+  "audited_version": "0.9.2",
+  "audited_commit": "6f9d30caff2070afcc8371f1e7b4ef1a05534f67",
+  "generated_at_utc": "2026-07-27T05:45:45Z",
   "overall_verdict": "NOT READY",
   "status_counts": {
-    "PASS": 30,
-    "PARTIAL": 21,
+    "PASS": 33,
+    "PARTIAL": 18,
     "FAIL": 6,
     "UNKNOWN": 3,
     "NOT_APPLICABLE": 0
@@ -15,7 +15,7 @@
   "priority_counts": {
     "P0": 0,
     "P1": 27,
-    "P2": 3,
+    "P2": 0,
     "P3": 0
   },
   "requirements": [
@@ -44,7 +44,7 @@
       "area": "Product identity and version integrity",
       "status": "PASS",
       "priority": null,
-      "summary": "Authoritative source versions agree on 0.9.1 and are machine-validated.",
+      "summary": "Authoritative source versions agree on 0.9.2 and are machine-validated.",
       "evidence": [
         "frontend/package.json and package-lock.json",
         "frontend/src-tauri/tauri.conf.json, Cargo.toml, and Cargo.lock",
@@ -114,11 +114,11 @@
       "area": "Product identity and version integrity",
       "status": "PASS",
       "priority": null,
-      "summary": "Documentation identifies 0.9.1 as pre-release governance work and does not imply v1 authorization.",
+      "summary": "Documentation identifies 0.9.2 as pre-release policy work and does not imply v1 authorization.",
       "evidence": [
         "README.md Current Status",
-        "RELEASE_NOTES.md 0.9.1 entry",
-        "backend/app/changelog.py 0.9.1 entry",
+        "RELEASE_NOTES.md 0.9.2 entry",
+        "backend/app/changelog.py 0.9.2 entry",
         "docs/release/v1.0-gap-audit.md NOT READY verdict"
       ],
       "gap": "",
@@ -515,19 +515,19 @@
     {
       "id": "V1-AGENT-003",
       "area": "Agent remediation outputs",
-      "status": "PARTIAL",
-      "priority": "P2",
-      "summary": "The 100-finding cap and omissions are explicit, but v1 acceptance is undecided.",
+      "status": "PASS",
+      "priority": null,
+      "summary": "The accepted v1 handoff boundary includes at most 100 canonically ordered unresolved findings with exact count disclosure.",
       "evidence": [
-        "backend/app/remediation_brief.py MAX_INCLUDED_FINDINGS",
+        "docs/release/v1.0-owner-decisions.md V1-DEC-001",
+        "backend/app/remediation_brief.py MAX_REMEDIATION_FINDINGS",
         "Brief and package included/unresolved/omitted metadata",
-        "G043 documentation and tests"
+        "backend/tests/test_remediation_brief.py 99, 100, 101, and mixed-severity cap matrix"
       ],
-      "gap": "No owner decision accepts or changes the cap for v1.",
-      "recommended_remediation": "Record acceptance with rationale or change the bounded design.",
+      "gap": "",
+      "recommended_remediation": "",
       "closure_evidence": [
-        "Committed owner decision.",
-        "Cap-boundary tests."
+        "Retain the owner decision and passing cap-boundary tests."
       ],
       "waiver_permitted": true
     },
@@ -571,19 +571,20 @@
     {
       "id": "V1-AGENT-006",
       "area": "Agent remediation outputs",
-      "status": "PARTIAL",
-      "priority": "P2",
-      "summary": "Formats are versioned, but long-term compatibility and retention policy is absent.",
+      "status": "PASS",
+      "priority": null,
+      "summary": "Brief and package formats have independent versions plus an approved compatibility, reader, retention, and deprecation policy.",
       "evidence": [
+        "docs/release/v1.0-owner-decisions.md V1-DEC-002",
+        "docs/release/agent-remediation-format-policy.md",
         "REMEDIATION_BRIEF_SCHEMA_VERSION",
         "PACKAGE_FORMAT_VERSION and FINDINGS_SCHEMA_VERSION",
-        "Request schema validation"
+        "No current Glacial remediation-archive reader or importer"
       ],
-      "gap": "Compatibility duration, future-reader behavior, retention, and deprecation are not published.",
-      "recommended_remediation": "Approve a small remediation-format compatibility policy.",
+      "gap": "",
+      "recommended_remediation": "",
       "closure_evidence": [
-        "Published policy.",
-        "Unsupported-future-format tests."
+        "Any future owned reader must add supported-major acceptance and unsupported-major rejection tests before shipment."
       ],
       "waiver_permitted": true
     },
@@ -673,7 +674,7 @@
         "frontend/src-tauri/src/backend.rs app-local data/log resolution",
         "Installer and portable build scripts only"
       ],
-      "gap": "No v0.9.1 installed or portable artifact or clean-machine lifecycle record exists.",
+      "gap": "No v0.9.2 installed or portable artifact or clean-machine lifecycle record exists.",
       "recommended_remediation": "Produce an RC after upstream blockers close and execute the edition lifecycle matrix.",
       "closure_evidence": [
         "Exact path inventory.",
@@ -762,21 +763,24 @@
     {
       "id": "V1-SEC-004",
       "area": "Security and privacy posture",
-      "status": "PARTIAL",
-      "priority": "P2",
-      "summary": "The sole open Dependabot alert is statically non-reachable in shipped Glacial, but remains open and undecided.",
+      "status": "PASS",
+      "priority": null,
+      "summary": "The sole advisory-affected PostCSS path is resolved to fixed version 8.5.18 through a narrow exact override.",
       "evidence": [
-        "GitHub REST 2026-07-27: Dependabot alert #2, GHSA-r28c-9q8g-f849, postcss 8.5.16, high",
-        "frontend/package-lock.json Vite to PostCSS dependency edge",
-        "No repository PostCSS API or selected-project CSS path",
+        "GitHub REST before remediation: alert #2 open for GHSA-r28c-9q8g-f849, postcss <=8.5.17, first patched 8.5.18",
+        "docs/release/v1.0-owner-decisions.md V1-DEC-003",
+        "frontend/package.json exact postcss 8.5.18 override",
+        "frontend/package-lock.json contains one postcss path at 8.5.18",
+        "npm ls and npm explain: Vite 7.3.6 to overridden PostCSS 8.5.18",
+        "Production frontend build passed",
         "Tauri ships frontend/dist and release inventory excludes node_modules",
-        "Codex Security triage verdict not_actionable with high confidence"
+        "No repository PostCSS API or selected-project CSS path"
       ],
-      "gap": "No owner, expiry, fixed lockfile, or waiver exists; final artifact absence remains to be confirmed.",
-      "recommended_remediation": "Prefer a narrow reviewed update, or record a time-bounded owner waiver and re-triage on build-path changes.",
+      "gap": "",
+      "recommended_remediation": "",
       "closure_evidence": [
-        "Closed alert or committed waiver.",
-        "Final artifact inventory proving PostCSS is not shipped."
+        "Keep the resolved tree free of advisory-affected PostCSS versions.",
+        "Capture GitHub alert refresh after push; final artifact inventory remains a separate release-candidate gate."
       ],
       "waiver_permitted": true
     },
@@ -824,11 +828,11 @@
       "priority": "P1",
       "summary": "Release preflight and lockfiles are exact, but the npm manifest retains loose production dependency ranges.",
       "evidence": [
-        "G044 starting state: clean main at 4f100a2 with local, origin, and remote alignment",
+        "G045 starting state: clean main at 39e284d with local, origin, and remote alignment",
         "Exact npm, Python, and Cargo locks",
         "scripts/desktop/Build-SignedWindowsRelease.mjs clean-source preflight"
       ],
-      "gap": "frontend/package.json uses ^ ranges for four production dependency declarations, contrary to the repository dependency-security rule, although npm ci consumes the exact lockfile.",
+      "gap": "frontend/package.json uses ^ ranges for four production dependency declarations, contrary to the repository dependency-security rule, although npm ci consumes the exact lockfile. The exact PostCSS security override does not close this separate declaration gap.",
       "recommended_remediation": "Decide and apply exact reviewed manifest versions without unrelated upgrades, then review lockfile parity and rerun the clean preflight.",
       "closure_evidence": [
         "Exact manifest declarations.",
@@ -866,7 +870,7 @@
         "Identical application capture requirement",
         "Inventory exclusion and portable re-extraction tests"
       ],
-      "gap": "No v0.9.1 or v1 candidate installer/portable inventory exists.",
+      "gap": "No v0.9.2 or v1 candidate installer/portable inventory exists.",
       "recommended_remediation": "Construct one bounded public-RC candidate after upstream blockers close.",
       "closure_evidence": [
         "Candidate artifact inventory.",
@@ -939,7 +943,7 @@
       "evidence": [
         "README.md",
         "SECURITY.md",
-        "RELEASE_NOTES.md 0.9.1 entry",
+        "RELEASE_NOTES.md 0.9.2 entry",
         "Readiness document links and disclaimer"
       ],
       "gap": "",
