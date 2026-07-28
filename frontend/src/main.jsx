@@ -34,6 +34,7 @@ import {
 } from "./projectExpectations.js";
 import { buildProjectDriftSummary } from "./projectDrift.js";
 import { buildProjectSecurityStatus } from "./projectSecurityStatus.js";
+import { validateStructuredDigest } from "./privacy.js";
 import {
   buildReviewCheckpointPreview,
   EMPTY_REVIEW_CHECKPOINTS,
@@ -503,6 +504,7 @@ export function App() {
       ) {
         throw new Error("The backend returned an invalid remediation package.");
       }
+      const packageSha256 = validateStructuredDigest(result?.sha256, "sha256");
       const bytes = decodeBase64(result.packageBase64);
       exportBlob(
         new Blob([bytes], { type: "application/zip" }),
@@ -510,7 +512,7 @@ export function App() {
       );
       setRemediationBrief((current) => ({
         ...current,
-        status: `Package download started. SHA-256: ${result.sha256}`,
+        status: `Package download started. SHA-256: ${packageSha256}`,
       }));
     } catch (error) {
       if (remediationPackageRequestRef.current !== packageRequestId) return;

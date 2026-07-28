@@ -766,6 +766,8 @@ fn sanitize_diagnostic_line(value: &str) -> String {
             });
             if looks_like_absolute_host_path(candidate) {
                 "<HOST_PATH>".to_string()
+            } else if contains_bounded_hex_token(candidate) {
+                redact_bounded_hex_tokens(item)
             } else if looks_like_secret_token(candidate) {
                 "[REDACTED]".to_string()
             } else {
@@ -774,6 +776,39 @@ fn sanitize_diagnostic_line(value: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+fn contains_bounded_hex_token(value: &str) -> bool {
+    redact_bounded_hex_tokens(value) != value
+}
+
+fn redact_bounded_hex_tokens(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut result = String::with_capacity(value.len());
+    let mut copied_until = 0;
+    let mut index = 0;
+    while index < bytes.len() {
+        if !bytes[index].is_ascii_hexdigit() {
+            index += 1;
+            continue;
+        }
+        let start = index;
+        while index < bytes.len() && bytes[index].is_ascii_hexdigit() {
+            index += 1;
+        }
+        let bounded_left = start == 0 || !bytes[start - 1].is_ascii_alphanumeric();
+        let bounded_right = index == bytes.len() || !bytes[index].is_ascii_alphanumeric();
+        if (40..=128).contains(&(index - start)) && bounded_left && bounded_right {
+            result.push_str(&value[copied_until..start]);
+            result.push_str("[REDACTED]");
+            copied_until = index;
+        }
+    }
+    if copied_until == 0 {
+        return value.to_string();
+    }
+    result.push_str(&value[copied_until..]);
+    result
 }
 
 fn looks_like_absolute_host_path(value: &str) -> bool {
@@ -1019,6 +1054,19 @@ mod tests {
         diagnostics.record(b"error at C:\\Users\\privacy-canary\\AppData\\Local\\Temp\\trace.log\n");
         diagnostics.record(b"Authorization: Bearer fake-diagnostic-token\n");
         diagnostics.record(b"password=fake-password-canary\n");
+        let hex_canaries = [
+            "A1".repeat(20),
+            "b2".repeat(32),
+            "C3d4".repeat(24),
+            "e5F6".repeat(32),
+        ];
+        diagnostics.record(
+            format!(
+                "{}\nprose {}\nevidence/{}.txt\nsha512:{}\n",
+                hex_canaries[0], hex_canaries[1], hex_canaries[2], hex_canaries[3]
+            )
+            .as_bytes(),
+        );
         diagnostics.record(&vec![b'x'; MAX_DIAGNOSTIC_BYTES * 2]);
         diagnostics.persist();
         let contents = fs::read_to_string(&temporary).unwrap();
@@ -1026,6 +1074,9 @@ mod tests {
         assert!(!contents.contains("privacy-canary"));
         assert!(!contents.contains("fake-diagnostic-token"));
         assert!(!contents.contains("fake-password-canary"));
+        for canary in hex_canaries {
+            assert!(!contents.contains(&canary));
+        }
         assert!(contents.contains("[REDACTED]"));
         assert!(contents.contains("<HOST_PATH>"));
         assert!(contents.len() <= MAX_DIAGNOSTIC_BYTES);

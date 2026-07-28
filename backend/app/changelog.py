@@ -2,6 +2,16 @@ from __future__ import annotations
 
 CHANGELOG_ENTRIES = [
     {
+        "version": "0.9.6",
+        "date": "2026-07-27",
+        "title": "Hex-secret redaction correction",
+        "changes": [
+            "Corrected the G048 privacy boundary so generic free text redacts standalone 40-128 character hexadecimal values by default, including values in evidence, paths, errors, diagnostics, reports, and generated outputs.",
+            "Preserved legitimate commits, checksums, signing hashes, dependency identities, and Glacial fingerprints only through explicit field-specific validation; digest-like characters or prefixes alone no longer grant trusted treatment.",
+            "Retained deterministic remediation packages, schema versions, the installed-only product boundary, and the NOT READY verdict while native installed-app privacy inspection remains outstanding.",
+        ],
+    },
+    {
         "version": "0.9.5",
         "date": "2026-07-27",
         "title": "Data privacy and disclosure boundary",

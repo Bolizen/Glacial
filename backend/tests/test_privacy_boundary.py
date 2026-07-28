@@ -20,6 +20,7 @@ from app.privacy import (
     safe_project_relative_path,
     sanitize_private_text,
     sanitize_scan_value,
+    validate_structured_digest,
 )
 from app.remediation_brief import build_remediation_snapshot
 from app.remediation_package import build_remediation_package
@@ -43,6 +44,12 @@ FAKE_UNC_PATH = r"\\privacy-server\private-share\hostile.txt"
 FAKE_UNICODE_PATH = r"D:\Utilisateurs\Renée\秘密\hostile.txt"
 FAKE_CONNECTION = "postgresql://privacy-user:privacy-db-password@localhost/private"
 FAKE_ENV_LINE = "SERVICE_API_KEY=privacy-env-value-0123456789"
+FAKE_HEX_CANARIES = (
+    "A1" * 20,
+    "b2" * 32,
+    "C3d4" * 24,
+    "e5F6" * 32,
+)
 FORBIDDEN = (
     FAKE_AWS_KEY,
     FAKE_GITHUB_TOKEN,
@@ -54,6 +61,7 @@ FORBIDDEN = (
     "Renée",
     "privacy-db-password",
     "privacy-env-value-0123456789",
+    *FAKE_HEX_CANARIES,
 )
 
 
@@ -69,6 +77,10 @@ def hostile_text() -> str:
             f"url={FAKE_CONNECTION}",
             FAKE_AWS_KEY,
             FAKE_GITHUB_TOKEN,
+            f"hex40={FAKE_HEX_CANARIES[0]}",
+            f"prose contains {FAKE_HEX_CANARIES[1]} safely",
+            FAKE_HEX_CANARIES[2],
+            f"filename=reports/{FAKE_HEX_CANARIES[3]}.txt",
             "-----BEGIN PRIVATE KEY-----",
             FAKE_PRIVATE_KEY_BODY,
             "-----END PRIVATE KEY-----",
@@ -122,6 +134,36 @@ class PrivacyHelperTests(unittest.TestCase):
         )
         secret_filename = safe_project_relative_path(f"src/{FAKE_GITHUB_TOKEN}.js")
         self.assertEqual(secret_filename, "src/[REDACTED].js")
+        hex_filename = safe_project_relative_path(
+            f"reports/{FAKE_HEX_CANARIES[1]}.json"
+        )
+        self.assertEqual(hex_filename, "reports/[REDACTED].json")
+
+    def test_generic_hex_tokens_redact_but_structured_digest_contracts_are_exact(self) -> None:
+        for canary in FAKE_HEX_CANARIES:
+            self.assertEqual(sanitize_private_text(canary), "[REDACTED]")
+            self.assertNotIn(
+                canary,
+                sanitize_private_text(f"evidence before/{canary}.txt after"),
+            )
+
+        commit = "1a" * 20
+        checksum = "B2" * 32
+        fingerprint = "cf1_" + ("c3" * 32)
+        self.assertEqual(validate_structured_digest(commit, "git-commit"), commit)
+        self.assertEqual(validate_structured_digest(checksum, "sha256"), checksum)
+        self.assertEqual(
+            validate_structured_digest(fingerprint, "fingerprint"),
+            fingerprint,
+        )
+        for value, contract in (
+            ("f" * 39, "git-commit"),
+            ("f" * 63, "sha256"),
+            ("f" * 64, "fingerprint"),
+            ("cf1_" + ("f" * 63), "fingerprint"),
+        ):
+            with self.assertRaises(ValueError):
+                validate_structured_digest(value, contract)
 
     def test_scan_sanitization_retains_security_and_dependency_utility(self) -> None:
         value = {
@@ -145,6 +187,18 @@ class PrivacyHelperTests(unittest.TestCase):
                 ]
             },
             "reviewedFiles": ["src/ordinary.js", FAKE_WINDOWS_PATH],
+            "structured": {
+                "fingerprint": "cf1_" + ("a2" * 32),
+                "vcsRequestedRevision": "rev:sha256:" + ("b3" * 32),
+                "integrity": "sha512-QUJDRA==",
+            },
+            "ordinary": {
+                "description": FAKE_HEX_CANARIES[0],
+                "notes": FAKE_HEX_CANARIES[1],
+                "metadata": FAKE_HEX_CANARIES[2],
+                "filename": f"{FAKE_HEX_CANARIES[3]}.txt",
+                "fingerprint": FAKE_HEX_CANARIES[1],
+            },
         }
         sanitized = sanitize_scan_value(value, project_root=r"C:\workspace\project")
         serialized = json.dumps(sanitized, ensure_ascii=False, sort_keys=True)
@@ -162,6 +216,16 @@ class PrivacyHelperTests(unittest.TestCase):
             {"name": "react", "version": "19.0.0"},
         )
         self.assertIn("src/ordinary.js", sanitized["reviewedFiles"])
+        self.assertEqual(
+            sanitized["structured"]["fingerprint"],
+            "cf1_" + ("a2" * 32),
+        )
+        self.assertEqual(
+            sanitized["structured"]["vcsRequestedRevision"],
+            "rev:sha256:" + ("b3" * 32),
+        )
+        self.assertEqual(sanitized["structured"]["integrity"], "sha512-QUJDRA==")
+        self.assertNotIn(FAKE_HEX_CANARIES[1], serialized)
 
 
 class PrivacyPersistenceAndExportTests(unittest.TestCase):
@@ -356,7 +420,7 @@ class PrivacyPersistenceAndExportTests(unittest.TestCase):
             project_name=hostile_text(),
             project_identity=str(self.project),
             scan=unreviewed_scan,
-            generator_version="0.9.5",
+            generator_version="0.9.6",
         )
         package = build_remediation_package(
             project_name=hostile_text(),

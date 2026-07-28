@@ -1,3 +1,17 @@
+# Glacial 0.9.6 Hex-Secret Redaction Correction
+
+Glacial 0.9.6 corrects the G048 privacy boundary so arbitrary credential-shaped hexadecimal values are not retained merely because they resemble hashes. It remains a pre-v1 hardening release and `NOT READY`; native installed-app privacy inspection and unrelated P1 requirements remain unresolved.
+
+## Hexadecimal privacy boundary
+
+- Redacts standalone 40-, 64-, 96-, and 128-character hexadecimal values by default in generic Python, frontend, Rust, Node, and PowerShell-child diagnostic text, including prose, evidence, errors, metadata, filenames, and path segments.
+- Removes generic `sha256`, `sha384`, `sha512`, `cf..._`, and raw-hex exemptions; a digest-like prefix or length is not a trust signal.
+- Retains exact Git commits, SHA-256 artifact/member checksums, snapshot digests, evidence/dependency fingerprints, signing pre/post hashes, release-manifest hashes, certificate thumbprints, and readiness commit references only through strict field-specific validation.
+- Rejects or safely bounds malformed structured digest values while preserving deterministic remediation package bytes and checksums for identical sanitized inputs.
+- Adds fake-canary regression evidence across SQLite persistence, reports, generated `AGENTS.md`, remediation briefs/packages, frontend errors, Rust startup diagnostics, Node build/signing output, signing audits, release manifests, and PowerShell child output.
+- Keeps SQLite schema version `1`, remediation schemas/formats, the installed-only distribution decision, `V1-FS-006` at `PARTIAL`/P1, `V1-SEC-002` at `PASS`, and the overall readiness verdict at `NOT READY`.
+- Inserts G049 as this correction and shifts the remaining ordered roadmap to G050–G058 without executing later work.
+
 # Glacial 0.9.5 Data Privacy and Disclosure Boundary
 
 Glacial 0.9.5 establishes a source-backed privacy boundary for application state, reports, remediation outputs, generated files, diagnostics, build/release records, and loopback process communication. It remains a pre-v1 hardening release and `NOT READY` while unrelated P1 requirements remain unresolved.
@@ -22,7 +36,7 @@ Glacial 0.9.4 formally retires the portable binary distribution and narrows the 
 - Uses the installed application-data and log model already selected by production runtime code; unsupported copying or relocation of installed files does not create a supported edition.
 - Reduces ambiguous state locations, relocation behavior, filesystem compatibility problems, duplicate artifact testing, and unclear upgrade/uninstall semantics.
 - Reframes the permanent readiness contract around one installed NSIS edition without converting missing lifecycle, signing, release-candidate, reset, recovery, upgrade, or uninstall evidence into passes.
-- Rebaselines the remaining handoffs as G048 through G057; tagging and GitHub Release publication remain separately authorized after G057.
+- Rebaselined the then-current remaining handoffs as G048 through G057; G049 later inserted the 0.9.6 correction and shifted unfinished work to G050 through G058.
 
 # Glacial 0.9.3 Versioned State Lifecycle and Recovery
 

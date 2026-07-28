@@ -94,21 +94,27 @@ test("exports every current and future finding with complete detailed evidence",
 test("report disclosure sanitizes legacy host paths credentials and control characters", () => {
   const awsKey = "AKIAIOSFODNN7EXAMPLE";
   const githubToken = "ghp_0123456789abcdefghijklmnopqrstuvwxyzAB";
+  const hexCanaries = [
+    "A1".repeat(20),
+    "b2".repeat(32),
+    "C3d4".repeat(24),
+    "e5F6".repeat(32),
+  ];
   const hostPath = "C:\\Users\\privacy-canary\\AppData\\Local\\Temp\\trace.txt";
   const markdown = buildScanReportMarkdown(
     {
       ...scanResult([
         finding(
           "suspicious-text-pattern",
-          `src/${githubToken}.js`,
-          `Authorization: Bearer privacy-bearer-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ at ${hostPath}`,
+          `src/${hexCanaries[0]}/${githubToken}.js`,
+          `Authorization: Bearer privacy-bearer-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ at ${hostPath} ${hexCanaries[1]}`,
           {
-            pattern: "curl",
+            pattern: hexCanaries[2],
             evidence: {
               line: 17,
               matchCount: 1,
-              pattern: "curl",
-              excerpt: `curl https://user:password@example.invalid/${awsKey}`,
+              pattern: hexCanaries[2],
+              excerpt: `curl https://user:password@example.invalid/${awsKey}/${hexCanaries[0]}`,
               additionalMatchesOmitted: false,
             },
           },
@@ -119,7 +125,7 @@ test("report disclosure sanitizes legacy host paths credentials and control char
     reportFixture({
       totalFindings: 1,
       reviewedFiles: ["src/ordinary.js", hostPath],
-      zone: `private ${githubToken}`,
+      zone: `private ${githubToken} ${hexCanaries[3]}`,
     }),
     comparisonFixture(),
     trustContextFixture(),
@@ -132,6 +138,7 @@ test("report disclosure sanitizes legacy host paths credentials and control char
     "privacy-canary",
     "user:password",
     "\u001b",
+    ...hexCanaries,
   ]) {
     assert.equal(markdown.includes(forbidden), false, forbidden);
   }

@@ -7,6 +7,7 @@ const CONNECTION_SECRET = /(\b(?:password|passwd|pwd|user\s*id|uid)\s*=\s*)[^;\s
 const AWS_ACCESS_KEY = /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g;
 const GITHUB_TOKEN = /\b(?:gh[pousr]_[A-Za-z0-9]{20,255}|github_pat_[A-Za-z0-9_]{20,255})\b/gi;
 const JWT = /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g;
+const HEX_SECRET = /(^|[^A-Za-z0-9])([0-9a-f]{40,128})(?=$|[^A-Za-z0-9])/gi;
 const LONG_TOKEN = /(^|[^A-Za-z0-9])([A-Za-z0-9._~+/=-]{32,})(?=$|[^A-Za-z0-9])/g;
 
 const EXTENDED_WINDOWS_PATH = /(^|[^A-Za-z0-9])\\\\\?\\(?:UNC\\[^\\/\s"'<>|]+\\[^\\/\s"'<>|]+|[A-Za-z]:\\)[^\r\n\t"'<>|]*/gi;
@@ -27,6 +28,7 @@ export function redactSecretValues(value) {
     .replace(AWS_ACCESS_KEY, "[REDACTED]")
     .replace(GITHUB_TOKEN, "[REDACTED]")
     .replace(JWT, "[REDACTED]");
+  text = text.replace(HEX_SECRET, "$1[REDACTED]");
   return text.replace(LONG_TOKEN, (match, prefix, token) => (
     shouldRedactLongToken(token) ? `${prefix}[REDACTED]` : match
   ));
@@ -58,6 +60,20 @@ export function safeErrorMessage(value, fallback = "Request failed.") {
 }
 
 
+export function validateStructuredDigest(value, contract) {
+  if (typeof value !== "string") throw new TypeError(`${contract} must be a string.`);
+  const patterns = {
+    "git-commit": /^[0-9a-f]{40}$/i,
+    sha256: /^[0-9a-f]{64}$/i,
+    fingerprint: /^(?:cf1_|cfdb2_|cpex1_|cpda1_|cpfr1_|cpbf1_|cpcov1_|cpr1_)[0-9a-f]{64}$/,
+  };
+  const pattern = patterns[contract];
+  if (!pattern) throw new TypeError("Unknown structured digest contract.");
+  if (!pattern.test(value)) throw new TypeError(`${contract} is invalid.`);
+  return value;
+}
+
+
 function normalizeControls(value) {
   return String(value ?? "")
     .replace(/\r\n?/g, "\n")
@@ -66,8 +82,6 @@ function normalizeControls(value) {
 
 
 function shouldRedactLongToken(value) {
-  if (/^[0-9a-f]{40,128}$/i.test(value)) return false;
-  if (/^(?:sha(?:256|384|512)[:_-]|cf[a-z0-9]*_)/i.test(value)) return false;
   const characters = new Set(value.toLowerCase());
   const hasLetter = /[A-Za-z]/.test(value);
   const hasDigit = /[0-9]/.test(value);

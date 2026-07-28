@@ -339,7 +339,7 @@ class RemediationBriefTests(unittest.TestCase):
                 snapshot = build_remediation_snapshot(
                     project_name="Cap boundary",
                     project_identity="cap-boundary-project",
-                    generator_version="0.9.5",
+                    generator_version="0.9.6",
                     scan=scan,
                 )
                 brief = snapshot["brief"]

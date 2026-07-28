@@ -875,6 +875,22 @@ test("Agent Remediation Brief uses the latest Review scan and previews, copies, 
   assert.equal(await downloadedBlob.text(), "deterministic-zip-bytes");
   assert.match(modal.textContent, new RegExp(`SHA-256: ${"b".repeat(64)}`));
   assert.equal(buttonWithText("Download package (.zip)").disabled, false);
+  const downloadsBeforeMalformedChecksum = downloadCount;
+  await click(buttonWithText("Download package (.zip)"));
+  await respond(
+    await fetchHarness.next("/api/remediation-package", { method: "POST" }),
+    {
+      fileName: "glacial-agent-remediation-package-scan-152.zip",
+      mediaType: "application/zip",
+      packageBase64: Buffer.from("must-not-download").toString("base64"),
+      sha256: "f".repeat(63),
+      sizeBytes: 17,
+      snapshotDigest: "a".repeat(64),
+    },
+  );
+  assert.equal(downloadCount, downloadsBeforeMalformedChecksum);
+  assert.match(modal.textContent, /Could not download the package/);
+  assert.equal(buttonWithText("Download package (.zip)").disabled, false);
   await click(buttonWithText("Download package (.zip)"));
   await respond(
     await fetchHarness.next("/api/remediation-package", { method: "POST" }),

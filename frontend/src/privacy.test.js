@@ -6,6 +6,7 @@ import {
   replaceAbsolutePaths,
   safeErrorMessage,
   sanitizeDisclosureText,
+  validateStructuredDigest,
 } from "./privacy.js";
 
 
@@ -39,6 +40,12 @@ const FORBIDDEN = [
   "\u001b",
   "\u0000",
 ];
+const HEX_CANARIES = [
+  "A1".repeat(20),
+  "b2".repeat(32),
+  "C3d4".repeat(24),
+  "e5F6".repeat(32),
+];
 
 
 test("frontend disclosure helpers redact hostile credentials paths and controls", () => {
@@ -67,4 +74,27 @@ test("frontend error messages are bounded and sanitize backend legacy detail", (
   assert.ok(message.length <= 300);
   for (const value of FORBIDDEN) assert.equal(message.includes(value), false);
   assert.match(message, /Failure at/);
+});
+
+
+test("frontend generic disclosure redacts hex canaries while typed digests remain exact", () => {
+  const disclosure = sanitizeDisclosureText([
+    HEX_CANARIES[0],
+    `prose ${HEX_CANARIES[1]} after`,
+    `evidence/${HEX_CANARIES[2]}.txt`,
+    `sha512:${HEX_CANARIES[3]}`,
+  ].join("\n"), 4000, { preserveLines: true });
+  for (const canary of HEX_CANARIES) assert.equal(disclosure.includes(canary), false);
+  assert.equal((disclosure.match(/\[REDACTED\]/g) || []).length, 4);
+  assert.equal(safeErrorMessage(`API failed: ${HEX_CANARIES[1]}`).includes(HEX_CANARIES[1]), false);
+
+  const commit = "1a".repeat(20);
+  const checksum = "B2".repeat(32);
+  const fingerprint = `cf1_${"c3".repeat(32)}`;
+  assert.equal(validateStructuredDigest(commit, "git-commit"), commit);
+  assert.equal(validateStructuredDigest(checksum, "sha256"), checksum);
+  assert.equal(validateStructuredDigest(fingerprint, "fingerprint"), fingerprint);
+  assert.throws(() => validateStructuredDigest("f".repeat(39), "git-commit"));
+  assert.throws(() => validateStructuredDigest("f".repeat(63), "sha256"));
+  assert.throws(() => validateStructuredDigest("f".repeat(64), "fingerprint"));
 });

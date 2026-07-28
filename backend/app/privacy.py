@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import re
 from pathlib import Path
@@ -47,7 +49,30 @@ _GITHUB_TOKEN_RE = re.compile(
 _JWT_RE = re.compile(
     r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b"
 )
+_HEX_SECRET_RE = re.compile(
+    r"(?<![A-Za-z0-9])[0-9a-f]{40,128}(?![A-Za-z0-9])",
+    re.IGNORECASE,
+)
 _LONG_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9])[A-Za-z0-9._~+/=-]{32,}(?![A-Za-z0-9])")
+_STRUCTURED_FINGERPRINT_RE = re.compile(
+    r"^(?:cf1_|cfdb2_|cpex1_|cpda1_|cpfr1_|cpbf1_|cpcov1_|cpr1_)[0-9a-f]{64}$"
+)
+_STRUCTURED_FINGERPRINT_KEYS = {
+    "analysisfingerprint",
+    "baselinefindingsfingerprint",
+    "coveragefingerprint",
+    "dependencyanalysisfingerprint",
+    "dependencyapprovalfingerprint",
+    "evidencefingerprint",
+    "expectationsfingerprint",
+    "findingreviewsfingerprint",
+    "fingerprint",
+}
+_STRUCTURED_VCS_SELECTORS = {
+    "vcsrequestedrevision": {"branch", "ref", "rev", "tag"},
+    "vcslockedrevision": {"reference"},
+    "vcsresolvedrevision": {"resolved"},
+}
 
 _EXTENDED_WINDOWS_PATH_RE = re.compile(
     r"(?<![A-Za-z0-9])\\\\\?\\(?:UNC\\[^\\/\s\"'<>|]+\\[^\\/\s\"'<>|]+|"
@@ -106,6 +131,7 @@ def redact_secret_values(value: Any) -> str:
     text = _AWS_ACCESS_KEY_RE.sub(REDACTED, text)
     text = _GITHUB_TOKEN_RE.sub(REDACTED, text)
     text = _JWT_RE.sub(REDACTED, text)
+    text = _HEX_SECRET_RE.sub(REDACTED, text)
     return _LONG_TOKEN_RE.sub(_redact_long_token, text)
 
 
@@ -255,6 +281,9 @@ def sanitize_scan_value(
     if isinstance(value, str):
         if key in _PATH_KEYS or key.lower().endswith("path"):
             return safe_project_relative_path(value, project_root=project_root)
+        structured_value = _validated_scan_field(value, key)
+        if structured_value is not None:
+            return structured_value
         return sanitize_private_text(
             value,
             limit=MAX_DISCLOSURE_TEXT_CHARS,
@@ -287,18 +316,83 @@ def redacted_fingerprint(value: Any) -> str:
     return hashlib.sha256(normalized).hexdigest()[:16]
 
 
+def validate_structured_digest(value: Any, contract: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{contract} must be a string.")
+    patterns = {
+        "git-commit": r"[0-9a-fA-F]{40}",
+        "sha256": r"[0-9a-fA-F]{64}",
+        "fingerprint": _STRUCTURED_FINGERPRINT_RE.pattern,
+    }
+    pattern = patterns.get(contract)
+    if pattern is None:
+        raise ValueError("Unknown structured digest contract.")
+    if not re.fullmatch(pattern, value):
+        raise ValueError(f"{contract} is invalid.")
+    return value
+
+
+def validate_dependency_integrity(value: Any) -> str:
+    if not isinstance(value, str) or not value:
+        raise ValueError("dependency integrity is invalid.")
+    digest_bytes = {"sha256": 32, "sha384": 48, "sha512": 64}
+    for token in value.split():
+        match = re.fullmatch(
+            r"(sha256|sha384|sha512)([:-])([A-Za-z0-9+/=_-]+)",
+            token,
+        )
+        if not match:
+            raise ValueError("dependency integrity is invalid.")
+        algorithm, separator, payload = match.groups()
+        expected_bytes = digest_bytes[algorithm]
+        if separator == ":":
+            if not re.fullmatch(rf"[0-9a-fA-F]{{{expected_bytes * 2}}}", payload):
+                raise ValueError("dependency integrity is invalid.")
+            continue
+        try:
+            decoded = base64.b64decode(payload, validate=True)
+        except (binascii.Error, ValueError) as error:
+            raise ValueError("dependency integrity is invalid.") from error
+        if len(decoded) != expected_bytes:
+            raise ValueError("dependency integrity is invalid.")
+    return value
+
+
 def _redact_long_token(match: re.Match[str]) -> str:
     value = match.group(0)
-    if re.fullmatch(r"[0-9a-f]{40,128}", value, re.IGNORECASE):
-        return value
-    if re.match(r"^(?:sha(?:256|384|512)[:_-]|cf[a-z0-9]*_)", value, re.IGNORECASE):
-        return value
     characters = set(value.casefold())
     has_letter = any(character.isalpha() for character in value)
     has_digit = any(character.isdigit() for character in value)
     if len(characters) >= 10 and has_letter and has_digit:
         return REDACTED
     return value
+
+
+def _validated_scan_field(value: str, key: str) -> str | None:
+    normalized_key = key.casefold()
+    if normalized_key in _STRUCTURED_FINGERPRINT_KEYS:
+        try:
+            return validate_structured_digest(value, "fingerprint")
+        except ValueError:
+            return None
+    selectors = _STRUCTURED_VCS_SELECTORS.get(normalized_key)
+    if selectors is not None:
+        items = value.split(",") if normalized_key == "vcsrequestedrevision" else [value]
+        parsed: list[str] = []
+        for item in items:
+            match = re.fullmatch(r"([a-z]+):sha256:([0-9a-f]{64})", item)
+            if not match or match.group(1) not in selectors:
+                return None
+            parsed.append(item)
+        if len({item.split(":", 1)[0] for item in parsed}) != len(parsed):
+            return None
+        return ",".join(parsed)
+    if normalized_key == "integrity":
+        try:
+            return validate_dependency_integrity(value)
+        except ValueError:
+            return None
+    return None
 
 
 def _bounded_line(value: str, limit: int) -> str:

@@ -31,6 +31,7 @@ import {
   sha256,
   signBackendTree,
   signingEnvironment,
+  validateStructuredDigest,
   verifySignature,
 } from "./windows-signing.mjs";
 
@@ -176,8 +177,14 @@ export function verifyReleaseSource(gitPath) {
   if (branch !== "main") throw new Error(`The release branch must be main; current branch is ${branch || "detached"}.`);
   const status = runText(gitPath, ["status", "--short"], { cwd: REPOSITORY, env: environment });
   if (status) throw new Error(`The release working tree must be clean.\n${status}`);
-  const commit = runText(gitPath, ["rev-parse", "HEAD"], { cwd: REPOSITORY, env: environment });
-  const originMain = runText(gitPath, ["rev-parse", "origin/main"], { cwd: REPOSITORY, env: environment });
+  const commit = validateStructuredDigest(
+    runText(gitPath, ["rev-parse", "HEAD"], { cwd: REPOSITORY, env: environment }),
+    "git-commit",
+  );
+  const originMain = validateStructuredDigest(
+    runText(gitPath, ["rev-parse", "origin/main"], { cwd: REPOSITORY, env: environment }),
+    "git-commit",
+  );
   if (commit !== originMain) throw new Error(`HEAD ${commit} does not match origin/main ${originMain}.`);
 
   const packageJson = readJson(join(FRONTEND, "package.json"));
@@ -191,10 +198,10 @@ export function verifyReleaseSource(gitPath) {
     cargo: cargoVersion(join(FRONTEND, "src-tauri", "Cargo.toml")),
     cargoLock: lockVersion(join(FRONTEND, "src-tauri", "Cargo.lock")),
   };
-  for (const [name, version] of Object.entries(versions)) if (version !== "0.9.5") throw new Error(`${name} identifies version ${version ?? "unknown"}; expected 0.9.5.`);
-  if (readFileSync(join(REPOSITORY, "backend", "app", "version.py"), "utf8").trim() !== 'GLACIAL_VERSION = "0.9.5"') throw new Error("Backend version constant does not identify 0.9.5.");
-  if (!readFileSync(join(REPOSITORY, "backend", "app", "changelog.py"), "utf8").includes('"version": "0.9.5"')) throw new Error("Backend release metadata does not identify 0.9.5.");
-  return { root, branch, commit, originMain, version: "0.9.5", versions, status: "" };
+  for (const [name, version] of Object.entries(versions)) if (version !== "0.9.6") throw new Error(`${name} identifies version ${version ?? "unknown"}; expected 0.9.6.`);
+  if (readFileSync(join(REPOSITORY, "backend", "app", "version.py"), "utf8").trim() !== 'GLACIAL_VERSION = "0.9.6"') throw new Error("Backend version constant does not identify 0.9.6.");
+  if (!readFileSync(join(REPOSITORY, "backend", "app", "changelog.py"), "utf8").includes('"version": "0.9.6"')) throw new Error("Backend release metadata does not identify 0.9.6.");
+  return { root, branch, commit, originMain, version: "0.9.6", versions, status: "" };
 }
 
 export function assertSameReleaseSource(before, after) {
@@ -315,7 +322,12 @@ function parseAuditLog(path) {
 }
 
 function requireSigningEventIdentity(event, config, expectedCanonicalSubject, label) {
-  if (event.signerThumbprint !== config.expectedThumbprint || !event.timestampThumbprint) throw new Error(`Invalid signing event identity for ${label}.`);
+  validateStructuredDigest(event.beforeSha256, "sha256");
+  validateStructuredDigest(event.sha256, "sha256");
+  if (
+    event.signerThumbprint !== config.expectedThumbprint
+    || !/^[0-9A-F]{40}$/.test(String(event.timestampThumbprint ?? ""))
+  ) throw new Error(`Invalid signing event identity for ${label}.`);
   if (String(event.canonicalSubject ?? "").toUpperCase() !== expectedCanonicalSubject) throw new Error(`Invalid signing event subject for ${label}.`);
 }
 
@@ -381,7 +393,13 @@ function findInstaller(version) {
 }
 
 function artifactRecord(kind, path, root) {
-  return { kind, filename: basename(path), path: relative(root, path).replaceAll("\\", "/"), bytes: statSync(path).size, sha256: sha256(path) };
+  return {
+    kind,
+    filename: basename(path),
+    path: relative(root, path).replaceAll("\\", "/"),
+    bytes: statSync(path).size,
+    sha256: validateStructuredDigest(sha256(path), "sha256"),
+  };
 }
 
 function writeReleaseMetadata({ workRoot, source, releaseProfile, signerIdentity, installer, backendSigningRecords, signingEvents, buildStartedUtc, applicationSha256, installerApplicationEvidence }) {
@@ -407,7 +425,13 @@ function writeReleaseMetadata({ workRoot, source, releaseProfile, signerIdentity
       timestampRequired: true,
       applicationSha256,
       installerApplicationEvidence,
-      backend: backendSigningRecords.map((record) => ({ path: record.relativePath, classification: record.classification, beforeSha256: record.beforeSha256, afterSha256: record.afterSha256, signerThumbprint: record.signature.signerThumbprint })),
+      backend: backendSigningRecords.map((record) => ({
+        path: record.relativePath,
+        classification: record.classification,
+        beforeSha256: validateStructuredDigest(record.beforeSha256, "sha256"),
+        afterSha256: validateStructuredDigest(record.afterSha256, "sha256"),
+        signerThumbprint: record.signature.signerThumbprint,
+      })),
       events: signingEvents.map(({ path, applicationCapturePath, ...event }) => ({ file: basename(path), applicationCapture: applicationCapturePath || null, ...event })),
     },
     artifacts,
@@ -430,6 +454,7 @@ export function verifyPublishedHashes(root, manifestPath, sumsPath) {
     return [match[2], match[1]];
   }));
   for (const artifact of manifest.artifacts) {
+    validateStructuredDigest(artifact.sha256, "sha256");
     const path = assertSafePath(root, join(root, artifact.path), { pathInspector: false });
     if (sha256(path) !== artifact.sha256 || statSync(path).size !== artifact.bytes || sums.get(artifact.filename) !== artifact.sha256) throw new Error(`Published hash mismatch for ${artifact.filename}.`);
   }

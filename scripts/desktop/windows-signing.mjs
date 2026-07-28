@@ -191,6 +191,10 @@ export function sanitizeDiagnosticText(value, redactions = []) {
     .replace(/(["']?\b(?:[A-Z0-9_.-]*(?:api[_-]?key|access[_-]?token|refresh[_-]?token|auth[_-]?token|client[_-]?secret|password|passwd|pwd|secret|private[_-]?key)[A-Z0-9_.-]*)\b["']?\s*[:=]\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;}\])]+)/gim, "$1[REDACTED]")
     .replace(/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g, "[REDACTED]")
     .replace(/\b(?:gh[pousr]_[A-Za-z0-9]{20,255}|github_pat_[A-Za-z0-9_]{20,255})\b/gi, "[REDACTED]")
+    .replace(/(^|[^A-Za-z0-9])([0-9a-f]{40,128})(?=$|[^A-Za-z0-9])/gi, "$1[REDACTED]")
+    .replace(/(^|[^A-Za-z0-9])([A-Za-z0-9._~+/=-]{32,})(?=$|[^A-Za-z0-9])/g, (match, prefix, token) => (
+      shouldRedactLongToken(token) ? `${prefix}[REDACTED]` : match
+    ))
     .replaceAll(REPOSITORY_ROOT, "<REPOSITORY_ROOT>")
     .replaceAll(DESKTOP_BUILD_ROOT, "<DESKTOP_BUILD_ROOT>")
     .replace(/(^|[^A-Za-z0-9])(?:[A-Za-z]:[\\/])Users[\\/][^\\/\s"'<>|]+/gi, "$1<USER_PROFILE>")
@@ -201,6 +205,11 @@ export function sanitizeDiagnosticText(value, redactions = []) {
     .replaceAll(/\u001B\[[0-?]*[ -/]*[@-~]/g, "")
     .replaceAll(/[^\t\n\x20-\x7E]/g, "");
   return text;
+}
+
+function shouldRedactLongToken(value) {
+  const characters = new Set(value.toLowerCase());
+  return characters.size >= 10 && /[A-Za-z]/.test(value) && /[0-9]/.test(value);
 }
 
 function sanitizedFailureOutput(result, redactions = []) {
@@ -236,6 +245,18 @@ export function normalizeThumbprint(value, name = "certificate thumbprint") {
   const normalized = String(value ?? "").replaceAll(/\s/g, "").toUpperCase();
   if (!/^[0-9A-F]{40}$/.test(normalized)) throw new Error(`${name} must be a 40-character SHA-1 certificate thumbprint.`);
   return normalized;
+}
+
+export function validateStructuredDigest(value, contract) {
+  if (typeof value !== "string") throw new Error(`${contract} must be a string.`);
+  const patterns = {
+    "git-commit": /^[0-9a-f]{40}$/i,
+    sha256: /^[0-9a-f]{64}$/i,
+  };
+  const pattern = patterns[contract];
+  if (!pattern) throw new Error("Unknown structured digest contract.");
+  if (!pattern.test(value)) throw new Error(`${contract} is invalid.`);
+  return value;
 }
 
 function parseTimestampUrl(value) {
@@ -295,7 +316,7 @@ function requireAbsoluteFile(path, name, dryRun) {
 
 function validateReleaseId(value) {
   if (!value) return null;
-  if (!/^Glacial-0\.9\.5-[0-9a-f]{12}-[0-9]{8}T[0-9]{6}Z$/i.test(value)) throw new Error("Invalid internal release id.");
+  if (!/^Glacial-0\.9\.6-[0-9a-f]{12}-[0-9]{8}T[0-9]{6}Z$/i.test(value)) throw new Error("Invalid internal release id.");
   return value;
 }
 
@@ -617,17 +638,35 @@ export function verifySignature(file, config, options = {}) {
   return signature;
 }
 
+export function signingAuditRecord(record) {
+  const trustClassification = String(record.trustClassification ?? "");
+  if (!["self-signed", "publicly-trusted"].includes(trustClassification)) {
+    throw new Error("Signing audit trust classification is invalid.");
+  }
+  const signedUtc = String(record.signedUtc ?? "");
+  if (!signedUtc || Number.isNaN(Date.parse(signedUtc))) {
+    throw new Error("Signing audit timestamp is invalid.");
+  }
+  return {
+    path: privacySafePath(record.path),
+    beforeSha256: validateStructuredDigest(record.beforeSha256, "sha256"),
+    sha256: validateStructuredDigest(record.sha256, "sha256"),
+    applicationCapturePath: record.applicationCapturePath
+      ? privacySafePath(record.applicationCapturePath)
+      : null,
+    signerThumbprint: normalizeThumbprint(record.signerThumbprint, "signer thumbprint"),
+    canonicalSubject: sanitizeDiagnosticText(record.canonicalSubject),
+    timestampThumbprint: normalizeThumbprint(record.timestampThumbprint, "timestamp thumbprint"),
+    trustClassification,
+    signedUtc,
+  };
+}
+
 function appendAuditRecord(config, record) {
   if (!config.auditLog) return;
   const audit = assertSafePath(DESKTOP_BUILD_ROOT, config.auditLog);
   ensureSafeDirectory(DESKTOP_BUILD_ROOT, dirname(audit));
-  const persisted = {
-    ...record,
-    path: privacySafePath(record.path),
-    applicationCapturePath: record.applicationCapturePath
-      ? privacySafePath(record.applicationCapturePath)
-      : null,
-  };
+  const persisted = signingAuditRecord(record);
   appendFileSync(audit, `${JSON.stringify(persisted)}\n`, { encoding: "utf8" });
 }
 
