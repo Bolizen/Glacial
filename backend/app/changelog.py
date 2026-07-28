@@ -2,6 +2,16 @@ from __future__ import annotations
 
 CHANGELOG_ENTRIES = [
     {
+        "version": "0.9.9",
+        "date": "2026-07-28",
+        "title": "Accessibility and window-management baseline",
+        "changes": [
+            "Accepted the primary installed workflows at the 960 x 640 minimum window and the tested Windows 100% display-scaling boundary.",
+            "Added consistent modal focus trapping, Escape cancellation, trigger restoration, explicit project-form labels, and in-dialog validation feedback.",
+            "Raised muted, disabled, and focus-indicator contrast while preserving the dark OLED-oriented interface and the pre-v1 NOT READY verdict.",
+        ],
+    },
+    {
         "version": "0.9.8",
         "date": "2026-07-28",
         "title": "Documentation, privacy, legal, and support boundaries",

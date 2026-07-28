@@ -127,6 +127,48 @@ const EMPTY_REMEDIATION_BRIEF = Object.freeze({
   status: "",
 });
 const RESET_APPLICATION_STATE_CONFIRMATION = "RESET GLACIAL APPLICATION DATA";
+
+function useModalFocus(panelRef, initialFocusRef, onClose, returnFocusRef = null) {
+  const fallbackTriggerRef = useRef(document.activeElement);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  useEffect(() => {
+    initialFocusRef.current?.focus();
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const focusable = [...(panelRef.current?.querySelectorAll(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])',
+      ) || [])];
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      const trigger = returnFocusRef?.current || fallbackTriggerRef.current;
+      window.setTimeout(() => {
+        if (trigger?.isConnected) trigger.focus?.();
+      }, 0);
+    };
+  }, []);
+}
+
 export function App() {
   const [projectRoot, setProjectRoot] = useState("");
   const [projectRootMessage, setProjectRootMessage] = useState("");
@@ -159,6 +201,7 @@ export function App() {
   const [majorSectionsOpen, setMajorSectionsOpen] = useState(OPEN_MAJOR_SECTIONS);
   const [copyStatus, setCopyStatus] = useState("");
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
+  const [createProjectError, setCreateProjectError] = useState("");
   const [selectedSection, setSelectedSection] = useState("workspace");
   const [projectDetailsRevision, setProjectDetailsRevision] = useState(0);
   const [isScanning, setIsScanning] = useState(false);
@@ -414,13 +457,13 @@ export function App() {
   }
 
   async function openRemediationBrief(event) {
+    if (!remediationBrief.open) {
+      remediationBriefTriggerRef.current = event?.currentTarget || document.activeElement;
+    }
     const projectPath = selectedPathRef.current;
     const generation = projectGenerationRef.current;
     const scanId = latestProjectScan?.id;
     if (!projectPath || !Number.isInteger(scanId) || scanId < 1) return;
-    if (!remediationBrief.open) {
-      remediationBriefTriggerRef.current = event?.currentTarget || document.activeElement;
-    }
     const requestId = beginScopedProjectRequest("remediationBrief");
     remediationPackageDownloadingRef.current = false;
     remediationPackageRequestRef.current += 1;
@@ -447,8 +490,6 @@ export function App() {
     remediationPackageDownloadingRef.current = false;
     remediationPackageRequestRef.current += 1;
     setRemediationBrief(EMPTY_REMEDIATION_BRIEF);
-    const trigger = remediationBriefTriggerRef.current;
-    window.setTimeout(() => trigger?.focus?.(), 0);
   }
 
   async function copyRemediationBrief() {
@@ -678,6 +719,7 @@ export function App() {
 
   async function createProject(event) {
     event.preventDefault();
+    setCreateProjectError("");
     const workspaceGeneration = workspaceGenerationRef.current;
     try {
       const created = await api("/api/projects", {
@@ -690,6 +732,7 @@ export function App() {
       });
       if (workspaceGenerationRef.current !== workspaceGeneration) return;
       setMessage(`Created ${created.name}`);
+      setCreateProjectError("");
       setCreateForm({ project_name: "", existing_path: "", description: "", project_type: "" });
       setCreateProjectOpen(false);
       await refreshProjects();
@@ -698,12 +741,16 @@ export function App() {
         setSelectedSection("workspace");
       }
     } catch (error) {
-      if (workspaceGenerationRef.current === workspaceGeneration) setMessage(error.message);
+      if (workspaceGenerationRef.current === workspaceGeneration) {
+        setCreateProjectError(error.message);
+        setMessage(error.message);
+      }
     }
   }
 
   async function registerExistingProject(event) {
     event.preventDefault();
+    setCreateProjectError("");
     const workspaceGeneration = workspaceGenerationRef.current;
     try {
       const registered = await api("/api/projects/register", {
@@ -716,6 +763,7 @@ export function App() {
       });
       if (workspaceGenerationRef.current !== workspaceGeneration) return;
       setMessage(`Registered ${registered.name}`);
+      setCreateProjectError("");
       setCreateForm({ project_name: "", existing_path: "", description: "", project_type: "" });
       setCreateProjectOpen(false);
       await refreshProjects();
@@ -724,7 +772,10 @@ export function App() {
         setSelectedSection("workspace");
       }
     } catch (error) {
-      if (workspaceGenerationRef.current === workspaceGeneration) setMessage(error.message);
+      if (workspaceGenerationRef.current === workspaceGeneration) {
+        setCreateProjectError(error.message);
+        setMessage(error.message);
+      }
     }
   }
 
@@ -1856,7 +1907,7 @@ export function App() {
           ) : null}
 
           {selectedSection === "projects" ? (
-            <ProjectsSection projects={projects} selectedPath={selectedPath} onSelectProject={selectProject} onNewProject={() => setCreateProjectOpen(true)} loading={loading} onSaveMetadata={saveProjectMetadata} metadataSaving={metadataSaving} onUnregister={unregisterProject} unregisteringPath={unregisteringPath} />
+            <ProjectsSection projects={projects} selectedPath={selectedPath} onSelectProject={selectProject} onNewProject={() => { setCreateProjectError(""); setCreateProjectOpen(true); }} loading={loading} onSaveMetadata={saveProjectMetadata} metadataSaving={metadataSaving} onUnregister={unregisterProject} unregisteringPath={unregisteringPath} />
           ) : null}
 
           {selectedSection === "trustProfiles" && selectedProject && !projectDetailsLoading ? (
@@ -1970,10 +2021,11 @@ export function App() {
       {createProjectOpen ? (
         <CreateProjectModal
           form={createForm}
+          error={createProjectError}
           setForm={setCreateForm}
           onSubmit={createProject}
           onRegister={registerExistingProject}
-          onClose={() => setCreateProjectOpen(false)}
+          onClose={() => { setCreateProjectError(""); setCreateProjectOpen(false); }}
         />
       ) : null}
       {trustedScanBaselinePreview ? (
@@ -2000,6 +2052,7 @@ export function App() {
           onDownloadPackage={downloadRemediationPackage}
           onClose={closeRemediationBrief}
           onRetry={openRemediationBrief}
+          returnFocusRef={remediationBriefTriggerRef}
         />
       ) : null}
     </main>
@@ -2138,37 +2191,10 @@ function ReviewWorkspace({
   );
 }
 
-function RemediationBriefPreview({ value, onCopy, onDownload, onDownloadPackage, onClose, onRetry }) {
+function RemediationBriefPreview({ value, onCopy, onDownload, onDownloadPackage, onClose, onRetry, returnFocusRef }) {
   const closeRef = useRef(null);
   const panelRef = useRef(null);
-
-  useEffect(() => {
-    closeRef.current?.focus();
-    const onKeyDown = (event) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onClose();
-        return;
-      }
-      if (event.key === "Tab") {
-        const focusable = [...(panelRef.current?.querySelectorAll(
-          'button:not(:disabled), [href], input:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
-        ) || [])];
-        if (!focusable.length) return;
-        const first = focusable[0];
-        const last = focusable.at(-1);
-        if (event.shiftKey && document.activeElement === first) {
-          event.preventDefault();
-          last.focus();
-        } else if (!event.shiftKey && document.activeElement === last) {
-          event.preventDefault();
-          first.focus();
-        }
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  useModalFocus(panelRef, closeRef, onClose, returnFocusRef);
 
   const data = value.data;
   return (
@@ -2316,15 +2342,19 @@ function ReviewCheckpointSection({
 }
 
 function ReviewCheckpointConfirmation({ value, saving, onConfirm, onCancel }) {
+  const cancelRef = useRef(null);
+  const panelRef = useRef(null);
+  useModalFocus(panelRef, cancelRef, onCancel);
+
   return (
     <div className="modal-backdrop" role="presentation">
-      <section className="modal-panel review-checkpoint-confirmation" role="dialog" aria-modal="true" aria-labelledby="review-checkpoint-confirmation-title">
+      <section ref={panelRef} className="modal-panel review-checkpoint-confirmation" role="dialog" aria-modal="true" aria-labelledby="review-checkpoint-confirmation-title">
         <div className="panel-heading">
           <div>
             <h2 id="review-checkpoint-confirmation-title">Record reviewed checkpoint</h2>
             <p className="muted">Confirm the exact normalized evidence reviewed manually. This creates an immutable audit record, not a security guarantee or permission to execute code.</p>
           </div>
-          <button type="button" className="tertiary-button modal-close" onClick={onCancel} disabled={saving}>Cancel</button>
+          <button ref={cancelRef} type="button" className="tertiary-button modal-close" onClick={onCancel} disabled={saving}>Cancel</button>
         </div>
         <div className="review-checkpoint-preview-grid">
           <PreviewFact label="Project" value={`${value.projectName} · ${value.projectId}`} />
@@ -2376,6 +2406,9 @@ function statusClass(value) {
 }
 
 function TrustedScanBaselineConfirmation({ value, saving, onConfirm, onCancel }) {
+  const cancelRef = useRef(null);
+  const panelRef = useRef(null);
+  useModalFocus(panelRef, cancelRef, onCancel);
   const clearing = value.type === "clear";
   const preview = value.preview;
   const baseline = value.baseline;
@@ -2386,7 +2419,7 @@ function TrustedScanBaselineConfirmation({ value, saving, onConfirm, onCancel })
       : "Set trusted baseline";
   return (
     <div className="modal-backdrop" role="presentation">
-      <section className="modal-panel trusted-baseline-confirmation" role="dialog" aria-modal="true" aria-labelledby="trusted-baseline-confirmation-title">
+      <section ref={panelRef} className="modal-panel trusted-baseline-confirmation" role="dialog" aria-modal="true" aria-labelledby="trusted-baseline-confirmation-title">
         <div className="panel-heading">
           <div>
             <h2 id="trusted-baseline-confirmation-title">{title}</h2>
@@ -2396,7 +2429,7 @@ function TrustedScanBaselineConfirmation({ value, saving, onConfirm, onCancel })
                 : "Future baseline comparisons will use this exact scan. This does not approve findings, dependencies, or project safety."}
             </p>
           </div>
-          <button type="button" className="tertiary-button modal-close" onClick={onCancel} disabled={saving}>Cancel</button>
+          <button ref={cancelRef} type="button" className="tertiary-button modal-close" onClick={onCancel} disabled={saving}>Cancel</button>
         </div>
         <div className="trusted-baseline-preview-grid">
           <PreviewFact label="Project" value={clearing ? value.projectName : preview.projectName} />
@@ -2543,29 +2576,52 @@ function OverviewSecondarySummary({ projects, report, result }) {
   );
 }
 
-function CreateProjectModal({ form, setForm, onSubmit, onRegister, onClose }) {
+function CreateProjectModal({ form, error, setForm, onSubmit, onRegister, onClose }) {
+  const existingPathRef = useRef(null);
+  const panelRef = useRef(null);
+  useModalFocus(panelRef, existingPathRef, onClose);
+
   return (
     <div className="modal-backdrop" role="presentation">
-      <section className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="new-project-title">
+      <section ref={panelRef} className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="new-project-title" aria-describedby="new-project-description">
         <div className="panel-heading">
           <div>
             <h2 id="new-project-title">Add Project</h2>
-            <p className="muted">Register an existing folder or create a new folder inside the workspace root.</p>
+            <p id="new-project-description" className="muted">Register an existing folder or create a new folder inside the workspace root.</p>
           </div>
           <button type="button" className="tertiary-button modal-close" onClick={onClose}>Close</button>
         </div>
+        {error ? <p className="form-message error" role="alert">{error}</p> : null}
         <form onSubmit={onRegister} className="stack project-action-form">
           <h3>Add Existing Folder</h3>
-          <input value={form.existing_path} onChange={(event) => setForm({ ...form, existing_path: event.target.value })} placeholder="Absolute folder path inside the workspace root" required />
-          <input value={form.project_type} onChange={(event) => setForm({ ...form, project_type: event.target.value })} placeholder="Project type" />
-          <textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="Description" rows="2" />
+          <label>
+            Existing folder path
+            <input ref={existingPathRef} value={form.existing_path} onChange={(event) => setForm({ ...form, existing_path: event.target.value })} placeholder="Absolute folder path inside the workspace root" required />
+          </label>
+          <label>
+            Project type
+            <input value={form.project_type} onChange={(event) => setForm({ ...form, project_type: event.target.value })} placeholder="Optional" />
+          </label>
+          <label>
+            Description
+            <textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="Optional" rows="2" />
+          </label>
           <button type="submit">Add Existing Folder</button>
         </form>
         <form onSubmit={onSubmit} className="stack project-action-form">
           <h3>Create New Folder</h3>
-          <input value={form.project_name} onChange={(event) => setForm({ ...form, project_name: event.target.value })} placeholder="Project name" required />
-          <input value={form.project_type} onChange={(event) => setForm({ ...form, project_type: event.target.value })} placeholder="Project type" />
-          <textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="Description" rows="3" />
+          <label>
+            Project name
+            <input value={form.project_name} onChange={(event) => setForm({ ...form, project_name: event.target.value })} placeholder="Folder name" required />
+          </label>
+          <label>
+            Project type
+            <input value={form.project_type} onChange={(event) => setForm({ ...form, project_type: event.target.value })} placeholder="Optional" />
+          </label>
+          <label>
+            Description
+            <textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="Optional" rows="3" />
+          </label>
           <button type="submit" className="secondary-button">Create New Folder</button>
         </form>
       </section>

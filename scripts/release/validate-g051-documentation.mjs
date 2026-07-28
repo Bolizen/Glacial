@@ -4,7 +4,7 @@ import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const expectedVersion = "0.9.8";
+const expectedVersion = "0.9.9";
 
 function fail(message) {
   console.error(`G051 documentation validation failed: ${message}`);
@@ -147,7 +147,7 @@ for (const [source, text] of [
   ["RELEASE_NOTES.md", releaseNotes],
   ["README.md", readme],
 ]) {
-  if (!text.includes(`0.9.8`)) fail(`${source} does not identify ${expectedVersion}`);
+  if (!text.includes(expectedVersion)) fail(`${source} does not identify ${expectedVersion}`);
 }
 
 if (tauri.bundle?.targets?.length !== 1 || tauri.bundle.targets[0] !== "nsis") fail("Tauri does not declare exactly the NSIS target");

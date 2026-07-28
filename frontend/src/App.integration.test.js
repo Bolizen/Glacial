@@ -102,6 +102,52 @@ test("restores a valid project, section, historical scan, and panel state once",
   assert.equal(fetchHarness.count("/api/notes"), 1);
 });
 
+test("Add Project exposes labels, reports errors in-dialog, traps focus, closes with Escape, and restores focus", async () => {
+  dom.window.HTMLElement.prototype.attachEvent = () => {};
+  dom.window.HTMLElement.prototype.detachEvent = () => {};
+  await renderApp([]);
+  await click(document.querySelector('a[href="#projects"]'));
+  const trigger = buttonWithText("Add Project");
+  trigger.focus();
+  await click(trigger);
+
+  let dialog = document.querySelector('[role="dialog"][aria-labelledby="new-project-title"]');
+  assert.ok(dialog);
+  const existingPath = [...dialog.querySelectorAll("input")]
+    .find((control) => control.labels?.[0]?.textContent.includes("Existing folder path"));
+  assert.ok(existingPath, "Expected an explicit Existing folder path label");
+  assert.equal(document.activeElement, existingPath);
+  assert.ok([...dialog.querySelectorAll("input")].every((control) => control.labels?.length === 1));
+  assert.ok([...dialog.querySelectorAll("textarea")].every((control) => control.labels?.length === 1));
+
+  const first = dialog.querySelector(".modal-close");
+  const last = [...dialog.querySelectorAll("button")].at(-1);
+  first.focus();
+  await act(async () => {
+    window.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true }));
+  });
+  assert.equal(document.activeElement, last);
+  await act(async () => {
+    window.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+  });
+  assert.equal(document.activeElement, first);
+
+  await input(existingPath, "C:/workspace/missing-project");
+  await click([...dialog.querySelectorAll("button")].find((button) => button.textContent === "Add Existing Folder"));
+  const register = await fetchHarness.next("/api/projects/register", { method: "POST" });
+  await respond(register, { detail: "Selected folder is unavailable." }, 404);
+  dialog = document.querySelector('[role="dialog"][aria-labelledby="new-project-title"]');
+  assert.equal(dialog.querySelector('[role="alert"]').textContent, "Selected folder is unavailable.");
+
+  await act(async () => {
+    window.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await flushMicrotasks();
+  });
+  await new Promise((resolve) => window.setTimeout(resolve, 0));
+  assert.equal(document.querySelector('[role="dialog"][aria-labelledby="new-project-title"]'), null);
+  assert.equal(document.activeElement, trigger);
+});
+
 test("Scan Comparison selects two scans and renders conservative read-only section results", async () => {
   storeSession({
     selectedProjectPath: PROJECT_A_PATH,
@@ -2226,15 +2272,27 @@ test("review checkpoint renders eligible evidence, confirms explicitly, and beco
   assert.match(section.textContent, /not approval, certification, or a security guarantee/i);
   assert.ok(buttonWithText("Record reviewed checkpoint"));
 
-  await click(buttonWithText("Record reviewed checkpoint"));
+  const checkpointTrigger = buttonWithText("Record reviewed checkpoint");
+  checkpointTrigger.focus();
+  await click(checkpointTrigger);
   let dialog = document.querySelector(".review-checkpoint-confirmation");
   assert.ok(dialog);
+  assert.equal(document.activeElement, dialog.querySelector(".modal-close"));
   assert.match(dialog.textContent, /Latest scan/);
   assert.match(dialog.textContent, /Project Expectations/);
   assert.match(dialog.textContent, /Dependency review/);
   assert.match(dialog.textContent, /Finding review/);
   assert.match(dialog.textContent, /Coverage and metadata/);
-  await click([...dialog.querySelectorAll("button")].find((button) => button.textContent === "Cancel"));
+  await act(async () => {
+    window.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true }));
+  });
+  assert.match(document.activeElement.textContent, /Confirm manual/);
+  await act(async () => {
+    window.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+  });
+  assert.equal(document.querySelector(".review-checkpoint-confirmation"), null);
+  assert.equal(document.activeElement, checkpointTrigger);
   assert.equal(fetchHarness.count("/api/review-checkpoints", "POST"), 0);
 
   await click(buttonWithText("Record reviewed checkpoint"));

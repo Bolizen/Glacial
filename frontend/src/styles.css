@@ -13,8 +13,8 @@
   --color-text-primary: #F1F4F8;
   --color-text-secondary: #A7B0BE;
   --color-text-subtle: #8B95A4;
-  --color-text-muted: #737E8D;
-  --color-text-disabled: #58616F;
+  --color-text-muted: #808B9A;
+  --color-text-disabled: #838E9D;
   --color-accent: #6EA8FE;
   --color-accent-hover: #8DBBFF;
   --color-accent-active: #4D8DF2;
@@ -86,9 +86,11 @@ button {
 }
 
 button:disabled {
+  background: var(--color-surface-inset);
+  border-color: var(--color-border);
   color: var(--color-text-disabled);
   cursor: not-allowed;
-  opacity: 0.6;
+  opacity: 1;
 }
 
 input,
@@ -3101,8 +3103,9 @@ textarea::placeholder {
 input:disabled,
 select:disabled,
 textarea:disabled {
+  border-color: var(--color-border);
   color: var(--color-text-disabled);
-  opacity: 0.72;
+  opacity: 1;
 }
 
 .app-shell {
@@ -3175,7 +3178,7 @@ textarea:disabled {
 }
 
 .sidebar-nav a:focus-visible {
-  box-shadow: inset 0 0 0 1px rgba(156, 196, 255, 0.42);
+  box-shadow: inset 0 0 0 2px rgba(156, 196, 255, 0.55);
   outline: none;
 }
 
@@ -3264,7 +3267,9 @@ textarea:disabled {
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-dialog);
+  max-height: calc(100vh - 48px);
   max-width: 520px;
+  overflow-y: auto;
   padding: var(--space-5);
   width: min(100%, 520px);
 }
@@ -3273,11 +3278,17 @@ textarea:disabled {
   grid-template-rows: auto minmax(0, 1fr) auto;
   max-height: min(88vh, 820px);
   max-width: min(1080px, calc(100vw - 48px));
+  overflow: hidden;
   width: min(1080px, calc(100vw - 48px));
 }
 
 .modal-panel form {
   margin-top: var(--space-4);
+}
+
+.project-action-form label {
+  display: grid;
+  gap: var(--space-1);
 }
 
 .project-action-form + .project-action-form {
@@ -4374,7 +4385,7 @@ label,
 
 .projects-section .project-select-target:disabled {
   cursor: not-allowed;
-  opacity: 0.72;
+  opacity: 1;
 }
 
 .projects-section .project-identity {
@@ -5426,4 +5437,11 @@ label,
   .scan-comparison-actions button {
     width: 100%;
   }
+}
+
+button:disabled {
+  background: var(--color-surface-inset);
+  border-color: var(--color-border);
+  color: var(--color-text-disabled);
+  opacity: 1;
 }

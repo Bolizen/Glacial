@@ -1,3 +1,16 @@
+# Glacial 0.9.9 Accessibility and Window-Management Baseline
+
+Glacial 0.9.9 establishes the bounded keyboard, focus, contrast, display-scaling, and minimum-window baseline recorded by G052. It is an unsigned internal pre-v1 acceptance build, not a public release candidate or stable release, and the repository remains `NOT READY`.
+
+## Accessibility and window scope
+
+- Accepts the installed Windows application at 100% display scaling and the enforced 960 × 640 minimum outer window on the tested Windows 11 Pro x64 VMware guest.
+- Records the complete primary-screen, control, state, hostile-content, startup/backend-failure, and destructive-confirmation inventory without claiming broader Windows, hardware, scaling, text-size, or formal accessibility certification.
+- Adds shared focus trapping, Escape cancellation, and trigger restoration to custom dialogs; labels every Add Project field and keeps its validation error inside the active dialog.
+- Constrains general dialogs to the usable viewport so their content and actions remain reachable at the minimum window.
+- Raises muted, disabled, and focus-indicator contrast and validates 17 representative foreground/background pairs with a repeatable dependency-free script.
+- Advances authoritative product metadata to 0.9.9 without creating a public installer, tag, GitHub Release, final signature, Deep Security Scan, or v1 authorization.
+
 # Glacial 0.9.8 Documentation, Privacy, Legal, and Support Boundaries
 
 Glacial 0.9.8 publishes the installed-product documentation and disclosure boundaries established by G048 through G051. It is an internal pre-v1 documentation milestone, not a public release candidate or stable release, and the repository remains `NOT READY`.

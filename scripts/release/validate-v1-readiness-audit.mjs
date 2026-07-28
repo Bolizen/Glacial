@@ -156,7 +156,7 @@ if (JSON.stringify(actualClassificationChanges) !== JSON.stringify(expectedClass
 const versionMatches = [...audit.matchAll(/^- Audited product version: `([^`]+)`$/gm)];
 if (versionMatches.length !== 1) fail(`expected one Markdown audited version, found ${versionMatches.length}`);
 if (versionMatches[0][1] !== snapshot.audited_version) fail("Markdown and JSON audited versions differ");
-if (snapshot.audited_version !== "0.9.8") fail(`expected audited version 0.9.8, found ${snapshot.audited_version}`);
+if (snapshot.audited_version !== "0.9.9") fail(`expected audited version 0.9.9, found ${snapshot.audited_version}`);
 
 const commitMatches = [...audit.matchAll(/^- Audited behavioral baseline commit: `([0-9a-f]{40})`$/gm)];
 if (commitMatches.length !== 1) fail(`expected one Markdown audited commit, found ${commitMatches.length}`);

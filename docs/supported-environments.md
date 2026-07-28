@@ -2,7 +2,7 @@
 
 Glacial v1 is limited to a current-user Windows x64 installation produced by the NSIS installer. The repository is still `NOT READY`; this matrix records the tested boundary and the work still required before v1 authorization.
 
-| Area | v0.9.8 boundary |
+| Area | v0.9.9 boundary |
 | --- | --- |
 | Product edition | Installed NSIS edition only |
 | Processor architecture | x64 |
@@ -11,7 +11,9 @@ Glacial v1 is limited to a current-user Windows x64 installation produced by the
 | Installed application data | `%LOCALAPPDATA%\com.glacial.desktop` and optional `%APPDATA%\com.glacial.desktop` state |
 | Language | English installer and application |
 | Web runtime | Microsoft Edge WebView2 Evergreen Runtime |
-| Application window | Configured minimum is 960 × 640; default is 1280 × 800 |
+| Application window | Enforced minimum outer window is 960 × 640; default is 1280 × 800 |
+| Windows display scaling | 100% only |
+| Windows text size | Default only; increased accessibility text-size settings are untested |
 | Update method | Close Glacial and run a verified newer NSIS installer as the same user |
 | Automatic updater | None; updater artifacts and runtime update checks are disabled |
 | Downgrade | Unsupported |
@@ -39,7 +41,9 @@ That one run is evidence for the tested configuration, not a multi-version Windo
 
 The application requires Microsoft Edge WebView2 Evergreen Runtime. The NSIS configuration uses Tauri's default download-bootstrapper mode: when WebView2 is absent, installation may contact Microsoft to acquire it. Users normally should not install a separate backend, Python runtime, Node.js, Rust toolchain, or database engine.
 
-The application refuses to size its main window below 960 × 640. G050 did not record a display-resolution or Windows-scaling matrix. No minimum monitor resolution or supported scaling range is authorized yet. G052 must test the 960 × 640 window and declare a scaling range before those configurations can enter the v1 support set.
+The application refuses to size its outer main window below 960 × 640; this is an enforced Tauri constraint, not merely a documented recommendation. G052 accepted every primary screen and the critical keyboard workflow at that minimum on the tested VMware guest with a 1276 × 1284 desktop, 100% Windows display scaling, and default Windows text size.
+
+The v1 support boundary is therefore conservative: 100% Windows display scaling only. Scaling at 125%, 150%, 175%, or 200%, custom DPI, increased Windows text size, high-contrast themes, multiple-monitor movement, rotation, and resolutions other than the tested 1276 × 1284 desktop are untested and unsupported. They may work, but G052 does not make that claim. The final frozen candidate must repeat acceptance on every environment proposed for support.
 
 ## Installation and upgrade assumptions
 
