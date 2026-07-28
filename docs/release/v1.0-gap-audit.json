@@ -2,8 +2,8 @@
   "schema_version": "1.0.0",
   "product": "Glacial",
   "audited_version": "0.9.9",
-  "audited_commit": "7416012b3c74920c0b892d72501256dfd8447c42",
-  "generated_at_utc": "2026-07-28T05:12:24Z",
+  "audited_commit": "b1ac54f0661425b111293c58176a76dc708fdf18",
+  "generated_at_utc": "2026-07-28T15:18:23Z",
   "overall_verdict": "NOT READY",
   "scope_decision": "Glacial v1 supports only the installed Windows x64 NSIS edition; the retired portable edition does not close any installed lifecycle or release requirement.",
   "classification_changes": [
@@ -60,18 +60,42 @@
       "from": "FAIL",
       "to": "PASS",
       "reason": "G051 publishes and checks the privacy/network, private security, ordinary support, response, installed-upgrade, and compatibility policies; the owner confirms that intentionally intermittent icefields.dev HTTP availability is not a support blocker."
+    },
+    {
+      "id": "V1-DESKTOP-006",
+      "from": "PARTIAL",
+      "to": "PASS",
+      "reason": "G052 accepts every primary installed screen, long/error states, dialogs, and the real startup-failure surface at the enforced 960 x 640 minimum and declared 100% scaling boundary."
+    },
+    {
+      "id": "V1-UX-001",
+      "from": "PARTIAL",
+      "to": "PASS",
+      "reason": "G052 records the installed keyboard-only critical workflow across navigation, registration, scanning, review, remediation, settings, selectors, disclosures, confirmations, and focus."
+    },
+    {
+      "id": "V1-UX-004",
+      "from": "UNKNOWN",
+      "to": "PASS",
+      "reason": "G052 defines the conservative display boundary, inspects all primary screens and hostile states at the minimum window, and passes 17 repeatable contrast measurements."
+    },
+    {
+      "id": "V1-UX-005",
+      "from": "PARTIAL",
+      "to": "PASS",
+      "reason": "G052 completes the interaction and state inventory and finds no remaining critical color-only, hover-only, drag-only, or fine-pointer-only meaning or action."
     }
   ],
   "status_counts": {
-    "PASS": 44,
-    "PARTIAL": 13,
+    "PASS": 48,
+    "PARTIAL": 10,
     "FAIL": 3,
-    "UNKNOWN": 1,
+    "UNKNOWN": 0,
     "NOT_APPLICABLE": 0
   },
   "priority_counts": {
     "P0": 0,
-    "P1": 17,
+    "P1": 13,
     "P2": 0,
     "P3": 0
   },
@@ -757,19 +781,19 @@
     {
       "id": "V1-DESKTOP-006",
       "area": "Desktop application lifecycle",
-      "status": "PARTIAL",
-      "priority": "P1",
-      "summary": "Remediation modal usability is evidenced, but whole-product minimum-window and keyboard coverage is incomplete.",
+      "status": "PASS",
+      "priority": null,
+      "summary": "Every primary installed screen, critical workflow, long/error state, and dialog passes at the enforced 960x640 minimum and declared 100% scaling boundary.",
       "evidence": [
-        "frontend/src-tauri/tauri.conf.json 960x640 minimum",
-        "frontend/src/App.integration.test.js modal behavior",
-        "G043 normal and 760x760 remediation modal observation"
+        "docs/release/g052-accessibility-window-management.md",
+        "frontend/src-tauri/tauri.conf.json enforced 960x640 minimum",
+        "Installed Windows 11 Pro x64 VMware all-screen and startup-failure acceptance",
+        "frontend/src/App.integration.test.js modal behavior"
       ],
-      "gap": "Primary workflows, long/error states, keyboard order, and display scaling lack complete evidence.",
-      "recommended_remediation": "Execute a concise screen and workflow accessibility checklist.",
+      "gap": "",
+      "recommended_remediation": "",
       "closure_evidence": [
-        "Dated screenshots.",
-        "Keyboard and focus observations for every primary screen."
+        "Repeat against the frozen candidate on every declared supported environment."
       ],
       "waiver_permitted": false
     },
@@ -1095,14 +1119,15 @@
       "area": "Documentation, legal, and support readiness",
       "status": "PARTIAL",
       "priority": "P1",
-      "summary": "A conservative installed-environment matrix is published, but display/scaling and representative final-candidate coverage are incomplete.",
+      "summary": "The conservative installed matrix now includes the accepted 100% scaling and enforced 960x640 minimum; representative final-candidate coverage remains incomplete.",
       "evidence": [
         "docs/supported-environments.md",
         "frontend/src-tauri/tauri.conf.json NSIS, currentUser, x64 release, updater, WebView2 default, and 960 x 640 window configuration",
-        "docs/release/g050-installed-lifecycle-acceptance.md Windows 11 Pro x64 build 26200 VMware baseline"
+        "docs/release/g050-installed-lifecycle-acceptance.md Windows 11 Pro x64 build 26200 VMware baseline",
+        "docs/release/g052-accessibility-window-management.md 100% scaling and minimum-window acceptance"
       ],
-      "gap": "No monitor-resolution or Windows-scaling range has passed G052, and no frozen candidate has completed a representative multi-environment matrix.",
-      "recommended_remediation": "Run G052 minimum-window and scaling acceptance, then repeat the frozen candidate on every environment proposed for final support.",
+      "gap": "No frozen candidate has completed a representative multi-environment matrix beyond the one accepted Windows 11 Pro VMware configuration.",
+      "recommended_remediation": "Repeat the frozen candidate on every environment proposed for final support.",
       "closure_evidence": [
         "Published matrix.",
         "Dated results per supported environment."
@@ -1157,18 +1182,18 @@
     {
       "id": "V1-UX-001",
       "area": "Accessibility and usability baseline",
-      "status": "PARTIAL",
-      "priority": "P1",
-      "summary": "Keyboard-capable controls and modal tests exist, but no whole-critical-workflow keyboard record exists.",
+      "status": "PASS",
+      "priority": null,
+      "summary": "The installed critical workflow passes keyboard-only navigation, registration, scanning, review, remediation, settings, selectors, disclosures, confirmations, and focus checks.",
       "evidence": [
-        "Native control use in frontend/src/main.jsx",
-        "frontend/src/App.integration.test.js modal tests",
-        "G043 Escape and keyboard package acceptance"
+        "docs/release/g052-accessibility-window-management.md keyboard-only checklist",
+        "Installed Windows UI Automation and keystroke readback",
+        "frontend/src/App.integration.test.js modal regression tests"
       ],
-      "gap": "Registration, selection, scan, review, settings, exports, errors, and destructive confirmations lack end-to-end keyboard-only evidence.",
-      "recommended_remediation": "Execute a bounded critical-workflow keyboard checklist.",
+      "gap": "",
+      "recommended_remediation": "",
       "closure_evidence": [
-        "Dated tab-order, activation, and no-trap checklist."
+        "Repeat the checklist against the frozen candidate."
       ],
       "waiver_permitted": false
     },
@@ -1211,37 +1236,36 @@
     {
       "id": "V1-UX-004",
       "area": "Accessibility and usability baseline",
-      "status": "UNKNOWN",
-      "priority": "P1",
-      "summary": "Whole-product contrast, scaling, and minimum-size legibility have not been measured.",
+      "status": "PASS",
+      "priority": null,
+      "summary": "Primary screens and hostile states pass the declared 100% scaling and 960x640 minimum boundary, and 17 representative contrast pairs pass repeatable thresholds.",
       "evidence": [
-        "frontend/src-tauri/tauri.conf.json 960x640 minimum",
-        "G043 one-modal normal and narrow screenshots"
+        "docs/release/g052-accessibility-window-management.md",
+        "scripts/release/validate-g052-accessibility.mjs",
+        "Installed all-screen, modal, validation, and startup-failure inspection"
       ],
-      "gap": "No complete contrast measurement, scaling declaration, or all-screen clipping and overlap evidence exists.",
-      "recommended_remediation": "Perform a bounded visual and contrast pass across primary screens and long/error states.",
+      "gap": "",
+      "recommended_remediation": "",
       "closure_evidence": [
-        "Screenshots.",
-        "Contrast results at declared minimum and scaling."
+        "Repeat visual and contrast checks when design tokens or the support boundary changes."
       ],
       "waiver_permitted": false
     },
     {
       "id": "V1-UX-005",
       "area": "Accessibility and usability baseline",
-      "status": "PARTIAL",
-      "priority": "P1",
-      "summary": "Most status and action meaning uses text, but no complete non-color/non-pointer inventory exists.",
+      "status": "PASS",
+      "priority": null,
+      "summary": "The complete primary interaction and state inventory has no remaining critical color-only, hover-only, drag-only, or fine-pointer-only meaning or action.",
       "evidence": [
-        "Frontend status labels and native buttons",
-        "Textual risk and progress states",
-        "No identified critical drag-only workflow"
+        "docs/release/g052-accessibility-window-management.md interaction and state inventory",
+        "Installed keyboard and UI Automation observations",
+        "Textual risk, coverage, progress, warning, success, error, selected, and disabled states"
       ],
-      "gap": "Every critical meaning and action has not been checked for color-only, hover-only, drag-only, or fine-pointer dependence.",
-      "recommended_remediation": "Review interaction and status semantics screen by screen and fix confirmed blockers.",
+      "gap": "",
+      "recommended_remediation": "",
       "closure_evidence": [
-        "Completed interaction inventory.",
-        "Desktop verification."
+        "Retain state-semantics review for new critical interactions."
       ],
       "waiver_permitted": false
     },
