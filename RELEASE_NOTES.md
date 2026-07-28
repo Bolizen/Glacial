@@ -1,3 +1,17 @@
+# Glacial 0.9.8 Documentation, Privacy, Legal, and Support Boundaries
+
+Glacial 0.9.8 publishes the installed-product documentation and disclosure boundaries established by G048 through G051. It is an internal pre-v1 documentation milestone, not a public release candidate or stable release, and the repository remains `NOT READY`.
+
+## Documentation and policy scope
+
+- Expands the current-user Windows x64 NSIS lifecycle guide with first-run verification, manual update and reinstall behavior, exact reset scope, verified backup restoration, both uninstall modes, and bounded troubleshooting.
+- Publishes a conservative environment matrix that records the one tested Windows 11 Pro x64 VMware baseline without claiming untested Windows builds, physical hardware, display scaling, or other operating systems.
+- Consolidates interpretation of findings, severity, evidence, coverage, review states, expectations, baselines, checkpoints, reports, remediation briefs, packages, and the 100-finding handoff cap.
+- Publishes the local data, export, redaction, WebView2 installer, runtime loopback, developer-tool, signing, support, and release network boundaries.
+- Verifies GitHub private vulnerability reporting as the preferred security channel and adds restrained security and ordinary-support response targets.
+- Reviews third-party runtime notices against locked frontend, Python, Windows-target Rust, installer, and G050 payload evidence while retaining final artifact notice readback and owner legal sign-off as a blocker.
+- Advances authoritative product metadata to 0.9.8 without creating an installer, tag, GitHub Release, public candidate, or v1 authorization.
+
 # Glacial 0.9.7 Installed Lifecycle Acceptance
 
 Glacial 0.9.7 exercises and documents the remaining installed Windows x64 NSIS lifecycle matrix. It is an internal pre-v1 acceptance build, not a public release candidate, and the repository remains `NOT READY`.

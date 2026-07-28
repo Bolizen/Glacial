@@ -13,6 +13,16 @@ AI coding agents are more useful when generated work is easy to review before ex
 
 Glacial is an early stage local-first project focused on project scanning, safety review, and safe AGENTS.md generation.
 
+### User documentation
+
+- [Installation, first run, updates, reset, recovery, uninstall, and troubleshooting](docs/installed-windows-lifecycle.md)
+- [Understanding findings, coverage, review states, baselines, reports, briefs, and packages](docs/evidence-and-remediation.md)
+- [Supported environments](docs/supported-environments.md)
+- [Privacy and network disclosure](docs/privacy-and-network.md)
+- [Security reporting](SECURITY.md)
+- [Support policy](docs/support.md)
+- [Third-party notices](THIRD_PARTY_NOTICES.md)
+
 ### Maintainer v1.0 readiness artifacts
 
 - [v1.0 readiness contract](docs/release/v1.0-readiness-contract.md)
@@ -30,17 +40,19 @@ These are planning and release-governance artifacts. They are not proof that Gla
 
 Glacial v1 supports one Windows x64 product distribution: the installed application packaged through the NSIS installer. Application-owned mutable state uses the installed application-data and log locations documented in the [state lifecycle policy](docs/release/state-lifecycle-policy.md).
 
-Glacial 0.9.7 retains the established privacy boundary and advances installed-edition lifecycle acceptance. Project-derived and user-authored values are sanitized before persistence and again at reports, remediation outputs, generated instructions, diagnostics, and release records. Generic free text redacts standalone 40–128 character hexadecimal values by default; legitimate commits, checksums, signing hashes, dependency identities, and Glacial fingerprints remain exact only in explicitly validated structured fields. Operational absolute workspace/project paths remain local where required to reopen and validate registrations; exports use relative paths or documented placeholders. Production application traffic is authenticated loopback only. Explicitly invoked build/signing tools may use dependency, signer, or timestamp networks without receiving project content. See the canonical [data privacy and disclosure boundary](docs/release/data-privacy-boundary.md).
+Glacial 0.9.8 publishes the installed lifecycle, evidence interpretation, supported-environment, privacy, security-reporting, support, and third-party notice boundaries established by G048 through G051. Project-derived and user-authored values are sanitized before persistence and again at reports, remediation outputs, generated instructions, diagnostics, and release records. Generic free text redacts standalone 40–128 character hexadecimal values by default; legitimate commits, checksums, signing hashes, dependency identities, and Glacial fingerprints remain exact only in explicitly validated structured fields. Operational absolute workspace and project paths remain local where required to reopen and validate registrations; exports use relative paths or documented placeholders. Production application traffic is authenticated loopback only. The WebView2 installer bootstrapper and explicitly invoked development, build, signing, support, or release tools may use external networks. See the [privacy and network disclosure](docs/privacy-and-network.md).
 
 Glacial does not provide or support a portable binary edition. Unpacked development builds, test fixtures, build staging directories, source checkouts, and GitHub-generated source archives are not portable product distributions. Copying or relocating files from an installation is unsupported and does not create a portable edition. G049 records focused predecessor/upgrade/reset evidence and G050 extends the installed Windows lifecycle matrix in the [installed lifecycle evidence](docs/release/installed-lifecycle-evidence.md). A successful internal lifecycle artifact is not a public release candidate, public-trust signature, or v1 authorization; the repository remains `NOT READY`.
 
 ## Licensing
 
-Glacial v0.9.7 is licensed under the Functional Source License, Version 1.1, ALv2 Future License (`FSL-1.1-ALv2`). It is Fair Source and source-available, but it is not presently OSI open source.
+Glacial v0.9.8 is licensed under the Functional Source License, Version 1.1, ALv2 Future License (`FSL-1.1-ALv2`). It is Fair Source and source-available, but it is not presently OSI open source.
 
 Internal use, study, modification, and redistribution are permitted subject to the license. Offering Glacial, or substantially similar functionality, to others as a competing commercial product or service is not permitted under the public license. Separate commercial licensing may be available from the copyright holder.
 
 Each software version becomes available under the Apache License, Version 2.0 on the second anniversary of the date that version was made available. The root `LICENSE` file is authoritative if this summary and the license text ever appear inconsistent.
+
+Third-party components remain under their own licenses. See [Third-party notices](THIRD_PARTY_NOTICES.md).
 
 
 
@@ -53,7 +65,7 @@ Each software version becomes available under the Apache License, Version 2.0 on
 
 ## Safety Model
 
-- Glacial runs locally only.
+- The installed application runs locally and uses authenticated loopback; see the documented installer and tooling network exceptions.
 - It does not add telemetry or cloud services.
 - Scans only read files.
 - It never runs package scripts, project commands, installers, or scanned project code.

@@ -142,16 +142,21 @@ const expectedClassificationChanges = [
   ["V1-DESKTOP-002", "PARTIAL", "PASS"],
   ["V1-DESKTOP-003", "PARTIAL", "PASS"],
   ["V1-DESKTOP-005", "PARTIAL", "PASS"],
+  ["V1-SEC-006", "FAIL", "PASS"],
+  ["V1-DOC-002", "PARTIAL", "PASS"],
+  ["V1-DOC-003", "PARTIAL", "PASS"],
+  ["V1-DOC-004", "UNKNOWN", "PARTIAL"],
+  ["V1-DOC-006", "FAIL", "PASS"],
 ];
 const actualClassificationChanges = (snapshot.classification_changes ?? []).map(({ id, from, to }) => [id, from, to]);
 if (JSON.stringify(actualClassificationChanges) !== JSON.stringify(expectedClassificationChanges)) {
-  fail("G050 readiness classification changes are missing or incorrect");
+  fail("G051 readiness classification changes are missing or incorrect");
 }
 
 const versionMatches = [...audit.matchAll(/^- Audited product version: `([^`]+)`$/gm)];
 if (versionMatches.length !== 1) fail(`expected one Markdown audited version, found ${versionMatches.length}`);
 if (versionMatches[0][1] !== snapshot.audited_version) fail("Markdown and JSON audited versions differ");
-if (snapshot.audited_version !== "0.9.7") fail(`expected audited version 0.9.7, found ${snapshot.audited_version}`);
+if (snapshot.audited_version !== "0.9.8") fail(`expected audited version 0.9.8, found ${snapshot.audited_version}`);
 
 const commitMatches = [...audit.matchAll(/^- Audited behavioral baseline commit: `([0-9a-f]{40})`$/gm)];
 if (commitMatches.length !== 1) fail(`expected one Markdown audited commit, found ${commitMatches.length}`);

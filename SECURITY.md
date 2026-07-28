@@ -56,8 +56,22 @@ Older scans without completeness metadata are **Unknown**, not Complete. Review 
 
 ## Reporting a vulnerability
 
-Security reports are welcome, but this repository does not currently document a private reporting address or confirmed private advisory workflow.
+Do not report an undisclosed vulnerability in a public GitHub issue. Use [GitHub private vulnerability reporting](https://github.com/Bolizen/Glacial/security/advisories/new). GitHub sign-in is required. The report is visible to repository security managers rather than the public issue tracker.
 
-> **Maintainer action required:** configure and publish a private security-reporting channel here before relying on this policy for coordinated disclosure.
+Include:
 
-Do not put active exploit details, authentication tokens, repository secrets, personal data, or other sensitive evidence in a public GitHub issue. If public issues are the only visible contact surface, use one only to request private contact with a minimal, non-sensitive summary.
+- the affected Glacial version and installed or development context;
+- the operating system and architecture;
+- a concise impact statement;
+- the smallest safe reproduction and required preconditions;
+- the expected and observed security boundary;
+- whether the issue is already public; and
+- a safe way to coordinate follow-up through the advisory.
+
+Do not include working credentials, private keys, real customer data, unnecessary personal data, or unrelated proprietary source. Use synthetic evidence where possible. Do not test against systems or data you do not own or have permission to assess.
+
+The maintainer aims to acknowledge a complete report within 7 calendar days. Initial acknowledgement is not validation. The advisory will receive a status update at least every 30 calendar days while active when maintainer availability permits. Fix timing depends on severity, reproducibility, affected versions, and release safety; no resolution deadline is guaranteed.
+
+Keep technical details private until a coordinated disclosure date is agreed or the maintainer states that disclosure can proceed. Credit and publication details are decided with the reporter. The maintainer may close reports that are not security vulnerabilities, cannot be reproduced within the supported model, affect only unsupported deployments, or lack enough safe detail to investigate.
+
+If the private reporting form is unavailable, open a [public issue](https://github.com/Bolizen/Glacial/issues/new) containing only a request for private contact and a non-sensitive one-sentence summary. Do not include exploit steps or sensitive evidence. Ordinary bugs, documentation problems, and feature requests belong in GitHub Issues.

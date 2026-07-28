@@ -2,6 +2,16 @@ from __future__ import annotations
 
 CHANGELOG_ENTRIES = [
     {
+        "version": "0.9.8",
+        "date": "2026-07-28",
+        "title": "Documentation, privacy, legal, and support boundaries",
+        "changes": [
+            "Published task-oriented installed lifecycle, evidence interpretation, supported-environment, privacy and network, security-reporting, and support documentation.",
+            "Reviewed third-party notices against the locked frontend, Python, Rust, installer, and bundled-runtime inventory while retaining the final artifact and owner sign-off gate.",
+            "Kept the repository NOT READY and limited readiness changes to requirements supported by complete G051 evidence.",
+        ],
+    },
+    {
         "version": "0.9.7",
         "date": "2026-07-27",
         "title": "Installed lifecycle acceptance",

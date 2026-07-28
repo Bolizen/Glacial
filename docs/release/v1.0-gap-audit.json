@@ -1,9 +1,9 @@
 {
   "schema_version": "1.0.0",
   "product": "Glacial",
-  "audited_version": "0.9.7",
-  "audited_commit": "778a75dea8a3df13e1674a9e77b35025b79ac7b2",
-  "generated_at_utc": "2026-07-28T04:36:38Z",
+  "audited_version": "0.9.8",
+  "audited_commit": "3e042eae47289b44e9cf206419159162c0c215b2",
+  "generated_at_utc": "2026-07-28T05:12:24Z",
   "overall_verdict": "NOT READY",
   "scope_decision": "Glacial v1 supports only the installed Windows x64 NSIS edition; the retired portable edition does not close any installed lifecycle or release requirement.",
   "classification_changes": [
@@ -30,18 +30,48 @@
       "from": "PARTIAL",
       "to": "PASS",
       "reason": "G049 and G050 provide exact installed paths plus first-run, predecessor upgrade, reset, recovery, reinstall, both uninstall variants, and project-state preservation on the supported installed NSIS edition."
+    },
+    {
+      "id": "V1-SEC-006",
+      "from": "FAIL",
+      "to": "PASS",
+      "reason": "G051 publishes a verified GitHub private-vulnerability-reporting form, response ownership, acknowledgement and update targets, coordinated disclosure guidance, and a non-sensitive fallback."
+    },
+    {
+      "id": "V1-DOC-002",
+      "from": "PARTIAL",
+      "to": "PASS",
+      "reason": "G051 completes the task-oriented installed lifecycle guide and a deliberately context-restricted clean-reader walkthrough; G049 and G050 provide the corresponding installed execution evidence."
+    },
+    {
+      "id": "V1-DOC-003",
+      "from": "PARTIAL",
+      "to": "PASS",
+      "reason": "G051 publishes and checks one consolidated interpretation guide for findings, severity, evidence, coverage, review states, expectations, baselines, checkpoints, reports, briefs, packages, and the 100-finding handoff cap."
+    },
+    {
+      "id": "V1-DOC-004",
+      "from": "UNKNOWN",
+      "to": "PARTIAL",
+      "reason": "G051 publishes a source- and G050-derived environment matrix, but display resolution/scaling and a representative multi-environment final-candidate matrix remain untested."
+    },
+    {
+      "id": "V1-DOC-006",
+      "from": "FAIL",
+      "to": "PASS",
+      "reason": "G051 publishes and checks the privacy/network, private security, ordinary support, response, installed-upgrade, and compatibility policies; the owner confirms that intentionally intermittent icefields.dev HTTP availability is not a support blocker."
     }
   ],
   "status_counts": {
-    "PASS": 40,
-    "PARTIAL": 14,
-    "FAIL": 5,
-    "UNKNOWN": 2,
+    "PASS": 44,
+    "PARTIAL": 13,
+    "FAIL": 3,
+    "UNKNOWN": 1,
     "NOT_APPLICABLE": 0
   },
   "priority_counts": {
     "P0": 0,
-    "P1": 21,
+    "P1": 17,
     "P2": 0,
     "P3": 0
   },
@@ -71,7 +101,7 @@
       "area": "Product identity and version integrity",
       "status": "PASS",
       "priority": null,
-      "summary": "Authoritative source versions agree on 0.9.7 and are machine-validated.",
+      "summary": "Authoritative source versions agree on 0.9.8 and are machine-validated.",
       "evidence": [
         "frontend/package.json and package-lock.json",
         "frontend/src-tauri/tauri.conf.json, Cargo.toml, and Cargo.lock",
@@ -141,11 +171,11 @@
       "area": "Product identity and version integrity",
       "status": "PASS",
       "priority": null,
-      "summary": "Documentation identifies 0.9.7 as pre-v1 installed lifecycle acceptance and does not imply a public release candidate, stable status, or v1 authorization.",
+      "summary": "Documentation identifies 0.9.8 as a pre-v1 documentation and policy milestone and does not imply a public release candidate, stable status, or v1 authorization.",
       "evidence": [
         "README.md Current Status",
-        "RELEASE_NOTES.md 0.9.7 entry",
-        "backend/app/changelog.py 0.9.7 entry",
+        "RELEASE_NOTES.md 0.9.8 entry",
+        "backend/app/changelog.py 0.9.8 entry",
         "docs/release/v1.0-gap-audit.md NOT READY verdict"
       ],
       "gap": "",
@@ -852,17 +882,17 @@
     {
       "id": "V1-SEC-006",
       "area": "Security and privacy posture",
-      "status": "FAIL",
-      "priority": "P1",
-      "summary": "Security claims are bounded, but no private vulnerability-reporting workflow exists.",
+      "status": "PASS",
+      "priority": null,
+      "summary": "Security claims remain bounded and a verified private vulnerability-reporting and coordinated-response workflow is published.",
       "evidence": [
-        "SECURITY.md states no private reporting address or confirmed private advisory workflow is documented."
+        "SECURITY.md private GitHub vulnerability-reporting workflow, response targets, coordinated disclosure policy, and fallback",
+        "2026-07-28 public repository Security page readback showing the Report a vulnerability destination"
       ],
-      "gap": "Coordinated private reporting and response ownership are absent.",
-      "recommended_remediation": "Configure and publish a private reporting channel, acknowledgement, ownership, and response process.",
+      "gap": "",
+      "recommended_remediation": "",
       "closure_evidence": [
-        "Live private-reporting verification.",
-        "Committed response policy."
+        "Retain live destination verification and current response ownership before release authorization."
       ],
       "waiver_permitted": false
     },
@@ -1012,7 +1042,7 @@
       "evidence": [
         "README.md",
         "SECURITY.md",
-        "RELEASE_NOTES.md 0.9.7 entry",
+        "RELEASE_NOTES.md 0.9.8 entry",
         "Readiness document links and disclaimer"
       ],
       "gap": "",
@@ -1025,55 +1055,54 @@
     {
       "id": "V1-DOC-002",
       "area": "Documentation, legal, and support readiness",
-      "status": "PARTIAL",
-      "priority": "P1",
-      "summary": "Task-oriented installed lifecycle guidance now covers installation, first run, update, reset, manual restore, uninstall, and troubleshooting, but independent execution remains incomplete.",
+      "status": "PASS",
+      "priority": null,
+      "summary": "Task-oriented installed lifecycle guidance covers the supported workflow and is reconciled with installed execution evidence.",
       "evidence": [
-        "README.md lifecycle-guide link",
-        "docs/installed-windows-lifecycle.md task-oriented installed-edition guide",
+        "README.md public documentation links",
+        "docs/installed-windows-lifecycle.md complete task-oriented installed-edition guide",
         "docs/release/installed-lifecycle-evidence.md exact acceptance boundary",
-        "docs/release/g050-installed-lifecycle-acceptance.md native execution of lifecycle procedures"
+        "docs/release/g050-installed-lifecycle-acceptance.md native execution of lifecycle procedures",
+        "docs/release/g051-documentation-closure.md deliberately context-restricted clean-reader walkthrough"
       ],
-      "gap": "The complete guide has not received an independent clean-reader execution across the declared support matrix.",
-      "recommended_remediation": "Run a clean-reader review and execute every supported instruction against the frozen candidate on each declared supported environment.",
+      "gap": "",
+      "recommended_remediation": "",
       "closure_evidence": [
-        "Clean-reader review.",
-        "Clean-machine completion of every instruction."
+        "Repeat the guide against the frozen candidate on each environment that enters the final support set."
       ],
       "waiver_permitted": false
     },
     {
       "id": "V1-DOC-003",
       "area": "Documentation, legal, and support readiness",
-      "status": "PARTIAL",
-      "priority": "P1",
-      "summary": "Major scan and remediation concepts are documented, but no complete interpretation guide exists.",
+      "status": "PASS",
+      "priority": null,
+      "summary": "One public guide consolidates scan evidence, review, baseline, checkpoint, report, brief, package, cap, and non-autonomous-remediation semantics.",
       "evidence": [
-        "README.md Notes",
-        "RELEASE_NOTES.md",
-        "SECURITY.md",
-        "UI labels and explanations"
+        "docs/evidence-and-remediation.md",
+        "README.md user-documentation link",
+        "scripts/release/validate-g051-documentation.mjs required content checks"
       ],
-      "gap": "Findings, severity, evidence, review/expected/reopen semantics, baselines, limitations, and the 100-item cap are not consolidated for users.",
-      "recommended_remediation": "Add a concise evidence, review, baseline, and remediation interpretation guide.",
+      "gap": "",
+      "recommended_remediation": "",
       "closure_evidence": [
-        "Feature-by-feature documentation review.",
-        "User checklist."
+        "Retain feature-to-documentation checks when result semantics change."
       ],
       "waiver_permitted": false
     },
     {
       "id": "V1-DOC-004",
       "area": "Documentation, legal, and support readiness",
-      "status": "UNKNOWN",
+      "status": "PARTIAL",
       "priority": "P1",
-      "summary": "The exact supported Windows, runtime, architecture, display, and upgrade matrix is not declared or proved.",
+      "summary": "A conservative installed-environment matrix is published, but display/scaling and representative final-candidate coverage are incomplete.",
       "evidence": [
-        "Release scripts target Windows x64.",
-        "Tauri config has a minimum window."
+        "docs/supported-environments.md",
+        "frontend/src-tauri/tauri.conf.json NSIS, currentUser, x64 release, updater, WebView2 default, and 960 x 640 window configuration",
+        "docs/release/g050-installed-lifecycle-acceptance.md Windows 11 Pro x64 build 26200 VMware baseline"
       ],
-      "gap": "Supported Windows versions, WebView prerequisites, scaling, architecture, and upgrade boundaries are absent and untested as a matrix.",
-      "recommended_remediation": "Declare a conservative support matrix after representative clean-machine acceptance.",
+      "gap": "No monitor-resolution or Windows-scaling range has passed G052, and no frozen candidate has completed a representative multi-environment matrix.",
+      "recommended_remediation": "Run G052 minimum-window and scaling acceptance, then repeat the frozen candidate on every environment proposed for final support.",
       "closure_evidence": [
         "Published matrix.",
         "Dated results per supported environment."
@@ -1085,15 +1114,18 @@
       "area": "Documentation, legal, and support readiness",
       "status": "PARTIAL",
       "priority": "P1",
-      "summary": "Primary license and selected provenance exist, but third-party notice obligations are not fully reviewed.",
+      "summary": "Primary licensing and a locked Windows runtime notice inventory are published, but final artifact notice readback and owner legal sign-off remain.",
       "evidence": [
         "LICENSE",
         "README.md licensing summary",
+        "THIRD_PARTY_NOTICES.md",
+        "docs/release/third-party-runtime-inventory.json",
+        "scripts/release/generate-third-party-inventory.mjs",
         "third_party/rust/glib-0.18.5-patched provenance and licenses",
-        "Dependency lockfiles"
+        "G050 PyInstaller and installed payload readback"
       ],
-      "gap": "No completed third-party notices and bundled-license obligation review or shipped notice inventory exists.",
-      "recommended_remediation": "Perform a bounded legal and third-party notices inventory.",
+      "gap": "No frozen installer has received notice/license readback, and no maintainer or legal owner has signed off the complete obligation set.",
+      "recommended_remediation": "Review the frozen artifact against the generated inventory, include every required notice with the shipped product, and record owner or legal sign-off.",
       "closure_evidence": [
         "Maintainer or legal sign-off.",
         "Artifact notice and license readback."
@@ -1103,19 +1135,22 @@
     {
       "id": "V1-DOC-006",
       "area": "Documentation, legal, and support readiness",
-      "status": "FAIL",
-      "priority": "P1",
-      "summary": "Privacy, private security reporting, support response, and compatibility policies are incomplete.",
+      "status": "PASS",
+      "priority": null,
+      "summary": "Current privacy/network, private security, support response, and installed compatibility policies are published, linked, and owner-confirmed.",
       "evidence": [
-        "README.md Icefields link",
-        "GitHub issue surface",
-        "SECURITY.md public-report warning"
+        "docs/privacy-and-network.md",
+        "SECURITY.md",
+        "docs/support.md",
+        "docs/supported-environments.md",
+        "docs/installed-windows-lifecycle.md",
+        "README.md user-documentation links",
+        "2026-07-28 public GitHub repository, issue, and private-reporting link readback"
       ],
-      "gap": "No consolidated privacy/network disclosure, live private security channel, support response expectation, or stable upgrade/compatibility policy exists.",
-      "recommended_remediation": "Publish and verify user-facing policies and contact paths.",
+      "gap": "",
+      "recommended_remediation": "",
       "closure_evidence": [
-        "Live-link readback.",
-        "Named owner confirmation."
+        "Retain repository-reference checks and record live homepage HTTP availability separately without treating intentional downtime as a product defect."
       ],
       "waiver_permitted": false
     },
