@@ -1,9 +1,9 @@
 {
   "schema_version": "1.0.0",
   "product": "Glacial",
-  "audited_version": "0.9.6",
-  "audited_commit": "6444c486612395a3b907e6c740882b691ddf20fe",
-  "generated_at_utc": "2026-07-28T02:47:40Z",
+  "audited_version": "0.9.7",
+  "audited_commit": "297299c635444c5e43a10578405e69f912a1e1a5",
+  "generated_at_utc": "2026-07-28T03:22:21Z",
   "overall_verdict": "NOT READY",
   "scope_decision": "Glacial v1 supports only the installed Windows x64 NSIS edition; the retired portable edition does not close any installed lifecycle or release requirement.",
   "classification_changes": [
@@ -59,7 +59,7 @@
       "area": "Product identity and version integrity",
       "status": "PASS",
       "priority": null,
-      "summary": "Authoritative source versions agree on 0.9.6 and are machine-validated.",
+      "summary": "Authoritative source versions agree on 0.9.7 and are machine-validated.",
       "evidence": [
         "frontend/package.json and package-lock.json",
         "frontend/src-tauri/tauri.conf.json, Cargo.toml, and Cargo.lock",
@@ -129,11 +129,11 @@
       "area": "Product identity and version integrity",
       "status": "PASS",
       "priority": null,
-      "summary": "Documentation identifies 0.9.6 as pre-v1 redaction/lifecycle hardening and does not imply stable or v1 authorization.",
+      "summary": "Documentation identifies 0.9.7 as pre-v1 installed lifecycle acceptance and does not imply a public release candidate, stable status, or v1 authorization.",
       "evidence": [
         "README.md Current Status",
-        "RELEASE_NOTES.md 0.9.6 entry",
-        "backend/app/changelog.py 0.9.6 entry",
+        "RELEASE_NOTES.md 0.9.7 entry",
+        "backend/app/changelog.py 0.9.7 entry",
         "docs/release/v1.0-gap-audit.md NOT READY verdict"
       ],
       "gap": "",
