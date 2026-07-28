@@ -1,3 +1,15 @@
+# Glacial 0.9.7 Installed Lifecycle Acceptance
+
+Glacial 0.9.7 exercises and documents the remaining installed Windows x64 NSIS lifecycle matrix. It is an internal pre-v1 acceptance build, not a public release candidate, and the repository remains `NOT READY`.
+
+## Installed lifecycle scope
+
+- Produces one exact-source current-user NSIS installer and records its source commit, filename, size, SHA-256, build command, build timestamp, signing state, and installed payload hashes.
+- Exercises clean application-state installation and first run, concurrent launch, graceful and forced-parent shutdown, controlled startup failure and recovery, interrupted reset recovery, manual backup restoration, same-version reinstall, and both uninstall retention modes.
+- Preserves a distinctive disposable registered-project marker byte-for-byte across every lifecycle case.
+- Records exact running paths, process observations, SQLite integrity, retained-versus-removed path inventories, rejected artifacts, defects, and remaining limitations.
+- Does not revive the retired portable edition, create a public release or tag, claim public signer trust, or authorize v1.
+
 # Glacial 0.9.6 Hex-Secret Redaction Correction
 
 Glacial 0.9.6 corrects the G048 privacy boundary so arbitrary credential-shaped hexadecimal values are not retained merely because they resemble hashes and implements the G049 installed application-state lifecycle. It remains a pre-v1 hardening release and `NOT READY`; clean-machine, interruption, optional uninstall-data removal, signed-candidate, native installed-app privacy inspection, and unrelated P1 requirements remain unresolved.

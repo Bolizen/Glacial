@@ -1,6 +1,6 @@
 # Glacial State Lifecycle and Recovery Policy
 
-Status: v1 policy baseline for Glacial 0.9.6. Focused G049 installed evidence is recorded in [installed-lifecycle-evidence.md](installed-lifecycle-evidence.md). Clean-machine, interruption, public-candidate, and final release acceptance remain separate.
+Status: v1 policy baseline for Glacial 0.9.7. G049 and G050 installed evidence is recorded in [installed-lifecycle-evidence.md](installed-lifecycle-evidence.md). Public-candidate and final release acceptance remain separate.
 
 ## Ownership boundary
 
@@ -9,7 +9,7 @@ Status: v1 policy baseline for Glacial 0.9.6. Focused G049 installed evidence is
 | State family | Storage | Contents and ownership |
 | --- | --- | --- |
 | SQLite database | `<Glacial data directory>/glacial.db` | The authoritative application database. Release desktop builds pass Tauri's application-local data directory plus `data`; development builds use the separated `development/data` directory. |
-| Database schema version | SQLite database header through `PRAGMA user_version` | The sole authoritative relational schema version. `DATABASE_SCHEMA_VERSION` is `2` in Glacial 0.9.6. It is not duplicated as an authoritative setting or JSON field. |
+| Database schema version | SQLite database header through `PRAGMA user_version` | The sole authoritative relational schema version. `DATABASE_SCHEMA_VERSION` is `2` in Glacial 0.9.7. It is not duplicated as an authoritative setting or JSON field. |
 | Settings | `settings` | Workspace-root selection. |
 | Projects and metadata | `projects` | Registration path, display name, description, type, and registration time. A row is a registration; it does not make the project directory application-owned. |
 | Immutable scans and scan metadata | `scans` | Append-only scan identity, time, risk, findings JSON, bounded counts, summary, coverage, reviewed/ignored-file metadata, dependency analysis, and related scanner metadata. |
@@ -45,9 +45,9 @@ Unregister, migration, backup, future reset, or uninstall logic must never reint
 
 ### Supported versions and shapes
 
-Schema version `1` is the smallest honest first version: every database before Glacial 0.9.3 was unversioned and therefore reports `user_version = 0`. Glacial 0.9.6 publishes schema version `2` as its installed-upgrade compatibility marker; the ordered `1 -> 2` migration validates and preserves the complete v1 schema and records, creates a verified backup, and changes only `user_version`.
+Schema version `1` is the smallest honest first version: every database before Glacial 0.9.3 was unversioned and therefore reports `user_version = 0`. Glacial 0.9.6 introduced schema version `2` as its installed-upgrade compatibility marker, and Glacial 0.9.7 retains it; the ordered `1 -> 2` migration validates and preserves the complete v1 schema and records, creates a verified backup, and changes only `user_version`.
 
-Glacial 0.9.6 supports:
+Glacial 0.9.7 supports:
 
 - a nonexistent, zero-byte, or valid table-empty database as new state;
 - schema version `0` when the database contains the historically evidenced core tables (`settings`, `projects`, `scans`, and `notes`), no unknown application tables, and only recognized later Glacial tables with their required historical columns and constraints;
@@ -94,8 +94,8 @@ Any exception before commit rolls back the whole migration. A verified pre-migra
 - Foreign keys: enabled on application connections and during initialization. Existing relationships are compatible with supported fixtures.
 - Busy timeout: 5,000 ms. A bounded lock wait is preferable to immediate spurious failure, but Glacial does not wait indefinitely.
 - Write transactions: `BEGIN IMMEDIATE` for migrations and state families that couple multiple writes or require stale-state revalidation.
-- Journal mode: not changed by Glacial 0.9.6. The existing database/runtime mode is retained because G046 found no artifact evidence justifying a mode migration.
-- Synchronous mode: not changed by Glacial 0.9.6. SQLite's existing/runtime default remains in force; G046 does not claim power-loss acceptance from this decision.
+- Journal mode: not changed by Glacial 0.9.7. The existing database/runtime mode is retained because G046 found no artifact evidence justifying a mode migration.
+- Synchronous mode: not changed by Glacial 0.9.7. SQLite's existing/runtime default remains in force; G046 does not claim power-loss acceptance from this decision.
 - Read/write connection context: normal single-statement writes use SQLite's implicit transaction and commit/rollback context. A Python `with connection:` block is not treated as proof; the fault tests exercise the effective transaction.
 
 ## Migration backups
@@ -174,7 +174,7 @@ Verified migration backups are retained indefinitely in the v1 policy unless a f
 
 ## Reset contract
 
-Glacial 0.9.6 exposes a Settings action for a full application-state reset. The installed contract is:
+Glacial 0.9.7 exposes a Settings action for a full application-state reset. The installed contract is:
 
 1. The user must enter the exact confirmation phrase `RESET GLACIAL APPLICATION DATA`; reset is never an automatic response to startup, schema, integrity, migration, or content failure.
 2. The backend acquires an exclusive database transaction before recreating valid application state. A lock or concurrent mutation causes an honest failure rather than partial success.
@@ -201,7 +201,7 @@ G049 verifies the installed Settings UX, actual-path readback, successful reset,
 
 ## Uninstall boundary
 
-Application uninstallation must never remove scanned project files, generated project instructions, or downloaded exports. The v0.9.6 current-user NSIS uninstaller preserves application data, migration/reset backups, and logs by default. Its optional unchecked data-removal control targets only the Glacial bundle-id roots under the current user's local and roaming application-data directories. G049 natively verified the default uninstall path and source-inspected the optional removal branch; the checked removal branch still requires native clean-machine acceptance in G056/G057.
+Application uninstallation must never remove scanned project files, generated project instructions, or downloaded exports. The v0.9.7 current-user NSIS uninstaller preserves application data, migration/reset backups, and logs by default. Its optional unchecked data-removal control targets only the Glacial bundle-id roots under the current user's local and roaming application-data directories. G049 natively verified the default uninstall path and source-inspected the optional removal branch; G050 owns native checked-removal acceptance.
 
 ## Evidence boundary
 

@@ -1,6 +1,6 @@
 # Glacial data privacy and disclosure boundary
 
-Status: canonical technical privacy boundary for Glacial 0.9.6. This document describes current source behavior and focused G048/G049 evidence. It is not a public privacy notice, legal review, release-candidate acceptance, or claim of absolute security.
+Status: canonical technical privacy boundary for Glacial 0.9.7. This document describes current source behavior and focused G048/G049 evidence. It is not a public privacy notice, legal review, release-candidate acceptance, or claim of absolute security.
 
 ## Governing rule
 

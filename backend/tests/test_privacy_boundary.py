@@ -420,7 +420,7 @@ class PrivacyPersistenceAndExportTests(unittest.TestCase):
             project_name=hostile_text(),
             project_identity=str(self.project),
             scan=unreviewed_scan,
-            generator_version="0.9.6",
+            generator_version="0.9.7",
         )
         package = build_remediation_package(
             project_name=hostile_text(),

@@ -2,6 +2,16 @@ from __future__ import annotations
 
 CHANGELOG_ENTRIES = [
     {
+        "version": "0.9.7",
+        "date": "2026-07-27",
+        "title": "Installed lifecycle acceptance",
+        "changes": [
+            "Prepared an exact-source Windows x64 NSIS artifact for the remaining installed-edition lifecycle acceptance matrix.",
+            "Extended lifecycle, recovery, restoration, reinstall, and uninstall evidence without reviving the retired portable edition or weakening production safety controls.",
+            "Retained the conservative NOT READY verdict while clean release-candidate, security, documentation, signing, and final authorization work remains outstanding.",
+        ],
+    },
+    {
         "version": "0.9.6",
         "date": "2026-07-27",
         "title": "Hex-secret redaction and installed lifecycle correction",
