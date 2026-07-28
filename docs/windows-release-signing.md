@@ -1,6 +1,6 @@
 # Windows release signing
 
-Glacial v0.9.9 is intended to use an Authenticode certificate with the subject `CN=Icefields Development`. The existing certificate is self-signed and is not publicly trusted. Its signature proves byte integrity and publisher-key continuity only; it does not establish Windows reputation or public trust.
+Glacial v0.9.10 is intended to use an Authenticode certificate with the subject `CN=Icefields Development`. The existing certificate is self-signed and is not publicly trusted. Its signature proves byte integrity and publisher-key continuity only; it does not establish Windows reputation or public trust.
 
 Windows Smart App Control, SmartScreen, or organization-managed Application Control may still block Glacial. Do not disable those controls, add exclusions, restore blocked files, or instruct users to bypass warnings. Treat a block as failed or incomplete acceptance.
 
@@ -43,6 +43,17 @@ npm.cmd --prefix frontend run release:windows:public-rc
 ```
 
 Both profiles retain the established RFC 3161 timestamp, exact signer identity, signature, installer-payload, restoration, hash, and atomic-publication checks. Each profile produces only the installed NSIS artifact and its release metadata. Glacial does not currently claim to possess or configure a publicly trusted code-signing certificate.
+
+### Signer preflight only
+
+The signer-only commands load the same redacted configuration and sign no Glacial product file. They validate the expected subject and exact thumbprint, current certificate validity, Code Signing EKU, usable private key or approved provider, disposable PE signature, RFC 3161 timestamp, observed Authenticode chain classification, profile trust gate, and disposable cleanup:
+
+```powershell
+npm.cmd --prefix frontend run release:windows:signed-preview:signer-preflight
+npm.cmd --prefix frontend run release:windows:public-rc:signer-preflight
+```
+
+The result is bounded to profile, provider type, expected and observed public signer identity, observed trust, validity dates, Code Signing EKU, timestamp origin/presence, verification, and cleanup. It excludes credentials, private-key locations, raw environment values, provider credential responses, and host paths. A plan command remains a plan and is not signer verification. The public-RC signer preflight must fail when only the existing self-signed signer is available.
 
 ## Signing providers
 
@@ -235,7 +246,7 @@ npm.cmd --prefix frontend run release:windows:public-rc
 
 The coordinator performs this order:
 
-1. Verify repository identity, branch, clean status, `HEAD == origin/main`, and v0.9.9 metadata.
+1. Verify repository identity, branch, clean status, `HEAD == origin/main`, and v0.9.10 metadata.
 2. Select one exact CurrentUser certificate or external signer and sign/verify a disposable timestamped PE probe.
 3. Enforce the selected profile immediately from the verified `trustClassification`: signed preview accepts `self-signed` or `publicly-trusted`; public RC accepts exactly `publicly-trusted`.
 4. Verify build/runtime environments, build the backend once, preserve valid vendor bytes, and sign every unsigned PE.

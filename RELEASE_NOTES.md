@@ -1,3 +1,15 @@
+# Glacial 0.9.10 Runtime Identity and Signer Readiness
+
+Glacial 0.9.10 adds bounded runtime/build identity, exact direct production dependency declarations, and a preflight-only public-signer evaluation path. It is an unsigned internal pre-v1 evidence build, not a public release candidate or stable release, and the repository remains `NOT READY`.
+
+## Identity, dependency, and signing scope
+
+- Shows product/version, build profile, source commit, lifecycle stage, signing state, observed trust classification, verified signer identity when applicable, frontend/Tauri versions, and authenticated owned-backend version agreement in Settings.
+- Compiles production identity from validated clean-source values; development identity remains explicitly unsigned and may report an unavailable source commit.
+- Pins `@vitejs/plugin-react` to `5.2.0`, `react` and `react-dom` to `19.2.7`, and `vite` to `7.3.6`, matching the unchanged resolved lock graph and preserving the exact PostCSS `8.5.18` override.
+- Adds standalone signed-preview and public-RC signer preflights that reuse the existing disposable PE, Authenticode, signer-identity, Code Signing EKU, validity, RFC 3161 timestamp, observed-chain, cleanup, and profile-trust gates.
+- Records that no publicly trusted signer is configured and no public candidate, tag, GitHub Release, final signature, Deep Security Scan, or v1 authorization was created.
+
 # Glacial 0.9.9 Accessibility and Window-Management Baseline
 
 Glacial 0.9.9 establishes the bounded keyboard, focus, contrast, display-scaling, and minimum-window baseline recorded by G052. It is an unsigned internal pre-v1 acceptance build, not a public release candidate or stable release, and the repository remains `NOT READY`.

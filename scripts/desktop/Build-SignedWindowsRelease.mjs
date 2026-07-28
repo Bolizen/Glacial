@@ -34,6 +34,11 @@ import {
   validateStructuredDigest,
   verifySignature,
 } from "./windows-signing.mjs";
+import {
+  buildIdentityForProfile,
+  serializeBuildIdentity,
+} from "../release/build-identity.mjs";
+import { validateProductionDependencies } from "../release/validate-production-dependencies.mjs";
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const REPOSITORY = resolve(dirname(SCRIPT_PATH), "..", "..");
@@ -198,10 +203,11 @@ export function verifyReleaseSource(gitPath) {
     cargo: cargoVersion(join(FRONTEND, "src-tauri", "Cargo.toml")),
     cargoLock: lockVersion(join(FRONTEND, "src-tauri", "Cargo.lock")),
   };
-  for (const [name, version] of Object.entries(versions)) if (version !== "0.9.9") throw new Error(`${name} identifies version ${version ?? "unknown"}; expected 0.9.9.`);
-  if (readFileSync(join(REPOSITORY, "backend", "app", "version.py"), "utf8").trim() !== 'GLACIAL_VERSION = "0.9.9"') throw new Error("Backend version constant does not identify 0.9.9.");
-  if (!readFileSync(join(REPOSITORY, "backend", "app", "changelog.py"), "utf8").includes('"version": "0.9.9"')) throw new Error("Backend release metadata does not identify 0.9.9.");
-  return { root, branch, commit, originMain, version: "0.9.9", versions, status: "" };
+  for (const [name, version] of Object.entries(versions)) if (version !== "0.9.10") throw new Error(`${name} identifies version ${version ?? "unknown"}; expected 0.9.10.`);
+  if (readFileSync(join(REPOSITORY, "backend", "app", "version.py"), "utf8").trim() !== 'GLACIAL_VERSION = "0.9.10"') throw new Error("Backend version constant does not identify 0.9.10.");
+  if (!readFileSync(join(REPOSITORY, "backend", "app", "changelog.py"), "utf8").includes('"version": "0.9.10"')) throw new Error("Backend release metadata does not identify 0.9.10.");
+  validateProductionDependencies(packageJson, packageLock);
+  return { root, branch, commit, originMain, version: "0.9.10", versions, status: "" };
 }
 
 export function assertSameReleaseSource(before, after) {
@@ -402,7 +408,7 @@ function artifactRecord(kind, path, root) {
   };
 }
 
-function writeReleaseMetadata({ workRoot, source, releaseProfile, signerIdentity, installer, backendSigningRecords, signingEvents, buildStartedUtc, applicationSha256, installerApplicationEvidence }) {
+function writeReleaseMetadata({ workRoot, source, releaseProfile, buildIdentity, signerIdentity, installer, backendSigningRecords, signingEvents, buildStartedUtc, applicationSha256, installerApplicationEvidence }) {
   const artifacts = [artifactRecord("nsis-installer", installer, workRoot)];
   const manifest = {
     schema: "glacial-release-candidate/v1",
@@ -412,6 +418,7 @@ function writeReleaseMetadata({ workRoot, source, releaseProfile, signerIdentity
     commit: source.commit,
     branch: source.branch,
     originMain: source.originMain,
+    buildIdentity,
     headMatchedOriginMain: true,
     workingTreeCleanBeforeBuild: true,
     workingTreeCleanBeforePublication: true,
@@ -517,6 +524,12 @@ async function buildSignedRelease(releaseProfile) {
     state,
     runTrustedSteps: async () => {
       const { signerIdentity } = state;
+      state.buildIdentity = buildIdentityForProfile({
+        profile: releaseProfile,
+        sourceCommit: source.commit,
+        signerIdentity,
+      });
+      releaseEnvironment.GLACIAL_BUILD_IDENTITY_JSON = serializeBuildIdentity(state.buildIdentity);
       ensureSafeDirectory(DESKTOP_BUILD_ROOT, join(workRoot, "artifacts"));
       writeFileSync(overlayPath, `${JSON.stringify(createTauriSigningOverlay(npm.command), null, 2)}\n`, { flag: "wx" });
       await runReleaseSteps([
@@ -545,7 +558,7 @@ async function buildSignedRelease(releaseProfile) {
           copyFileSync(state.installer, state.installerDestination, constants.COPYFILE_EXCL);
           verifySignature(state.installerDestination, config, { expectFirstParty: true, expectedCanonicalSubject: signerIdentity.expectedCanonicalSubject });
         } },
-        { name: "write-metadata", run: () => { state.metadata = writeReleaseMetadata({ workRoot, source, releaseProfile, signerIdentity, installer: state.installerDestination, backendSigningRecords: state.backendSigningRecords, signingEvents: state.signingEvents, buildStartedUtc, applicationSha256: state.applicationSha256, installerApplicationEvidence: state.installerApplicationEvidence }); } },
+        { name: "write-metadata", run: () => { state.metadata = writeReleaseMetadata({ workRoot, source, releaseProfile, buildIdentity: state.buildIdentity, signerIdentity, installer: state.installerDestination, backendSigningRecords: state.backendSigningRecords, signingEvents: state.signingEvents, buildStartedUtc, applicationSha256: state.applicationSha256, installerApplicationEvidence: state.installerApplicationEvidence }); } },
         { name: "publish", run: () => publishCandidate({ workRoot, finalRoot, sourceBefore: source, integrityVerifier: () => verifyPublishedHashes(workRoot, state.metadata.manifestPath, state.metadata.sumsPath), sourceVerifier: () => verifyReleaseSource(gitPath) }) },
       ], state);
     },

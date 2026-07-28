@@ -2031,6 +2031,32 @@ test("health failure does not claim systems are operational", async () => {
   assert.doesNotMatch(document.body.textContent, /All systems operational/);
 });
 
+test("Settings renders bounded development build identity and matching owned backend", async () => {
+  await renderApp([]);
+  await openSettings();
+  await respond(await fetchHarness.next("/api/state-lifecycle"), installedLifecycleFixture());
+  await respond(await fetchHarness.next("/api/runtime-identity"), backendRuntimeIdentityFixture());
+  const identity = document.querySelector(".build-identity");
+  assert.ok(identity);
+  assert.match(identity.textContent, /Glacial/);
+  assert.match(identity.textContent, /0\.9\.10/);
+  assert.match(identity.textContent, /development/);
+  assert.match(identity.textContent, /Source commitUnavailable/);
+  assert.match(identity.textContent, /Trust classificationunsigned/);
+  assert.match(identity.textContent, /Matches frontend\/Tauri version/);
+});
+
+test("Settings exposes frontend/backend version mismatch as unhealthy", async () => {
+  await renderApp([]);
+  await openSettings();
+  await respond(await fetchHarness.next("/api/state-lifecycle"), installedLifecycleFixture());
+  await respond(await fetchHarness.next("/api/runtime-identity"), backendRuntimeIdentityFixture("0.9.9"));
+  const alert = document.querySelector(".build-identity [role='alert']");
+  assert.ok(alert);
+  assert.match(alert.textContent, /does not report the same Glacial version/);
+  assert.match(document.querySelector(".build-identity").textContent, /Mismatch/);
+});
+
 test("project metadata and unregister lifecycle update the real UI flow", async () => {
   const availableA = { ...PROJECT_A, available: true, availability: "available", scan_state: "not_scanned", description: "Old description", project_type: "Python" };
   const missingB = { ...PROJECT_B, available: false, availability: "missing", scan_state: "not_scanned", description: "Missing project" };
@@ -3059,6 +3085,8 @@ function defaultResponse(request) {
       return { status: "ok" };
     case "/api/state-lifecycle":
       return installedLifecycleFixture();
+    case "/api/runtime-identity":
+      return backendRuntimeIdentityFixture();
     case "/api/notes":
       return request.method === "POST" ? note(99, "Cleanup note") : { notes: [] };
     case "/api/scans/history":
@@ -3074,6 +3102,15 @@ function defaultResponse(request) {
     default:
       return {};
   }
+}
+
+function backendRuntimeIdentityFixture(version = "0.9.10") {
+  return {
+    schema_version: 1,
+    product_name: "Glacial",
+    product_version: version,
+    component: "owned-backend",
+  };
 }
 
 function installedLifecycleFixture() {

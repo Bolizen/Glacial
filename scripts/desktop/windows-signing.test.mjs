@@ -66,7 +66,17 @@ const TEST_PATH = fileURLToPath(import.meta.url);
 const REPOSITORY = resolve(dirname(TEST_PATH), "..", "..");
 const TEST_ROOT = join(DESKTOP_BUILD_ROOT, "release-signing-tests");
 const THUMBPRINT = "A".repeat(40);
-const RELEASE_ID = "Glacial-0.9.9-ffffffffffff-20260720T120000Z";
+const RELEASE_ID = "Glacial-0.9.10-ffffffffffff-20260720T120000Z";
+const CERTIFICATE_VALIDITY = {
+  NotBeforeUtc: "2026-01-01T00:00:00.000Z",
+  NotAfterUtc: "2027-01-01T00:00:00.000Z",
+  CodeSigningEku: true,
+};
+const SIGNATURE_VALIDITY = {
+  SignerNotBeforeUtc: CERTIFICATE_VALIDITY.NotBeforeUtc,
+  SignerNotAfterUtc: CERTIFICATE_VALIDITY.NotAfterUtc,
+  CodeSigningEku: true,
+};
 
 function cleanTestRoot() {
   removeSafeTree(DESKTOP_BUILD_ROOT, TEST_ROOT, { pathInspector: false });
@@ -127,9 +137,9 @@ function sourceState(overrides = {}) {
     branch: "main",
     commit: "f".repeat(40),
     originMain: "f".repeat(40),
-    version: "0.9.9",
+    version: "0.9.10",
     status: "",
-    versions: { packageJson: "0.9.9", tauri: "0.9.9" },
+    versions: { packageJson: "0.9.10", tauri: "0.9.10" },
     ...overrides,
   };
 }
@@ -204,13 +214,15 @@ test("thumbprints normalize exactly and reject malformed input", () => {
 
 test("certificate selection requires one exact canonical subject and accessible key", () => {
   const config = loadSigningConfig(storeEnvironment(), { dryRun: true });
-  const valid = { Thumbprint: THUMBPRINT, CanonicalSubject: "CN=ICEFIELDS DEVELOPMENT", HasPrivateKey: true, TrustValid: true, TrustClassification: "self-signed" };
+  const valid = { Thumbprint: THUMBPRINT, CanonicalSubject: "CN=ICEFIELDS DEVELOPMENT", HasPrivateKey: true, TrustValid: true, TrustClassification: "self-signed", ...CERTIFICATE_VALIDITY };
   assert.equal(assertCertificateIdentity([valid], config, "CN=ICEFIELDS DEVELOPMENT"), valid);
   assert.throws(() => assertCertificateIdentity([], config, "CN=ICEFIELDS DEVELOPMENT"), /exactly one/);
   assert.throws(() => assertCertificateIdentity([valid, valid], config, "CN=ICEFIELDS DEVELOPMENT"), /exactly one/);
   assert.throws(() => assertCertificateIdentity([{ ...valid, CanonicalSubject: "CN=ICEFIELDS DEVELOPMENT EVIL" }], config, "CN=ICEFIELDS DEVELOPMENT"), /exact canonical/);
   assert.throws(() => assertCertificateIdentity([{ ...valid, Thumbprint: "B".repeat(40) }], config, "CN=ICEFIELDS DEVELOPMENT"), /thumbprint/);
   assert.throws(() => assertCertificateIdentity([{ ...valid, HasPrivateKey: false }], config, "CN=ICEFIELDS DEVELOPMENT"), /private key/);
+  assert.throws(() => assertCertificateIdentity([{ ...valid, CodeSigningEku: false }], config, "CN=ICEFIELDS DEVELOPMENT"), /Code Signing EKU/);
+  assert.throws(() => assertCertificateIdentity([{ ...valid, NotAfterUtc: "2025-01-01T00:00:00.000Z" }], config, "CN=ICEFIELDS DEVELOPMENT"), /expired/);
   assert.throws(() => assertCertificateIdentity([{ ...valid, TrustClassification: "private-trusted" }], config, "CN=ICEFIELDS DEVELOPMENT"), /private, or ambiguous/);
 });
 
@@ -233,7 +245,7 @@ test("command provider keeps the file as one direct argument and forwards only n
     AZURE_CLIENT_SECRET: "not-allowed",
     AWS_SECRET_ACCESS_KEY: "not-allowed-either",
   });
-  const releaseEnvironment = signingEnvironment(source, "Glacial-0.9.9-ffffffffffff-20260719T120000Z");
+  const releaseEnvironment = signingEnvironment(source, "Glacial-0.9.10-ffffffffffff-20260719T120000Z");
   assert.equal(releaseEnvironment.AZURE_CLIENT_ID, "allowed-value");
   assert.equal("AZURE_CLIENT_SECRET" in releaseEnvironment, false);
   assert.equal("AWS_SECRET_ACCESS_KEY" in releaseEnvironment, false);
@@ -404,7 +416,7 @@ test("private-key probe fails before builds and cleans disposable files on times
   const runner = (command, args, options = {}) => {
     const operation = options.env?.GLACIAL_WINDOWS_HELPER_OPERATION;
     if (operation === "canonical-subject") return { status: 0, stdout: '{"CanonicalSubject":"CN=ICEFIELDS DEVELOPMENT"}', stderr: "" };
-    if (operation === "certificate") return { status: 0, stdout: JSON.stringify({ Candidates: [{ Thumbprint: THUMBPRINT, CanonicalSubject: "CN=ICEFIELDS DEVELOPMENT", HasPrivateKey: true, TrustValid: true, TrustClassification: "self-signed" }] }), stderr: "" };
+    if (operation === "certificate") return { status: 0, stdout: JSON.stringify({ Candidates: [{ Thumbprint: THUMBPRINT, CanonicalSubject: "CN=ICEFIELDS DEVELOPMENT", HasPrivateKey: true, TrustValid: true, TrustClassification: "self-signed", ...CERTIFICATE_VALIDITY }] }), stderr: "" };
     if (operation === "signature") return { status: 0, stdout: JSON.stringify({ Status: "NotSigned", StatusMessage: "The file is not digitally signed.", SignerThumbprint: null, CanonicalSubject: null, TimestampThumbprint: null, TrustValid: false, TrustClassification: "invalid", ChainStatuses: [] }), stderr: "" };
     if (args[0] === "sign") { calls.push("sign"); return { status: 0, stdout: "Successfully signed", stderr: "" }; }
     if (args[0] === "timestamp") { calls.push("timestamp"); throw new Error("timestamp service unavailable"); }
@@ -424,13 +436,13 @@ test("private-key probe signs, verifies, derives trust, and removes its disposab
   const probeSource = join(TEST_ROOT, "successful-probe-source.exe");
   writeFileSync(probeSource, minimalPe());
   const config = loadSigningConfig(storeEnvironment(), { dryRun: true });
-  const signature = { Status: "Valid", StatusMessage: "Signature verified.", SignerThumbprint: THUMBPRINT, CanonicalSubject: "CN=ICEFIELDS DEVELOPMENT", TimestampThumbprint: "B".repeat(40), TrustValid: true, TrustClassification: "self-signed", ChainStatuses: [] };
+  const signature = { Status: "Valid", StatusMessage: "Signature verified.", SignerThumbprint: THUMBPRINT, CanonicalSubject: "CN=ICEFIELDS DEVELOPMENT", TimestampThumbprint: "B".repeat(40), TrustValid: true, TrustClassification: "self-signed", ChainStatuses: [], ...SIGNATURE_VALIDITY };
   const calls = [];
   let signed = false;
   const runner = (command, args, options = {}) => {
     const operation = options.env?.GLACIAL_WINDOWS_HELPER_OPERATION;
     if (operation === "canonical-subject") return { status: 0, stdout: '{"CanonicalSubject":"CN=ICEFIELDS DEVELOPMENT"}', stderr: "" };
-    if (operation === "certificate") return { status: 0, stdout: JSON.stringify({ Candidates: [{ Thumbprint: THUMBPRINT, CanonicalSubject: "CN=ICEFIELDS DEVELOPMENT", HasPrivateKey: true, TrustValid: true, TrustClassification: "self-signed" }] }), stderr: "" };
+    if (operation === "certificate") return { status: 0, stdout: JSON.stringify({ Candidates: [{ Thumbprint: THUMBPRINT, CanonicalSubject: "CN=ICEFIELDS DEVELOPMENT", HasPrivateKey: true, TrustValid: true, TrustClassification: "self-signed", ...CERTIFICATE_VALIDITY }] }), stderr: "" };
     if (operation === "signature") return { status: 0, stdout: JSON.stringify(signed ? signature : { Status: "NotSigned", StatusMessage: "The file is not digitally signed.", SignerThumbprint: null, CanonicalSubject: null, TimestampThumbprint: null, TrustValid: false, TrustClassification: "invalid", ChainStatuses: [] }), stderr: "" };
     if (["sign", "timestamp", "verify"].includes(args[0])) { calls.push(args[0]); if (args[0] === "sign") signed = true; return { status: 0, stdout: "", stderr: "" }; }
     throw new Error(`Unexpected probe command: ${command}`);
@@ -460,7 +472,7 @@ test("signed application capture survives Tauri restoration and remains installe
     applicationCapture: capture,
     auditLog,
   };
-  const signature = { Status: "Valid", StatusMessage: "Signature verified.", SignerThumbprint: THUMBPRINT, CanonicalSubject: "CN=ICEFIELDS DEVELOPMENT", TimestampThumbprint: "B".repeat(40), TrustValid: true, TrustClassification: "self-signed", ChainStatuses: [] };
+  const signature = { Status: "Valid", StatusMessage: "Signature verified.", SignerThumbprint: THUMBPRINT, CanonicalSubject: "CN=ICEFIELDS DEVELOPMENT", TimestampThumbprint: "B".repeat(40), TrustValid: true, TrustClassification: "self-signed", ChainStatuses: [], ...SIGNATURE_VALIDITY };
   const runner = (command, args, options = {}) => {
     const operation = options.env?.GLACIAL_WINDOWS_HELPER_OPERATION;
     if (operation === "canonical-subject") return { status: 0, stdout: '{"CanonicalSubject":"CN=ICEFIELDS DEVELOPMENT"}', stderr: "" };
@@ -510,7 +522,7 @@ test("application capture validation rejects missing, duplicate, unrelated, and 
 test("Tauri signing evidence requires one transient uninstaller between plugins and final installer", () => {
   const capture = join(TEST_ROOT, "capture-evidence", "Glacial.exe");
   const target = join(TEST_ROOT, "target-evidence", "glacial.exe");
-  const installer = join(TEST_ROOT, "bundle", "Glacial_0.9.9_x64-setup.exe");
+  const installer = join(TEST_ROOT, "bundle", "Glacial_0.9.10_x64-setup.exe");
   mkdirSync(dirname(capture), { recursive: true });
   writeFileSync(capture, minimalPe());
   const config = { expectedThumbprint: THUMBPRINT, applicationTarget: target, applicationCapture: capture };
@@ -532,7 +544,7 @@ test("release source revalidation rejects every mutable provenance field", () =>
     { originMain: "e".repeat(40) },
     { status: " M file" },
     { version: "0.9.2" },
-    { versions: { packageJson: "0.9.9", tauri: "0.9.4" } },
+    { versions: { packageJson: "0.9.10", tauri: "0.9.4" } },
   ]) assert.throws(() => assertSameReleaseSource(before, sourceState(changed)), /changed/);
 });
 
@@ -650,7 +662,7 @@ test("dry-run plans and manifest fields report profile trust requirements honest
   );
 });
 
-test("release package commands and established version sources identify 0.9.9", () => {
+test("release package commands and established version sources identify 0.9.10", () => {
   const packageJson = JSON.parse(readFileSync(join(REPOSITORY, "frontend", "package.json"), "utf8"));
   const packageLock = JSON.parse(readFileSync(join(REPOSITORY, "frontend", "package-lock.json"), "utf8"));
   const tauri = JSON.parse(readFileSync(join(REPOSITORY, "frontend", "src-tauri", "tauri.conf.json"), "utf8"));
@@ -685,21 +697,21 @@ test("release package commands and established version sources identify 0.9.9", 
   });
   assert.deepEqual(
     [packageJson.version, packageLock.version, packageLock.packages[""].version, tauri.version],
-    ["0.9.9", "0.9.9", "0.9.9", "0.9.9"],
+    ["0.9.10", "0.9.10", "0.9.10", "0.9.10"],
   );
-  assert.match(cargo, /^version = "0\.9\.9"$/m);
-  assert.match(cargoLock, /\[\[package\]\]\r?\nname = "glacial"\r?\nversion = "0\.9\.9"/);
-  assert.match(releaseTool, /expected 0\.9\.9/);
-  assert.match(signingTool, /\^Glacial-0\\\.9\\\.9-/);
-  assert.match(backendVersion, /^GLACIAL_VERSION = "0\.9\.9"$/m);
-  assert.match(changelog, /"version": "0\.9\.9"/);
-  assert.match(readme, /Glacial v0\.9\.9 is licensed/);
-  assert.match(releaseNotes, /^# Glacial 0\.9\.9 /);
-  assert.match(signingDocs, /Glacial v0\.9\.9 is intended/);
-  assert.match(formatPolicy, /Glacial application version \| `0\.9\.9`/);
-  assert.match(lifecyclePolicy, /Status: v1 policy baseline for Glacial 0\.9\.9\./);
-  assert.match(readinessAudit, /Audited product version: `0\.9\.9`/);
-  assert.equal(readinessSnapshot.audited_version, "0.9.9");
+  assert.match(cargo, /^version = "0\.9\.10"$/m);
+  assert.match(cargoLock, /\[\[package\]\]\r?\nname = "glacial"\r?\nversion = "0\.9\.10"/);
+  assert.match(releaseTool, /expected 0\.9\.10/);
+  assert.match(signingTool, /\^Glacial-0\\\.9\\\.10-/);
+  assert.match(backendVersion, /^GLACIAL_VERSION = "0\.9\.10"$/m);
+  assert.match(changelog, /"version": "0\.9\.10"/);
+  assert.match(readme, /Glacial v0\.9\.10 is licensed/);
+  assert.match(releaseNotes, /^# Glacial 0\.9\.10 /);
+  assert.match(signingDocs, /Glacial v0\.9\.10 is intended/);
+  assert.match(formatPolicy, /Glacial application version \| `0\.9\.10`/);
+  assert.match(lifecyclePolicy, /Status: v1 policy baseline for Glacial 0\.9\.10\./);
+  assert.match(readinessAudit, /Audited product version: `0\.9\.10`/);
+  assert.equal(readinessSnapshot.audited_version, "0.9.10");
 });
 
 test("candidate publication is failure-atomic and never overwrites existing candidates", () => {
@@ -747,17 +759,17 @@ test("manifest and SHA256SUMS verification detects post-packaging mutation", () 
   const root = join(TEST_ROOT, "hashes");
   const artifacts = join(root, "artifacts");
   mkdirSync(artifacts, { recursive: true });
-  const artifact = join(artifacts, "Glacial_0.9.9_x64-setup.exe");
+  const artifact = join(artifacts, "Glacial_0.9.10_x64-setup.exe");
   writeFileSync(artifact, "final bytes");
   const hash = sha256(artifact);
   const manifestPath = join(root, "release-candidate-manifest.json");
   const sumsPath = join(root, "SHA256SUMS.txt");
-  writeFileSync(manifestPath, JSON.stringify({ artifacts: [{ filename: "Glacial_0.9.9_x64-setup.exe", path: "artifacts/Glacial_0.9.9_x64-setup.exe", bytes: 11, sha256: hash }] }));
-  writeFileSync(sumsPath, `${hash}  Glacial_0.9.9_x64-setup.exe\n`);
+  writeFileSync(manifestPath, JSON.stringify({ artifacts: [{ filename: "Glacial_0.9.10_x64-setup.exe", path: "artifacts/Glacial_0.9.10_x64-setup.exe", bytes: 11, sha256: hash }] }));
+  writeFileSync(sumsPath, `${hash}  Glacial_0.9.10_x64-setup.exe\n`);
   assert.equal(verifyPublishedHashes(root, manifestPath, sumsPath), true);
-  writeFileSync(manifestPath, JSON.stringify({ artifacts: [{ filename: "Glacial_0.9.9_x64-setup.exe", path: "artifacts/Glacial_0.9.9_x64-setup.exe", bytes: 11, sha256: "f".repeat(63) }] }));
+  writeFileSync(manifestPath, JSON.stringify({ artifacts: [{ filename: "Glacial_0.9.10_x64-setup.exe", path: "artifacts/Glacial_0.9.10_x64-setup.exe", bytes: 11, sha256: "f".repeat(63) }] }));
   assert.throws(() => verifyPublishedHashes(root, manifestPath, sumsPath), /sha256 is invalid/);
-  writeFileSync(manifestPath, JSON.stringify({ artifacts: [{ filename: "Glacial_0.9.9_x64-setup.exe", path: "artifacts/Glacial_0.9.9_x64-setup.exe", bytes: 11, sha256: hash }] }));
+  writeFileSync(manifestPath, JSON.stringify({ artifacts: [{ filename: "Glacial_0.9.10_x64-setup.exe", path: "artifacts/Glacial_0.9.10_x64-setup.exe", bytes: 11, sha256: hash }] }));
   writeFileSync(artifact, "mutated");
   assert.throws(() => verifyPublishedHashes(root, manifestPath, sumsPath), /mismatch/);
 });

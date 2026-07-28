@@ -75,6 +75,11 @@ import {
   stateForWorkspace,
   writeSessionState,
 } from "./sessionState.js";
+import {
+  normalizeBackendIdentity,
+  reconcileRuntimeIdentity,
+  requestHostBuildIdentity,
+} from "./runtimeIdentity.js";
 import glacialIcon from "../src-tauri/icons/128x128.png";
 import "./styles.css";
 
@@ -221,6 +226,13 @@ export function App() {
     resetting: false,
     status: "",
   });
+  const [runtimeIdentity, setRuntimeIdentity] = useState({
+    build: null,
+    backend: null,
+    backendAgreement: "unavailable",
+    loading: false,
+    error: "",
+  });
   const [reviewNavigation, setReviewNavigation] = useState({ targetId: "", findingFilter: "", nonce: 0 });
   const [toastTop, setToastTop] = useState(112);
   const topbarRef = useRef(null);
@@ -331,6 +343,9 @@ export function App() {
   useEffect(() => {
     if (selectedSection === "settings" && !installedLifecycle.data && !installedLifecycle.loading) {
       loadInstalledLifecycle();
+    }
+    if (selectedSection === "settings" && !runtimeIdentity.build && !runtimeIdentity.loading) {
+      loadRuntimeIdentity();
     }
   }, [selectedSection]);
 
@@ -1624,6 +1639,39 @@ export function App() {
     }
   }
 
+  async function loadRuntimeIdentity() {
+    setRuntimeIdentity((current) => ({ ...current, loading: true, error: "" }));
+    const [buildResult, backendResult] = await Promise.allSettled([
+      requestHostBuildIdentity(),
+      api("/api/runtime-identity"),
+    ]);
+    const build = buildResult.status === "fulfilled" ? buildResult.value : null;
+    let backend = null;
+    let backendError = "";
+    if (backendResult.status === "fulfilled") {
+      try {
+        backend = normalizeBackendIdentity(backendResult.value);
+      } catch (error) {
+        backendError = error.message;
+      }
+    } else {
+      backendError = backendResult.reason?.message || "Backend runtime identity is unavailable.";
+    }
+    const agreement = build && backend
+      ? reconcileRuntimeIdentity(build, backendResult.value).backendAgreement
+      : "unavailable";
+    const buildError = buildResult.status === "rejected"
+      ? buildResult.reason?.message || "Compiled build identity is unavailable."
+      : "";
+    setRuntimeIdentity({
+      build,
+      backend,
+      backendAgreement: agreement,
+      loading: false,
+      error: [buildError, backendError].filter(Boolean).join(" "),
+    });
+  }
+
   async function resetApplicationState() {
     const paths = installedLifecycle.data?.paths;
     const confirmed = window.confirm(
@@ -1999,6 +2047,7 @@ export function App() {
                 error={workspaceRootError}
                 onResetSavedState={resetSavedUiState}
                 installedLifecycle={installedLifecycle}
+                runtimeIdentity={runtimeIdentity}
                 onResetApplicationState={resetApplicationState}
               />
               {selectedProject && !projectDetailsLoading ? (
@@ -2748,6 +2797,7 @@ function SettingsSection({
   error,
   onResetSavedState,
   installedLifecycle,
+  runtimeIdentity,
   onResetApplicationState,
 }) {
   const [editing, setEditing] = useState(false);
@@ -2785,6 +2835,7 @@ function SettingsSection({
           <span>Glacial by Icefields · icefields.dev</span>
         </div>
       </div>
+      <BuildIdentitySection value={runtimeIdentity} />
       {editing ? (
         <form className="stack project-action-form" onSubmit={(event) => { event.preventDefault(); onChangeRoot(draft); }}>
           <label>
@@ -2831,6 +2882,50 @@ function SettingsSection({
           {installedLifecycle.resetting ? "Resetting..." : "Reset application state"}
         </button>
       </div>
+    </section>
+  );
+}
+
+export function BuildIdentitySection({ value }) {
+  const build = value.build;
+  const backend = value.backend;
+  const agreementLabel = value.backendAgreement === "match"
+    ? "Matches frontend/Tauri version"
+    : value.backendAgreement === "mismatch"
+      ? "Mismatch: frontend and owned backend versions differ"
+      : "Unavailable";
+  const rows = [
+    ["Product", build?.productName ?? "Unknown"],
+    ["Version", build?.productVersion ?? "Unknown"],
+    ["Build profile", build?.buildProfile ?? "Unknown"],
+    ["Lifecycle stage", build?.lifecycleStage ?? "Unknown"],
+    ["Source commit", build?.sourceCommit ?? "Unavailable"],
+    ["Signing state", build?.signingState ?? "Unknown"],
+    ["Trust classification", build?.trustClassification ?? "Unknown"],
+    ["Signer evidence", build?.signerVerification ?? "Unverified"],
+    ["Signer subject", build?.signerSubject ?? "Unavailable"],
+    ["Signer SHA-1 thumbprint", build?.signerThumbprint ?? "Unavailable"],
+    ["Frontend / Tauri version", build ? `${build.frontendVersion} / ${build.tauriVersion}` : "Unknown"],
+    ["Owned backend version", backend?.productVersion ?? "Unavailable"],
+    ["Frontend / backend agreement", agreementLabel],
+  ];
+  return (
+    <section className="settings-reset-state build-identity" aria-labelledby="build-identity-heading">
+      <strong id="build-identity-heading">Build Identity</strong>
+      <p className="muted">Observed compile-time identity and authenticated owned-backend agreement. Configured signer values are never shown as signature evidence.</p>
+      {value.loading ? <p className="muted">Loading build identity...</p> : null}
+      <dl className="build-identity-list">
+        {rows.map(([label, content]) => (
+          <div key={label}>
+            <dt>{label}</dt>
+            <dd>{content}</dd>
+          </div>
+        ))}
+      </dl>
+      {value.backendAgreement === "mismatch" ? (
+        <p className="notice" role="alert">The owned backend does not report the same Glacial version as this frontend. Runtime identity is not healthy.</p>
+      ) : null}
+      {value.error ? <p className="notice" role="alert">{value.error}</p> : null}
     </section>
   );
 }

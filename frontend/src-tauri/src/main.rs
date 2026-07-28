@@ -7,7 +7,12 @@ mod windows_job;
 use std::{fmt, sync::Arc, thread};
 
 use backend::{BackendSupervisor, StartupError};
+use serde_json::Value;
 use tauri::Manager;
+
+mod compiled_identity {
+    include!(concat!(env!("OUT_DIR"), "/build_identity.rs"));
+}
 
 fn main() {
     let backend = Arc::new(BackendSupervisor::new());
@@ -21,7 +26,7 @@ fn main() {
             }
         }))
         .manage(Arc::clone(&backend))
-        .invoke_handler(tauri::generate_handler![api_bridge::api_request])
+        .invoke_handler(tauri::generate_handler![api_bridge::api_request, build_identity])
         .setup(move |app| {
             let app_handle = app.handle().clone();
             let startup_backend = Arc::clone(&setup_backend);
@@ -76,6 +81,12 @@ fn main() {
     });
 }
 
+#[tauri::command]
+fn build_identity() -> Result<Value, String> {
+    serde_json::from_str(compiled_identity::BUILD_IDENTITY_JSON)
+        .map_err(|_| "The compiled Glacial build identity is unavailable.".to_string())
+}
+
 fn create_main_window(app: &tauri::AppHandle, startup_error: Option<&str>) -> tauri::Result<()> {
     let mut window_config = app
         .config()
@@ -119,5 +130,15 @@ mod tests {
         let script = include_str!("../../public/startup-error.js");
         assert!(script.contains("detail.textContent"));
         assert!(!script.contains("innerHTML"));
+    }
+
+    #[test]
+    fn compiled_build_identity_is_bounded_and_matches_the_rust_package() {
+        let identity: Value = serde_json::from_str(compiled_identity::BUILD_IDENTITY_JSON).unwrap();
+        assert_eq!(identity["schemaVersion"], 1);
+        assert_eq!(identity["productName"], "Glacial");
+        assert_eq!(identity["productVersion"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(identity["tauriVersion"], env!("CARGO_PKG_VERSION"));
+        assert!(compiled_identity::BUILD_IDENTITY_JSON.len() < 4096);
     }
 }

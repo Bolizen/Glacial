@@ -2,6 +2,17 @@ from __future__ import annotations
 
 CHANGELOG_ENTRIES = [
     {
+        "version": "0.9.10",
+        "date": "2026-07-28",
+        "title": "Runtime identity and signer readiness",
+        "changes": [
+            "Added a visible compile-time build identity and authenticated owned-backend version agreement without treating configured signer values as observed evidence.",
+            "Pinned every direct frontend production dependency declaration to the exact committed lockfile version and added fail-closed parity validation.",
+            "Added a disposable public-signer preflight while retaining the self-signed/public-trust boundary; no publicly trusted signer or public candidate exists.",
+            "Retained the pre-v1 NOT READY verdict and the separate mandatory G054/G055 security handoffs.",
+        ],
+    },
+    {
         "version": "0.9.9",
         "date": "2026-07-28",
         "title": "Accessibility and window-management baseline",

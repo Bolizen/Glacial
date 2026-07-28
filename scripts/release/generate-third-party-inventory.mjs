@@ -149,7 +149,7 @@ function pythonRuntime() {
 function inventory() {
   return {
     schemaVersion: "1.0.0",
-    productVersion: "0.9.9",
+    productVersion: "0.9.10",
     target: "Windows x64 current-user NSIS installed application",
     reviewedAt: "2026-07-28",
     sources: [

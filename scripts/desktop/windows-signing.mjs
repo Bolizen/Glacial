@@ -68,6 +68,15 @@ export const WINDOWS_SIGNING_POWERSHELL_HELPER_COMMAND = [
   "  return $Name.Decode($flags).Trim().ToUpperInvariant()",
   "}",
   "function Thumb([string] $Value) { return ($Value -replace '\\s', '').ToUpperInvariant() }",
+  "function Has-CodeSigningEku([System.Security.Cryptography.X509Certificates.X509Certificate2] $Certificate) {",
+  "  foreach ($extension in $Certificate.Extensions) {",
+  "    if ($extension.Oid.Value -eq '2.5.29.37') {",
+  "      $eku = [System.Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension]::new($extension.RawData, $false)",
+  "      return @($eku.EnhancedKeyUsages | Where-Object { $_.Value -eq '1.3.6.1.5.5.7.3.3' }).Count -gt 0",
+  "    }",
+  "  }",
+  "  return $false",
+  "}",
   "function Trust-Info([System.Security.Cryptography.X509Certificates.X509Certificate2] $Certificate) {",
   "  $chain = [System.Security.Cryptography.X509Certificates.X509Chain]::new()",
   "  $chain.ChainPolicy.RevocationMode = [System.Security.Cryptography.X509Certificates.X509RevocationMode]::NoCheck",
@@ -98,14 +107,14 @@ export const WINDOWS_SIGNING_POWERSHELL_HELPER_COMMAND = [
   "    $matches = @(Get-ChildItem -LiteralPath 'Cert:\\CurrentUser\\My' | Where-Object { (Thumb $_.Thumbprint) -eq $wanted -or (Canonical-Dn $_.SubjectName) -eq $expectedCanonical })",
   "    $candidates = @($matches | ForEach-Object {",
   "      $trust = Trust-Info $_",
-  "      [pscustomobject]@{ Thumbprint = Thumb $_.Thumbprint; CanonicalSubject = Canonical-Dn $_.SubjectName; HasPrivateKey = $_.HasPrivateKey; TrustValid = $trust.Valid; TrustClassification = $trust.Classification; ChainStatuses = $trust.Statuses }",
+  "      [pscustomobject]@{ Thumbprint = Thumb $_.Thumbprint; CanonicalSubject = Canonical-Dn $_.SubjectName; HasPrivateKey = $_.HasPrivateKey; NotBeforeUtc = $_.NotBefore.ToUniversalTime().ToString('o'); NotAfterUtc = $_.NotAfter.ToUniversalTime().ToString('o'); CodeSigningEku = Has-CodeSigningEku $_; TrustValid = $trust.Valid; TrustClassification = $trust.Classification; ChainStatuses = $trust.Statuses }",
   "    })",
   "    [pscustomobject]@{ Candidates = $candidates } | ConvertTo-Json -Compress -Depth 5",
   "  }",
   "  'signature' {",
   "    $signature = Get-AuthenticodeSignature -LiteralPath ([string]$payload.path)",
   "    $trust = if ($signature.SignerCertificate) { Trust-Info $signature.SignerCertificate } else { $null }",
-  "    [pscustomobject]@{ Status = $signature.Status.ToString(); StatusMessage = $signature.StatusMessage; SignerThumbprint = if ($signature.SignerCertificate) { Thumb $signature.SignerCertificate.Thumbprint } else { $null }; CanonicalSubject = if ($signature.SignerCertificate) { Canonical-Dn $signature.SignerCertificate.SubjectName } else { $null }; TimestampThumbprint = if ($signature.TimeStamperCertificate) { Thumb $signature.TimeStamperCertificate.Thumbprint } else { $null }; TrustValid = if ($trust) { $trust.Valid } else { $false }; TrustClassification = if ($trust) { $trust.Classification } else { 'invalid' }; ChainStatuses = if ($trust) { $trust.Statuses } else { @() } } | ConvertTo-Json -Compress -Depth 5",
+  "    [pscustomobject]@{ Status = $signature.Status.ToString(); StatusMessage = $signature.StatusMessage; SignerThumbprint = if ($signature.SignerCertificate) { Thumb $signature.SignerCertificate.Thumbprint } else { $null }; CanonicalSubject = if ($signature.SignerCertificate) { Canonical-Dn $signature.SignerCertificate.SubjectName } else { $null }; SignerNotBeforeUtc = if ($signature.SignerCertificate) { $signature.SignerCertificate.NotBefore.ToUniversalTime().ToString('o') } else { $null }; SignerNotAfterUtc = if ($signature.SignerCertificate) { $signature.SignerCertificate.NotAfter.ToUniversalTime().ToString('o') } else { $null }; CodeSigningEku = if ($signature.SignerCertificate) { Has-CodeSigningEku $signature.SignerCertificate } else { $false }; TimestampThumbprint = if ($signature.TimeStamperCertificate) { Thumb $signature.TimeStamperCertificate.Thumbprint } else { $null }; TrustValid = if ($trust) { $trust.Valid } else { $false }; TrustClassification = if ($trust) { $trust.Classification } else { 'invalid' }; ChainStatuses = if ($trust) { $trust.Statuses } else { @() } } | ConvertTo-Json -Compress -Depth 5",
   "  }",
   "  'path-info' {",
   "    $items = @($payload.paths | ForEach-Object {",
@@ -316,7 +325,7 @@ function requireAbsoluteFile(path, name, dryRun) {
 
 function validateReleaseId(value) {
   if (!value) return null;
-  if (!/^Glacial-0\.9\.9-[0-9a-f]{12}-[0-9]{8}T[0-9]{6}Z$/i.test(value)) throw new Error("Invalid internal release id.");
+  if (!/^Glacial-0\.9\.10-[0-9a-f]{12}-[0-9]{8}T[0-9]{6}Z$/i.test(value)) throw new Error("Invalid internal release id.");
   return value;
 }
 
@@ -446,6 +455,13 @@ export function assertCertificateIdentity(candidates, config, expectedCanonicalS
   if (normalizeThumbprint(certificate.Thumbprint) !== config.expectedThumbprint) throw new Error("The selected certificate thumbprint is unexpected.");
   if (String(certificate.CanonicalSubject ?? "").toUpperCase() !== expectedCanonicalSubject) throw new Error("The selected certificate subject is not an exact canonical match.");
   if (certificate.HasPrivateKey !== true) throw new Error("The selected certificate has no associated private key.");
+  const now = Date.now();
+  const notBefore = Date.parse(certificate.NotBeforeUtc);
+  const notAfter = Date.parse(certificate.NotAfterUtc);
+  if (!Number.isFinite(notBefore) || !Number.isFinite(notAfter) || now < notBefore || now > notAfter) {
+    throw new Error("The selected certificate is expired, not yet valid, or has malformed validity dates.");
+  }
+  if (certificate.CodeSigningEku !== true) throw new Error("The selected certificate lacks the Code Signing EKU.");
   if (certificate.TrustValid !== true || !["self-signed", "publicly-trusted"].includes(certificate.TrustClassification)) {
     throw new Error("The selected certificate chain is invalid, private, or ambiguous.");
   }
@@ -612,6 +628,9 @@ export function inspectAuthenticode(file, runner = runCommand, env = process.env
     statusMessage: value.StatusMessage,
     signerThumbprint: value.SignerThumbprint ? normalizeThumbprint(value.SignerThumbprint, "signer thumbprint") : null,
     canonicalSubject: value.CanonicalSubject ?? null,
+    signerNotBeforeUtc: value.SignerNotBeforeUtc ?? null,
+    signerNotAfterUtc: value.SignerNotAfterUtc ?? null,
+    codeSigningEku: value.CodeSigningEku === true,
     timestampThumbprint: value.TimestampThumbprint ? normalizeThumbprint(value.TimestampThumbprint, "timestamp thumbprint") : null,
     trustValid: value.TrustValid === true,
     trustClassification: value.TrustClassification,
@@ -633,6 +652,13 @@ export function verifySignature(file, config, options = {}) {
     if (signature.signerThumbprint !== config.expectedThumbprint) throw new Error(`The signer thumbprint for ${basename(file)} is unexpected.`);
     if (String(signature.canonicalSubject ?? "").toUpperCase() !== expectedCanonical) throw new Error(`The signer subject for ${basename(file)} is not an exact canonical match.`);
     if (!signature.timestampThumbprint) throw new Error(`The first-party signature for ${basename(file)} is not timestamped.`);
+    const now = Date.now();
+    const notBefore = Date.parse(signature.signerNotBeforeUtc);
+    const notAfter = Date.parse(signature.signerNotAfterUtc);
+    if (!Number.isFinite(notBefore) || !Number.isFinite(notAfter) || now < notBefore || now > notAfter) {
+      throw new Error(`The signer certificate for ${basename(file)} is expired, not yet valid, or malformed.`);
+    }
+    if (signature.codeSigningEku !== true) throw new Error(`The signer certificate for ${basename(file)} lacks the Code Signing EKU.`);
     if (!signature.trustValid || !["self-signed", "publicly-trusted"].includes(signature.trustClassification)) throw new Error(`The signer chain for ${basename(file)} is invalid, private, or ambiguous.`);
   }
   return signature;
@@ -739,7 +765,17 @@ export function preflightSigningProvider(config, options = {}) {
     if (initialSignature.status !== "NotSigned") throw new Error("The disposable signing probe is not unsigned.");
     const signature = signOne(probe, { ...config, auditLog: null }, { runner, env: options.env });
     if (signature.canonicalSubject.toUpperCase() !== expectedCanonical) throw new Error("The private-key probe used an unexpected signer subject.");
-    return { expectedCanonicalSubject: expectedCanonical, canonicalSubject: signature.canonicalSubject, trustClassification: signature.trustClassification, signerThumbprint: signature.signerThumbprint, storeCertificate };
+    return {
+      expectedCanonicalSubject: expectedCanonical,
+      canonicalSubject: signature.canonicalSubject,
+      trustClassification: signature.trustClassification,
+      signerThumbprint: signature.signerThumbprint,
+      signerNotBeforeUtc: signature.signerNotBeforeUtc,
+      signerNotAfterUtc: signature.signerNotAfterUtc,
+      codeSigningEku: signature.codeSigningEku,
+      timestampThumbprint: signature.timestampThumbprint,
+      storeCertificate,
+    };
   } finally {
     removeSafeTree(DESKTOP_BUILD_ROOT, probeRoot, options);
   }

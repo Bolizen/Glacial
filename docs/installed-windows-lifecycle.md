@@ -2,7 +2,7 @@
 
 Glacial supports one Windows x64 product edition: the current-user NSIS installation. It does not support a portable edition or relocation by copying installed files.
 
-This guide describes Glacial 0.9.9. The application remains pre-v1 and `NOT READY`; these instructions do not make an unsigned or unapproved installer trustworthy.
+This guide describes Glacial 0.9.10. The application remains pre-v1 and `NOT READY`; these instructions do not make an unsigned or unapproved installer trustworthy.
 
 ## Install and first run
 

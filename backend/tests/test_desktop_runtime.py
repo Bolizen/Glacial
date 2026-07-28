@@ -130,6 +130,24 @@ class DesktopAuthenticationTests(unittest.TestCase):
             with self.subTest(value=value):
                 self.assertFalse(_authorized_api_request("/api/health", "GET", value, TOKEN))
 
+    def test_runtime_identity_requires_authentication_and_exposes_only_bounded_product_fields(self) -> None:
+        with patch.dict(os.environ, {"GLACIAL_DESKTOP_AUTH_TOKEN": TOKEN}, clear=False):
+            status, _, body = asyncio.run(asgi_request(
+                "GET",
+                "/api/runtime-identity",
+                [(b"authorization", f"Bearer {TOKEN}".encode("ascii"))],
+            ))
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            json.loads(body),
+            {
+                "schema_version": 1,
+                "product_name": "Glacial",
+                "product_version": "0.9.10",
+                "component": "owned-backend",
+            },
+        )
+
     def test_missing_malformed_and_incorrect_tokens_return_401(self) -> None:
         with patch.dict(os.environ, {DESKTOP_AUTH_TOKEN_ENV: TOKEN}, clear=False):
             for authorization in (None, b"", b"Basic abc", f"Bearer {'b' * 64}".encode("ascii")):

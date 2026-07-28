@@ -63,6 +63,7 @@ from .review_checkpoints import (
 )
 from .remediation_brief import build_remediation_snapshot
 from .remediation_package import build_remediation_package
+from .runtime_identity import backend_runtime_identity
 from .schemas import AgentPreviewRequest, ApplicationStateReset, FindingReviewDelete, FindingReviewRequest, NoteCreate, ProjectCreate, ProjectMetadataUpdate, ProjectPathRequest, ProjectRegister, ProjectRootUpdate, RemediationBriefRequest, RemediationPackageRequest, ReviewCheckpointCreate, TrustProfileRequest, TrustedDependencyBaselineApprove, TrustedDependencyBaselineNote, TrustedScanBaselineSet
 from .trusted_dependency_baseline import BASELINE_SCHEMA_VERSION, BaselineError, approval_for_analysis, enrich_scan as enrich_trusted_baseline, public_baseline, snapshot_from_analysis, snapshot_json, valid_fingerprint as valid_baseline_fingerprint
 from .trusted_scan_baseline import PROVENANCE_MANUAL, trusted_scan_baseline_state
@@ -125,6 +126,11 @@ def startup() -> None:
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/runtime-identity")
+def runtime_identity() -> dict[str, object]:
+    return backend_runtime_identity()
 
 
 def _authorized_api_request(

@@ -4614,6 +4614,31 @@ label,
   margin: 12px 0;
 }
 
+.build-identity-list {
+  display: grid;
+  gap: 0;
+  margin: 12px 0;
+  min-width: 0;
+}
+
+.build-identity-list > div {
+  border-bottom: 1px solid var(--color-border-subtle);
+  display: grid;
+  gap: 4px;
+  grid-template-columns: minmax(180px, 0.45fr) minmax(0, 1fr);
+  padding: 8px 0;
+}
+
+.build-identity-list dt {
+  color: var(--color-text-muted);
+  font-weight: 700;
+}
+
+.build-identity-list dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 .installed-path-list > div {
   display: grid;
   gap: 3px;

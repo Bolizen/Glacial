@@ -4,7 +4,7 @@ import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const expectedVersion = "0.9.9";
+const expectedVersion = "0.9.10";
 
 function fail(message) {
   console.error(`G051 documentation validation failed: ${message}`);
