@@ -1,9 +1,9 @@
 {
   "schema_version": "1.0.0",
   "product": "Glacial",
-  "audited_version": "0.9.9",
-  "audited_commit": "b1ac54f0661425b111293c58176a76dc708fdf18",
-  "generated_at_utc": "2026-07-28T15:18:23Z",
+  "audited_version": "0.9.10",
+  "audited_commit": "1d580221a1275aec5f355131028c9911e30c7191",
+  "generated_at_utc": "2026-07-28T16:50:24Z",
   "overall_verdict": "NOT READY",
   "scope_decision": "Glacial v1 supports only the installed Windows x64 NSIS edition; the retired portable edition does not close any installed lifecycle or release requirement.",
   "classification_changes": [
@@ -84,18 +84,24 @@
       "from": "PARTIAL",
       "to": "PASS",
       "reason": "G052 completes the interaction and state inventory and finds no remaining critical color-only, hover-only, drag-only, or fine-pointer-only meaning or action."
+    },
+    {
+      "id": "V1-REL-001",
+      "from": "PARTIAL",
+      "to": "PASS",
+      "reason": "G053 pins every direct frontend production dependency to the exact committed lock version, proves package/lock root parity and an unchanged normalized resolved graph, preserves PostCSS 8.5.18, and integrates the validator into clean release-source preflight."
     }
   ],
   "status_counts": {
-    "PASS": 48,
-    "PARTIAL": 10,
+    "PASS": 49,
+    "PARTIAL": 9,
     "FAIL": 3,
     "UNKNOWN": 0,
     "NOT_APPLICABLE": 0
   },
   "priority_counts": {
     "P0": 0,
-    "P1": 13,
+    "P1": 12,
     "P2": 0,
     "P3": 0
   },
@@ -125,7 +131,7 @@
       "area": "Product identity and version integrity",
       "status": "PASS",
       "priority": null,
-      "summary": "Authoritative source versions agree on 0.9.9 and are machine-validated.",
+      "summary": "Authoritative source versions agree on 0.9.10 and are machine-validated.",
       "evidence": [
         "frontend/package.json and package-lock.json",
         "frontend/src-tauri/tauri.conf.json, Cargo.toml, and Cargo.lock",
@@ -161,14 +167,16 @@
       "area": "Product identity and version integrity",
       "status": "PARTIAL",
       "priority": "P1",
-      "summary": "Release profiles are honest in scripts, but complete visible runtime profile identity is absent.",
+      "summary": "Development and internal-evidence identity are visible and fail closed, but no signed preview, public RC, or stable candidate identity has been read back.",
       "evidence": [
         "docs/windows-release-signing.md",
-        "scripts/desktop/Build-SignedWindowsRelease.mjs profile and trust fields",
-        "frontend/src-tauri/src/backend.rs development data separation"
+        "frontend/src/buildIdentityContract.js and runtimeIdentity.js",
+        "frontend/src-tauri/build.rs and src/main.rs compiled identity",
+        "backend/app/runtime_identity.py authenticated bounded identity",
+        "G053 native 960x640 internal-evidence readback for commit 1d580221a1275aec5f355131028c9911e30c7191"
       ],
-      "gap": "The running UI does not expose a complete build profile/version/trust identity, and no stable candidate exists for end-to-end inspection.",
-      "recommended_remediation": "Add a bounded About or diagnostic identity and verify every supported profile.",
+      "gap": "No actual signed-preview identity was produced in the unconfigured local signer environment, and no publicly trusted public-RC or stable candidate exists for end-to-end identity readback.",
+      "recommended_remediation": "Read back the same identity surface and generated metadata from actual signed-preview, public-RC, and stable candidate bytes when those profiles become available.",
       "closure_evidence": [
         "Runtime and generated metadata readback for development, signed preview, public RC, and stable candidate."
       ],
@@ -195,11 +203,11 @@
       "area": "Product identity and version integrity",
       "status": "PASS",
       "priority": null,
-      "summary": "Documentation identifies 0.9.9 as a bounded pre-v1 accessibility and window-management milestone and does not imply a public release candidate, stable status, formal certification, or v1 authorization.",
+      "summary": "Documentation identifies 0.9.10 as a bounded pre-v1 identity, dependency, and signer-readiness milestone and does not imply a public release candidate, stable status, or v1 authorization.",
       "evidence": [
         "README.md Current Status",
-        "RELEASE_NOTES.md 0.9.9 entry",
-        "backend/app/changelog.py 0.9.9 entry",
+        "RELEASE_NOTES.md 0.9.10 entry",
+        "backend/app/changelog.py 0.9.10 entry",
         "docs/release/v1.0-gap-audit.md NOT READY verdict"
       ],
       "gap": "",
@@ -892,8 +900,10 @@
       "evidence": [
         "scripts/desktop/Build-SignedWindowsRelease.mjs",
         "scripts/desktop/windows-signing.mjs",
+        "scripts/desktop/Signer-Preflight.mjs",
         "scripts/desktop/windows-signing.test.mjs",
-        "docs/windows-release-signing.md"
+        "scripts/desktop/Signer-Preflight.test.mjs",
+        "G053 real local signed-preview/public-RC preflights rejected missing provider configuration without product construction"
       ],
       "gap": "No public signer, signed candidate, timestamps, manifest, hashes, or independent publication evidence exists.",
       "recommended_remediation": "Close through RC construction and signing verification.",
@@ -943,20 +953,21 @@
     {
       "id": "V1-REL-001",
       "area": "Release engineering and supply-chain integrity",
-      "status": "PARTIAL",
-      "priority": "P1",
-      "summary": "Release preflight and lockfiles are exact, but the npm manifest retains loose production dependency ranges.",
+      "status": "PASS",
+      "priority": null,
+      "summary": "Direct production declarations, package-lock root metadata, locked packages, and clean-source release preflight are exact and fail closed.",
       "evidence": [
-        "G048 starting state: clean main at d4bfe1413f987a7d4f08a1e6adcfd0549bb33b53 with local, origin, and direct remote alignment",
-        "Exact npm, Python, and Cargo locks",
-        "scripts/desktop/Build-SignedWindowsRelease.mjs clean-source preflight"
+        "frontend/package.json exact @tauri-apps/api 2.11.1, @vitejs/plugin-react 5.2.0, react 19.2.7, react-dom 19.2.7, and vite 7.3.6 declarations",
+        "frontend/package-lock.json exact matching root declarations and packages",
+        "scripts/release/validate-production-dependencies.mjs and focused negative tests",
+        "Normalized before/after resolved graph fingerprint 42CB63A73AEC7BC7F58A4FC02018E9C020A8C89E9AD452575A8DD02D3319A06F",
+        "PostCSS override remains exact 8.5.18",
+        "scripts/desktop/Build-SignedWindowsRelease.mjs invokes dependency validation during clean-source preflight"
       ],
-      "gap": "frontend/package.json uses ^ ranges for four production dependency declarations, contrary to the repository dependency-security rule, although npm ci consumes the exact lockfile. The exact PostCSS security override does not close this separate declaration gap.",
-      "recommended_remediation": "Decide and apply exact reviewed manifest versions without unrelated upgrades, then review lockfile parity and rerun the clean preflight.",
+      "gap": "",
+      "recommended_remediation": "",
       "closure_evidence": [
-        "Exact manifest declarations.",
-        "Reviewed lockfile parity.",
-        "Captured fail-closed preflight on the final candidate commit."
+        "Retain exact-declaration, lock-parity, unchanged-graph, and clean-source validation on the final candidate commit."
       ],
       "waiver_permitted": false
     },
@@ -1007,7 +1018,8 @@
       "summary": "The public-trust gate exists, but no publicly trusted signer is configured.",
       "evidence": [
         "docs/windows-release-signing.md states the existing certificate is self-signed",
-        "Public-RC script rejects non-public trust before build"
+        "Public-RC script rejects non-public trust before build",
+        "G053 public-RC signer preflight exits non-zero because no signing provider is configured"
       ],
       "gap": "No approved public signer can produce a passing public v1 candidate.",
       "recommended_remediation": "Obtain an approved public signing service or certificate without weakening the gate.",
@@ -1066,7 +1078,7 @@
       "evidence": [
         "README.md",
         "SECURITY.md",
-        "RELEASE_NOTES.md 0.9.9 entry",
+        "RELEASE_NOTES.md 0.9.10 entry",
         "Readiness document links and disclaimer"
       ],
       "gap": "",
