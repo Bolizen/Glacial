@@ -1,17 +1,30 @@
 {
   "schema_version": "1.0.0",
   "product": "Glacial",
-  "audited_version": "0.9.5",
-  "audited_commit": "a0349dda4ff34b2ec84f60eead981720f8b7d82e",
-  "generated_at_utc": "2026-07-27T20:39:36Z",
+  "audited_version": "0.9.6",
+  "audited_commit": "6444c486612395a3b907e6c740882b691ddf20fe",
+  "generated_at_utc": "2026-07-28T02:47:40Z",
   "overall_verdict": "NOT READY",
   "scope_decision": "Glacial v1 supports only the installed Windows x64 NSIS edition; the retired portable edition does not close any installed lifecycle or release requirement.",
-  "classification_changes": [],
+  "classification_changes": [
+    {
+      "id": "V1-DESKTOP-005",
+      "from": "UNKNOWN",
+      "to": "PARTIAL",
+      "reason": "G049 adds focused one-host installed path, upgrade, reset, reinstall, default-uninstall, and project-file non-deletion evidence; clean-machine and remaining lifecycle acceptance are incomplete."
+    },
+    {
+      "id": "V1-DOC-002",
+      "from": "FAIL",
+      "to": "PARTIAL",
+      "reason": "G049 documents exact installed lifecycle paths and reset/uninstall behavior, but stable task-oriented guidance and clean-reader/clean-machine validation remain incomplete."
+    }
+  ],
   "status_counts": {
     "PASS": 36,
-    "PARTIAL": 16,
-    "FAIL": 6,
-    "UNKNOWN": 3,
+    "PARTIAL": 18,
+    "FAIL": 5,
+    "UNKNOWN": 2,
     "NOT_APPLICABLE": 0
   },
   "priority_counts": {
@@ -46,7 +59,7 @@
       "area": "Product identity and version integrity",
       "status": "PASS",
       "priority": null,
-      "summary": "Authoritative source versions agree on 0.9.5 and are machine-validated.",
+      "summary": "Authoritative source versions agree on 0.9.6 and are machine-validated.",
       "evidence": [
         "frontend/package.json and package-lock.json",
         "frontend/src-tauri/tauri.conf.json, Cargo.toml, and Cargo.lock",
@@ -116,11 +129,11 @@
       "area": "Product identity and version integrity",
       "status": "PASS",
       "priority": null,
-      "summary": "Documentation identifies 0.9.5 as pre-v1 privacy-boundary hardening and does not imply stable or v1 authorization.",
+      "summary": "Documentation identifies 0.9.6 as pre-v1 redaction/lifecycle hardening and does not imply stable or v1 authorization.",
       "evidence": [
         "README.md Current Status",
-        "RELEASE_NOTES.md 0.9.5 entry",
-        "backend/app/changelog.py 0.9.5 entry",
+        "RELEASE_NOTES.md 0.9.6 entry",
+        "backend/app/changelog.py 0.9.6 entry",
         "docs/release/v1.0-gap-audit.md NOT READY verdict"
       ],
       "gap": "",
@@ -391,17 +404,18 @@
       "area": "Data integrity and state lifecycle",
       "status": "PARTIAL",
       "priority": "P1",
-      "summary": "Migration rollback, integrity, and cleanup are tested, but real forced interruption and installed-edition recovery remain unaccepted.",
+      "summary": "Migration/reset rollback, integrity, and cleanup are tested, with focused installed forced-parent evidence; real write-boundary interruption remains unaccepted.",
       "evidence": [
         "backend/tests/test_database_lifecycle.py integrity, rollback, and retry recovery",
         "backend/tests/test_agents.py failure cleanup",
-        "frontend/src-tauri/src/backend.rs startup cleanup"
+        "frontend/src-tauri/src/backend.rs startup cleanup",
+        "docs/release/installed-lifecycle-evidence.md forced predecessor-parent cleanup and post-upgrade/reset integrity"
       ],
-      "gap": "No controlled process, parent-crash, filesystem-interruption, power-loss, or installed-edition record proves conservative recovery at real interruption boundaries.",
-      "recommended_remediation": "Exercise controlled termination at startup and representative write boundaries against disposable installed state.",
+      "gap": "No controlled termination during representative writes/reset, startup-failure recovery, OS crash, filesystem interruption, or power-loss record proves conservative recovery at real interruption boundaries.",
+      "recommended_remediation": "Exercise controlled interruption at startup and representative write/reset boundaries against disposable installed state.",
       "closure_evidence": [
         "Dated SQLite integrity checks.",
-        "Installed-edition conservative recovery/readback record."
+        "Installed-edition conservative interruption recovery/readback record."
       ],
       "waiver_permitted": false
     },
@@ -429,12 +443,13 @@
       "area": "Data integrity and state lifecycle",
       "status": "PASS",
       "priority": null,
-      "summary": "Schema version 1 has an explicit compatibility policy, verified legacy migration, recovery backup, and fail-closed future/corrupt behavior.",
+      "summary": "Schema version 2 has an explicit compatibility policy, ordered predecessor migrations, verified recovery backup, and fail-closed future/corrupt behavior.",
       "evidence": [
         "backend/app/state_lifecycle.py DATABASE_SCHEMA_VERSION and ordered migration registry",
         "SQLite PRAGMA user_version as authoritative schema version",
         "backend/tests/test_database_lifecycle.py predecessor, future, corrupt, backup, rollback, and readback tests",
-        "docs/release/state-lifecycle-policy.md compatibility, downgrade, backup, and restore policy"
+        "docs/release/state-lifecycle-policy.md compatibility, downgrade, backup, and restore policy",
+        "G049 installed schema-1-to-2 preservation and idempotent readback"
       ],
       "gap": "",
       "recommended_remediation": "",
@@ -448,17 +463,19 @@
       "area": "Data integrity and state lifecycle",
       "status": "PARTIAL",
       "priority": "P1",
-      "summary": "State retention, reset, backup, restore, and uninstall policy is explicit, but desktop flows and artifact acceptance remain incomplete.",
+      "summary": "State retention/reset/backup/restore/uninstall policy and focused installed flows are explicit, but clean-machine and remaining recovery acceptance are incomplete.",
       "evidence": [
         "frontend/src-tauri/src/backend.rs app-local data and log path source",
         "docs/release/state-lifecycle-policy.md complete state-family inventory and lifecycle policy",
-        "backend/app/state_lifecycle.py verified automatic migration backups"
+        "backend/app/state_lifecycle.py verified automatic migration backups",
+        "backend/app/installed_lifecycle.py exact path inventory and reset implementation",
+        "docs/release/installed-lifecycle-evidence.md one-host upgrade/reset/reinstall/default-uninstall record"
       ],
-      "gap": "No complete supported reset flow or installed-edition path, upgrade, reset, recovery, and uninstall acceptance exists; exact NSIS retention/removal is unproven.",
-      "recommended_remediation": "Implement and accept the explicit reset/backup flow and verify exact retained/removed paths on the installed artifact.",
+      "gap": "Manual restore, interrupted reset, clean-machine execution, and the optional checked uninstall-data removal path remain unproven.",
+      "recommended_remediation": "Execute the remaining clean-machine, interruption, manual-restore, and checked-removal acceptance against the frozen candidate.",
       "closure_evidence": [
         "User-facing lifecycle documentation.",
-        "G049/G056 installed path, reset, recovery, and uninstall acceptance."
+        "G056 installed recovery and exact retained/removed path acceptance."
       ],
       "waiver_permitted": false
     },
@@ -620,17 +637,18 @@
       "area": "Desktop application lifecycle",
       "status": "PARTIAL",
       "priority": "P1",
-      "summary": "Owned-backend termination and console suppression exist, but artifact lifecycle evidence is incomplete.",
+      "summary": "Owned-backend termination and console suppression exist with focused installed forced-parent evidence, but the complete artifact lifecycle matrix is incomplete.",
       "evidence": [
         "frontend/src-tauri/src/windows_job.rs kill-on-close",
         "frontend/src-tauri/src/backend.rs bounded kill/wait",
         "frontend/src-tauri/src/main.rs windows_subsystem",
-        "G043 development shutdown observation"
+        "G043 development shutdown observation",
+        "G049 installed forced-parent cleanup with no owned backend left behind"
       ],
-      "gap": "Installed-edition graceful/forced exit, orphan, and console-flash observations are absent.",
-      "recommended_remediation": "Run process-tree and visual lifecycle acceptance on the installed artifact.",
+      "gap": "The v0.9.5 predecessor did not close through CloseMainWindow within 10 seconds; current graceful exit, parent crash, startup failure, and console-flash acceptance remain absent.",
+      "recommended_remediation": "Run the remaining process-tree and visual lifecycle matrix on the frozen candidate.",
       "closure_evidence": [
-        "No orphan after graceful, forced, parent-crash, and startup-failure cases."
+        "No orphan after graceful, forced, parent-crash, and startup-failure cases plus no console flash."
       ],
       "waiver_permitted": false
     },
@@ -639,13 +657,14 @@
       "area": "Desktop application lifecycle",
       "status": "PARTIAL",
       "priority": "P1",
-      "summary": "Single-instance controls exist but repeated-launch artifact acceptance is absent.",
+      "summary": "Single-instance controls and repeated installed startup evidence exist, but concurrent two-launch acceptance is absent.",
       "evidence": [
         "frontend/src-tauri/src/main.rs tauri_plugin_single_instance",
-        "frontend/src-tauri/src/backend.rs DuplicateSpawn guard"
+        "frontend/src-tauri/src/backend.rs DuplicateSpawn guard",
+        "G049 repeated current startup and same-version reinstall with stable database state"
       ],
-      "gap": "No installed-edition two-launch observation proves one backend and safe shared state.",
-      "recommended_remediation": "Add a bounded repeated-launch acceptance case.",
+      "gap": "No concurrent installed two-launch observation proves one window, one backend, and safe shared state.",
+      "recommended_remediation": "Add a bounded concurrent two-launch acceptance case.",
       "closure_evidence": [
         "Installed window, process, and database observation."
       ],
@@ -656,13 +675,14 @@
       "area": "Desktop application lifecycle",
       "status": "PARTIAL",
       "priority": "P1",
-      "summary": "Startup failures are handled in source, but real candidate failure and recovery evidence is missing.",
+      "summary": "Startup failures are handled in source and G049 verified clean recovery after a rejected reset attempt, but real candidate startup-failure evidence is missing.",
       "evidence": [
         "frontend/src-tauri/src/backend.rs StartupError paths and bounded diagnostics",
         "frontend/src-tauri/src/main.rs startup-error URL",
-        "frontend/public/startup-error.js inert textContent rendering"
+        "frontend/public/startup-error.js inert textContent rendering",
+        "G049 rejected preliminary reset and successful corrected-artifact recovery"
       ],
-      "gap": "Controlled candidate failure paths and resource recovery have not been accepted.",
+      "gap": "Controlled real startup-failure paths and candidate resource recovery have not been accepted.",
       "recommended_remediation": "Exercise safe synthetic startup failures without weakening Windows controls.",
       "closure_evidence": [
         "Error screenshots.",
@@ -674,18 +694,19 @@
     {
       "id": "V1-DESKTOP-005",
       "area": "Desktop application lifecycle",
-      "status": "UNKNOWN",
+      "status": "PARTIAL",
       "priority": "P1",
-      "summary": "Installed first-run, state, upgrade, reset, recovery, and uninstall behavior lacks current evidence.",
+      "summary": "Focused installed first-run, state, upgrade, reset, recovery, reinstall, and default-uninstall behavior is evidenced, but clean-machine closure remains incomplete.",
       "evidence": [
         "frontend/src-tauri/src/backend.rs app-local data/log resolution without executable-location inference",
-        "NSIS-only Tauri and release configuration"
+        "NSIS-only Tauri and release configuration",
+        "docs/release/installed-lifecycle-evidence.md exact paths and one-host native lifecycle record"
       ],
-      "gap": "No v0.9.5 installed artifact or clean-machine lifecycle record exists.",
-      "recommended_remediation": "Produce an installed RC after upstream blockers close and execute the installed lifecycle matrix.",
+      "gap": "The host was not a clean Windows machine; optional checked data removal, manual recovery restore, interruption, and final signed-candidate acceptance remain unproven.",
+      "recommended_remediation": "Repeat the complete lifecycle matrix on supported clean environments using the frozen candidate.",
       "closure_evidence": [
         "Exact path inventory.",
-        "Dated clean-machine first-run, upgrade, reset, recovery, and uninstall acceptance."
+        "Dated clean-machine first-run, upgrade, reset, recovery, and both uninstall variants."
       ],
       "waiver_permitted": false
     },
@@ -894,17 +915,18 @@
       "area": "Release engineering and supply-chain integrity",
       "status": "PARTIAL",
       "priority": "P1",
-      "summary": "Installed-only NSIS construction is implemented, but no current candidate artifact proves it.",
+      "summary": "Installed-only NSIS construction is implemented and focused internal artifacts were exercised, but no clean-source signed candidate proves it.",
       "evidence": [
         "NSIS-only Tauri and release scripts",
         "Signed application capture retained as installer evidence",
-        "One-artifact manifest, checksum, and release tests"
+        "One-artifact manifest, checksum, and release tests",
+        "G049 exact unsigned internal v0.9.5/v0.9.6 installer hashes and installed payload readback"
       ],
-      "gap": "No v0.9.5 or v1 candidate installer inventory or installed-payload readback exists.",
+      "gap": "The v0.9.6 artifact is not a clean-source, commit-provenanced, signed/public-trust candidate and has no candidate manifest.",
       "recommended_remediation": "Construct one bounded public-RC installer after upstream blockers close.",
       "closure_evidence": [
         "Candidate installer inventory.",
-        "Installed application payload readback and hash evidence."
+        "Installed application payload readback, provenance, and hash evidence."
       ],
       "waiver_permitted": false
     },
@@ -952,12 +974,13 @@
       "priority": "P1",
       "summary": "The complete stable release, lifecycle acceptance, and withdrawal procedure is absent.",
       "evidence": [
-        "Partial release notes and signing verification guidance"
+        "Partial release notes and signing verification guidance",
+        "G049 focused one-host install, first-run, upgrade, reset, reinstall, and default-uninstall evidence"
       ],
-      "gap": "No complete clean-machine install/first-run/upgrade/reset/recovery/uninstall acceptance, GitHub Release contents procedure, stable authorization checklist, or rollback/withdrawal procedure exists.",
+      "gap": "No complete clean-machine final-RC lifecycle acceptance, checked data-removal run, GitHub Release contents procedure, stable authorization checklist, or rollback/withdrawal procedure exists.",
       "recommended_remediation": "Define the installed-edition release playbook and execute it against the final RC.",
       "closure_evidence": [
-        "Dated installed lifecycle acceptance.",
+        "Dated final-candidate lifecycle acceptance.",
         "Rollback drill.",
         "Final GitHub Release contents plan.",
         "Owner authorization."
@@ -973,7 +996,7 @@
       "evidence": [
         "README.md",
         "SECURITY.md",
-        "RELEASE_NOTES.md 0.9.5 entry",
+        "RELEASE_NOTES.md 0.9.6 entry",
         "Readiness document links and disclaimer"
       ],
       "gap": "",
@@ -986,15 +1009,16 @@
     {
       "id": "V1-DOC-002",
       "area": "Documentation, legal, and support readiness",
-      "status": "FAIL",
+      "status": "PARTIAL",
       "priority": "P1",
-      "summary": "Only developer setup exists; stable user installation and troubleshooting documentation is absent.",
+      "summary": "Focused installed lifecycle documentation exists, but stable task-oriented installation and troubleshooting guidance is incomplete.",
       "evidence": [
         "README.md developer clone, Python, npm, Tauri setup",
-        "README.md manual test notes"
+        "README.md manual test notes",
+        "docs/release/installed-lifecycle-evidence.md exact paths, update/reset/recovery/uninstall boundaries, unsupported relocation, and evidence limits"
       ],
-      "gap": "No stable installed first-run, normal update, reset/recovery/uninstall, unsupported-relocation, or user troubleshooting instructions independent of developer tooling.",
-      "recommended_remediation": "Write task-oriented installed-edition user documentation and validate it on clean machines.",
+      "gap": "Stable task-oriented installation, first-run, and troubleshooting guidance independent of developer tooling is incomplete and has not received clean-reader or clean-machine validation.",
+      "recommended_remediation": "Write the remaining task-oriented installed-edition user guide and validate every supported instruction on clean machines.",
       "closure_evidence": [
         "Clean-reader review.",
         "Clean-machine completion of every instruction."

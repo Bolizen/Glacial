@@ -1,6 +1,6 @@
 # Glacial State Lifecycle and Recovery Policy
 
-Status: implemented v1 policy baseline for Glacial 0.9.6. Focused G049 installed evidence is recorded in [installed-lifecycle-evidence.md](installed-lifecycle-evidence.md). Clean-machine, interruption, public-candidate, and final release acceptance remain separate.
+Status: v1 policy baseline for Glacial 0.9.6. Focused G049 installed evidence is recorded in [installed-lifecycle-evidence.md](installed-lifecycle-evidence.md). Clean-machine, interruption, public-candidate, and final release acceptance remain separate.
 
 ## Ownership boundary
 

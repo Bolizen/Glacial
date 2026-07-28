@@ -137,14 +137,19 @@ const verdictMatches = [...audit.matchAll(/\*\*Overall verdict: (READY|CONDITION
 if (verdictMatches.length !== 1) fail(`expected exactly one Markdown overall verdict, found ${verdictMatches.length}`);
 if (verdictMatches[0][1] !== snapshot.overall_verdict) fail("Markdown and JSON verdicts differ");
 if (snapshot.overall_verdict !== "NOT READY") fail("current evidence requires NOT READY");
-if (!Array.isArray(snapshot.classification_changes) || snapshot.classification_changes.length !== 0) {
-  fail("G048 must report no readiness classification changes");
+const expectedClassificationChanges = [
+  ["V1-DESKTOP-005", "UNKNOWN", "PARTIAL"],
+  ["V1-DOC-002", "FAIL", "PARTIAL"],
+];
+const actualClassificationChanges = (snapshot.classification_changes ?? []).map(({ id, from, to }) => [id, from, to]);
+if (JSON.stringify(actualClassificationChanges) !== JSON.stringify(expectedClassificationChanges)) {
+  fail("G049 readiness classification changes are missing or incorrect");
 }
 
 const versionMatches = [...audit.matchAll(/^- Audited product version: `([^`]+)`$/gm)];
 if (versionMatches.length !== 1) fail(`expected one Markdown audited version, found ${versionMatches.length}`);
 if (versionMatches[0][1] !== snapshot.audited_version) fail("Markdown and JSON audited versions differ");
-if (snapshot.audited_version !== "0.9.5") fail(`expected audited version 0.9.5, found ${snapshot.audited_version}`);
+if (snapshot.audited_version !== "0.9.6") fail(`expected audited version 0.9.6, found ${snapshot.audited_version}`);
 
 const commitMatches = [...audit.matchAll(/^- Audited behavioral baseline commit: `([0-9a-f]{40})`$/gm)];
 if (commitMatches.length !== 1) fail(`expected one Markdown audited commit, found ${commitMatches.length}`);
