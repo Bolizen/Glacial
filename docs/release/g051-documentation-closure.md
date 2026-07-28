@@ -5,6 +5,7 @@ Status: completed documentation implementation and focused source validation on 
 ## Source and scope
 
 - Starting source commit: `3e042eae47289b44e9cf206419159162c0c215b2`
+- Audited implementation commit: `7416012b3c74920c0b892d72501256dfd8447c42`
 - Audited version: `0.9.8`
 - Product boundary: current-user Windows x64 NSIS installation
 - Installed behavior evidence: G049 and [G050 installed lifecycle acceptance](g050-installed-lifecycle-acceptance.md)

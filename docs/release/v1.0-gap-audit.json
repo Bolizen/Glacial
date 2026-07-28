@@ -2,7 +2,7 @@
   "schema_version": "1.0.0",
   "product": "Glacial",
   "audited_version": "0.9.8",
-  "audited_commit": "3e042eae47289b44e9cf206419159162c0c215b2",
+  "audited_commit": "7416012b3c74920c0b892d72501256dfd8447c42",
   "generated_at_utc": "2026-07-28T05:12:24Z",
   "overall_verdict": "NOT READY",
   "scope_decision": "Glacial v1 supports only the installed Windows x64 NSIS edition; the retired portable edition does not close any installed lifecycle or release requirement.",
