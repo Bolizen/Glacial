@@ -1,6 +1,6 @@
 # Glacial 0.9.6 Hex-Secret Redaction Correction
 
-Glacial 0.9.6 corrects the G048 privacy boundary so arbitrary credential-shaped hexadecimal values are not retained merely because they resemble hashes. It remains a pre-v1 hardening release and `NOT READY`; native installed-app privacy inspection and unrelated P1 requirements remain unresolved.
+Glacial 0.9.6 corrects the G048 privacy boundary so arbitrary credential-shaped hexadecimal values are not retained merely because they resemble hashes and implements the G049 installed application-state lifecycle. It remains a pre-v1 hardening release and `NOT READY`; clean-machine, interruption, optional uninstall-data removal, signed-candidate, native installed-app privacy inspection, and unrelated P1 requirements remain unresolved.
 
 ## Hexadecimal privacy boundary
 
@@ -9,8 +9,10 @@ Glacial 0.9.6 corrects the G048 privacy boundary so arbitrary credential-shaped 
 - Retains exact Git commits, SHA-256 artifact/member checksums, snapshot digests, evidence/dependency fingerprints, signing pre/post hashes, release-manifest hashes, certificate thumbprints, and readiness commit references only through strict field-specific validation.
 - Rejects or safely bounds malformed structured digest values while preserving deterministic remediation package bytes and checksums for identical sanitized inputs.
 - Adds fake-canary regression evidence across SQLite persistence, reports, generated `AGENTS.md`, remediation briefs/packages, frontend errors, Rust startup diagnostics, Node build/signing output, signing audits, release manifests, and PowerShell child output.
-- Keeps SQLite schema version `1`, remediation schemas/formats, the installed-only distribution decision, `V1-FS-006` at `PARTIAL`/P1, `V1-SEC-002` at `PASS`, and the overall readiness verdict at `NOT READY`.
-- Inserts G049 as this correction and shifts the remaining ordered roadmap to G050–G058 without executing later work.
+- Advances SQLite schema version from `1` to `2` without changing table shape, preserves remediation schemas/formats and the installed-only distribution decision, keeps `V1-FS-006` at `PARTIAL`/P1 and `V1-SEC-002` at `PASS`, and retains the overall readiness verdict at `NOT READY`.
+- Exposes actual installed executable, database, application-data, backend runtime, log, and temporary paths in Settings; adds an exact-phrase application-state reset with a mandatory verified recovery backup while leaving project files, backups, and logs untouched.
+- Makes the current-user NSIS uninstall boundary explicit: application data is retained by default, while the optional unchecked removal branch targets only Glacial's bundle-id application-data roots.
+- Records focused one-host predecessor-install, schema-v1-to-v2 upgrade, repeated-startup, reset/restart, same-version-reinstall, default-uninstall, process-cleanup, and project-file non-deletion evidence without claiming clean-machine or final-candidate acceptance.
 
 # Glacial 0.9.5 Data Privacy and Disclosure Boundary
 

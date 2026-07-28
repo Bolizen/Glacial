@@ -27,6 +27,7 @@ from .agents import generate_agents_md
 from .agents_write import filesystem_error_status, safe_write_project_file
 from .changelog import CHANGELOG_ENTRIES
 from .config import allowed_cors_origins, desktop_auth_token
+from . import database
 from .database import (
     WORKSPACE_ROOT_SETTING,
     get_connection,
@@ -37,6 +38,10 @@ from .database import (
     row_to_scan,
     scan_completeness_for_row,
     set_setting,
+)
+from .installed_lifecycle import (
+    reset_application_state,
+    runtime_path_contract,
 )
 from .dependency_trust import SCHEMA_VERSION as DEPENDENCY_TRUST_SCHEMA_VERSION
 from .finding_reviews import enrich_scan, finding_fingerprint, valid_fingerprint
@@ -58,7 +63,7 @@ from .review_checkpoints import (
 )
 from .remediation_brief import build_remediation_snapshot
 from .remediation_package import build_remediation_package
-from .schemas import AgentPreviewRequest, FindingReviewDelete, FindingReviewRequest, NoteCreate, ProjectCreate, ProjectMetadataUpdate, ProjectPathRequest, ProjectRegister, ProjectRootUpdate, RemediationBriefRequest, RemediationPackageRequest, ReviewCheckpointCreate, TrustProfileRequest, TrustedDependencyBaselineApprove, TrustedDependencyBaselineNote, TrustedScanBaselineSet
+from .schemas import AgentPreviewRequest, ApplicationStateReset, FindingReviewDelete, FindingReviewRequest, NoteCreate, ProjectCreate, ProjectMetadataUpdate, ProjectPathRequest, ProjectRegister, ProjectRootUpdate, RemediationBriefRequest, RemediationPackageRequest, ReviewCheckpointCreate, TrustProfileRequest, TrustedDependencyBaselineApprove, TrustedDependencyBaselineNote, TrustedScanBaselineSet
 from .trusted_dependency_baseline import BASELINE_SCHEMA_VERSION, BaselineError, approval_for_analysis, enrich_scan as enrich_trusted_baseline, public_baseline, snapshot_from_analysis, snapshot_json, valid_fingerprint as valid_baseline_fingerprint
 from .trusted_scan_baseline import PROVENANCE_MANUAL, trusted_scan_baseline_state
 from .version import GLACIAL_VERSION
@@ -140,6 +145,27 @@ def _authorized_api_request(
 @app.get("/api/config")
 def get_config() -> dict[str, str]:
     return {"project_root": _project_root_value()}
+
+
+@app.get("/api/state-lifecycle")
+def get_state_lifecycle() -> dict[str, object]:
+    try:
+        return runtime_path_contract(database.DB_PATH)
+    except DatabaseStateError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.post("/api/state/reset")
+def reset_state(payload: ApplicationStateReset) -> dict[str, object]:
+    try:
+        return reset_application_state(
+            database.DB_PATH,
+            database.init_db,
+            confirmation=payload.confirmation,
+            default_workspace_root=database.DEFAULT_WORKSPACE_ROOT,
+        )
+    except DatabaseStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @app.get("/api/changelog")

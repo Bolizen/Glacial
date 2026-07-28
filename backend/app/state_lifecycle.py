@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, ContextManager
 
 
-DATABASE_SCHEMA_VERSION = 1
+DATABASE_SCHEMA_VERSION = 2
 DATABASE_BUSY_TIMEOUT_MS = 5_000
 MIGRATION_BACKUP_DIRECTORY = "migration-backups"
 
@@ -317,7 +317,7 @@ def initialize_database(
                 if source_version == DATABASE_SCHEMA_VERSION:
                     _verify_current_database(connection, require_version=True)
                     return
-                if source_version != 0:
+                if source_version not in {0, 1}:
                     raise DatabaseStateError(
                         f"Glacial does not support database schema version {source_version}. "
                         "The database was not changed; restore a verified compatible backup."
@@ -328,7 +328,10 @@ def initialize_database(
                 application_tables = set(source_shape)
                 is_new_database = not application_tables
                 if not is_new_database:
-                    _validate_legacy_shape(connection, source_shape)
+                    if source_version == 0:
+                        _validate_legacy_shape(connection, source_shape)
+                    else:
+                        _verify_current_database(connection, require_version=False)
                     schema_version_before_backup = _schema_change_counter(connection)
                     data_version_before_backup = _data_change_counter(connection)
                     backup_path = _create_verified_backup(
@@ -404,7 +407,10 @@ def _apply_migrations(
     default_workspace_root: str,
 ) -> None:
     version = source_version
-    migrations = {0: _migrate_legacy_to_v1}
+    migrations = {
+        0: _migrate_legacy_to_v1,
+        1: _migrate_v1_to_v2,
+    }
     while version < DATABASE_SCHEMA_VERSION:
         migration = migrations.get(version)
         if migration is None:
@@ -468,6 +474,15 @@ def _migrate_legacy_to_v1(
         "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
         ("project_root", default_workspace_root),
     )
+
+
+def _migrate_v1_to_v2(
+    connection: sqlite3.Connection,
+    *,
+    default_workspace_root: str,
+) -> None:
+    del default_workspace_root
+    _verify_current_database(connection, require_version=False)
 
 
 def _add_column_if_missing(
@@ -700,7 +715,10 @@ def _verify_backup(path: Path, source_version: int) -> None:
                 "The migration backup schema version does not match its source."
             )
         _require_integrity(connection, "migration backup")
-        _validate_legacy_shape(connection, _schema_shape(connection))
+        if source_version == 0:
+            _validate_legacy_shape(connection, _schema_shape(connection))
+        else:
+            _verify_current_database(connection, require_version=False)
     finally:
         connection.close()
 

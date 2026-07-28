@@ -24,6 +24,7 @@ import {
 } from "./findingWorkbench.js";
 import {
   buildGuidedReviewState,
+  clearGuidedReviewDismissals,
   dismissGuidedReview,
   readGuidedReviewDismissals,
 } from "./guidedReview.js";
@@ -125,6 +126,7 @@ const EMPTY_REMEDIATION_BRIEF = Object.freeze({
   error: "",
   status: "",
 });
+const RESET_APPLICATION_STATE_CONFIRMATION = "RESET GLACIAL APPLICATION DATA";
 export function App() {
   const [projectRoot, setProjectRoot] = useState("");
   const [projectRootMessage, setProjectRootMessage] = useState("");
@@ -169,6 +171,13 @@ export function App() {
   const [trustedBaselineMutation, setTrustedBaselineMutation] = useState({ saving: false, error: "", success: "" });
   const [sessionStateReady, setSessionStateReady] = useState(false);
   const [dismissedGuidedReviews, setDismissedGuidedReviews] = useState(() => readGuidedReviewDismissals());
+  const [installedLifecycle, setInstalledLifecycle] = useState({
+    data: null,
+    loading: false,
+    error: "",
+    resetting: false,
+    status: "",
+  });
   const [reviewNavigation, setReviewNavigation] = useState({ targetId: "", findingFilter: "", nonce: 0 });
   const [toastTop, setToastTop] = useState(112);
   const topbarRef = useRef(null);
@@ -275,6 +284,12 @@ export function App() {
     loadChangelog();
     checkHealth();
   }, []);
+
+  useEffect(() => {
+    if (selectedSection === "settings" && !installedLifecycle.data && !installedLifecycle.loading) {
+      loadInstalledLifecycle();
+    }
+  }, [selectedSection]);
 
   useEffect(() => () => trustedBaselineRequestRef.current.controller?.abort(), []);
 
@@ -1545,6 +1560,67 @@ export function App() {
     setMessage("Saved UI state reset. Backend data and workspace configuration were not changed.");
   }
 
+  async function loadInstalledLifecycle() {
+    setInstalledLifecycle((current) => ({ ...current, loading: true, error: "" }));
+    try {
+      const data = await api("/api/state-lifecycle");
+      if (!data?.paths || !data?.uninstall) {
+        throw new Error("Glacial returned an invalid installed-path contract.");
+      }
+      setInstalledLifecycle((current) => ({ ...current, data, loading: false, error: "" }));
+    } catch (error) {
+      setInstalledLifecycle((current) => ({ ...current, loading: false, error: error.message }));
+    }
+  }
+
+  async function resetApplicationState() {
+    const paths = installedLifecycle.data?.paths;
+    const confirmed = window.confirm(
+      `Reset Glacial application state?\n\nThis deletes registered projects, scan history, notes, Project Expectations, trust data, and settings from ${paths?.database || "Glacial's SQLite database"}. It clears Glacial's saved UI state. It does not delete or modify any registered project file.\n\nA recovery backup is created when an existing database is available. Migration backups, recovery backups, and logs are retained.\n\nChoose OK only if you intend to reset Glacial.`,
+    );
+    if (!confirmed) return;
+
+    setInstalledLifecycle((current) => ({
+      ...current,
+      resetting: true,
+      error: "",
+      status: "",
+    }));
+    try {
+      const result = await api("/api/state/reset", {
+        method: "POST",
+        body: { confirmation: RESET_APPLICATION_STATE_CONFIRMATION },
+      });
+      clearSessionState();
+      clearGuidedReviewDismissals();
+      setDismissedGuidedReviews([]);
+      pendingScanRestoreRef.current = null;
+      restorationPendingRef.current = false;
+      initialSessionStateRef.current = null;
+      lastSessionWriteRef.current = "";
+      skipNextSessionWriteRef.current = true;
+      resetProjectState("");
+      setProjects([]);
+      setSelectedPath("");
+      selectedPathRef.current = "";
+      setSelectedScanId(null);
+      setSelectedSection("settings");
+      setMajorSectionsOpen({ ...OPEN_MAJOR_SECTIONS });
+      await refreshProjects();
+      setInstalledLifecycle((current) => ({
+        ...current,
+        resetting: false,
+        status: result?.message || "Glacial application state was reset.",
+      }));
+    } catch (error) {
+      setInstalledLifecycle((current) => ({
+        ...current,
+        resetting: false,
+        error: error.message,
+      }));
+    }
+  }
+
   function openReports() {
     setSelectedSection("reports");
     setMajorSectionOpen("scanReport", true);
@@ -1864,7 +1940,16 @@ export function App() {
 
           {selectedSection === "settings" ? (
             <>
-              <SettingsSection projectRoot={projectRoot} selectedProject={selectedProject} onChangeRoot={changeWorkspaceRoot} changing={workspaceRootChanging} error={workspaceRootError} onResetSavedState={resetSavedUiState} />
+              <SettingsSection
+                projectRoot={projectRoot}
+                selectedProject={selectedProject}
+                onChangeRoot={changeWorkspaceRoot}
+                changing={workspaceRootChanging}
+                error={workspaceRootError}
+                onResetSavedState={resetSavedUiState}
+                installedLifecycle={installedLifecycle}
+                onResetApplicationState={resetApplicationState}
+              />
               {selectedProject && !projectDetailsLoading ? (
                 <>
                   <AgentGenerator form={agentForm} updateField={updateAgentField} preview={agentPreview} exists={agentsExists} onPreview={previewAgents} onWrite={writeAgents} open={majorSectionsOpen.agents} onOpenChange={(open) => setMajorSectionOpen("agents", open)} />
@@ -2599,7 +2684,16 @@ function ProjectExpectationsSummary({ profile, onEdit }) {
   );
 }
 
-function SettingsSection({ projectRoot, selectedProject, onChangeRoot, changing, error, onResetSavedState }) {
+function SettingsSection({
+  projectRoot,
+  selectedProject,
+  onChangeRoot,
+  changing,
+  error,
+  onResetSavedState,
+  installedLifecycle,
+  onResetApplicationState,
+}) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(projectRoot);
 
@@ -2654,8 +2748,41 @@ function SettingsSection({ projectRoot, selectedProject, onChangeRoot, changing,
         <p className="muted">Reset the saved project selection, active section, historical scan, and panel layout. Backend projects, scans, notes, Project Expectations, and workspace configuration are not changed.</p>
         <button type="button" className="secondary-button" onClick={onResetSavedState}>Reset saved UI state</button>
       </div>
+      <div className="settings-reset-state installed-lifecycle">
+        <strong>Installed paths and application state</strong>
+        <p className="muted">These paths are resolved by the running desktop application. Glacial does not use the repository, current working directory, or installation directory for mutable state.</p>
+        {installedLifecycle.loading ? <p className="muted">Loading installed paths...</p> : null}
+        {installedLifecycle.data?.paths ? (
+          <dl className="installed-path-list">
+            {Object.entries(installedLifecycle.data.paths).map(([name, value]) => (
+              <div key={name}>
+                <dt>{installedPathLabel(name)}</dt>
+                <dd>{value}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : null}
+        <p className="muted">Reset deletes active SQLite application state and Glacial UI preferences after explicit confirmation. It preserves a recovery backup when possible, retains existing backups and logs, and never traverses or changes registered project directories.</p>
+        <p className="muted">Uninstall preserves application data by default. The optional “Delete the application data” checkbox removes Glacial’s roaming/local application-data roots; project files remain untouched.</p>
+        {installedLifecycle.error ? <p className="notice">{installedLifecycle.error}</p> : null}
+        {installedLifecycle.status ? <p className="good">{installedLifecycle.status}</p> : null}
+        <button
+          type="button"
+          className="secondary-button"
+          onClick={onResetApplicationState}
+          disabled={installedLifecycle.resetting || !installedLifecycle.data}
+        >
+          {installedLifecycle.resetting ? "Resetting..." : "Reset application state"}
+        </button>
+      </div>
     </section>
   );
+}
+
+function installedPathLabel(name) {
+  return String(name)
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/^./, (character) => character.toUpperCase());
 }
 
 function FindingsOverview({ report, result }) {

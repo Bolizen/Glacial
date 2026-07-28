@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   buildGuidedReviewState,
+  clearGuidedReviewDismissals,
   dependencyReviewState,
   dismissGuidedReview,
   GUIDED_REVIEW_DISMISSALS_KEY,
@@ -157,6 +158,21 @@ test("checklist dismissal writes only local UI state and never mutates project o
   assert.ok(values.has(GUIDED_REVIEW_DISMISSALS_KEY));
   assert.deepEqual(project, projectBefore);
   assert.deepEqual(sourceScan, scanBefore);
+});
+
+test("checklist dismissal reset removes only the owned storage key", () => {
+  const values = new Map([
+    [GUIDED_REVIEW_DISMISSALS_KEY, JSON.stringify([PROJECT.path])],
+    ["unrelated", "keep"],
+  ]);
+  const storage = {
+    getItem: (key) => values.get(key) ?? null,
+    removeItem: (key) => values.delete(key),
+  };
+
+  assert.equal(clearGuidedReviewDismissals(storage), true);
+  assert.equal(values.has(GUIDED_REVIEW_DISMISSALS_KEY), false);
+  assert.equal(values.get("unrelated"), "keep");
 });
 
 

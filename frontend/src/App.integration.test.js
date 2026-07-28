@@ -443,6 +443,57 @@ test("reset clears only saved UI state and returns to defaults without reload", 
   assert.equal(fetchHarness.count("/api/scans/history"), 2);
 });
 
+test("confirmed application reset shows actual paths and never removes unrelated browser state", async () => {
+  window.localStorage.setItem("unrelated", "keep");
+  window.localStorage.setItem(GUIDED_REVIEW_DISMISSALS_KEY, JSON.stringify([PROJECT_A_PATH]));
+  await renderReadyProjectA();
+  await openSettings();
+  const lifecycleRequest = await fetchHarness.next("/api/state-lifecycle");
+  await respond(lifecycleRequest, installedLifecycleFixture());
+
+  assert.match(document.querySelector(".installed-lifecycle").textContent, /C:\\Users\\tester\\AppData\\Local\\Glacial/);
+  let confirmation = "";
+  window.confirm = (message) => {
+    confirmation = message;
+    return true;
+  };
+  await click(buttonWithText("Reset application state"));
+  const resetRequest = await fetchHarness.next("/api/state/reset", { method: "POST" });
+  assert.deepEqual(resetRequest.body, { confirmation: "RESET GLACIAL APPLICATION DATA" });
+  assert.match(confirmation, /does not delete or modify any registered project file/i);
+  assert.match(confirmation, /recovery backup/i);
+
+  await respond(resetRequest, {
+    reset: true,
+    backup: "C:\\Users\\tester\\AppData\\Local\\com.glacial.desktop\\data\\recovery-backups\\before-reset.db",
+    message: "Glacial application state was reset. Registered project files were not changed.",
+  });
+  const projectsRequest = await fetchHarness.next("/api/projects");
+  await respond(projectsRequest, {
+    project_root: "C:/Users/tester/GlacialProjects",
+    message: "Workspace root does not exist yet.",
+    projects: [],
+  });
+
+  assert.deepEqual(parseStoredSession(), {
+    version: 1,
+    workspaceRoot: "C:/Users/tester/GlacialProjects",
+    selectedProjectPath: "",
+    activeSection: "settings",
+    selectedScanId: null,
+    panels: {
+      changelog: true,
+      scanReport: true,
+      agents: true,
+      notes: true,
+      history: true,
+    },
+  });
+  assert.equal(window.localStorage.getItem(GUIDED_REVIEW_DISMISSALS_KEY), null);
+  assert.equal(window.localStorage.getItem("unrelated"), "keep");
+  assert.match(document.querySelector(".installed-lifecycle").textContent, /project files were not changed/i);
+});
+
 test("transient drafts and mutation state are never restored", async () => {
   storeSession({
     selectedProjectPath: PROJECT_A_PATH,
@@ -2948,6 +2999,8 @@ function defaultResponse(request) {
       return { entries: [] };
     case "/api/health":
       return { status: "ok" };
+    case "/api/state-lifecycle":
+      return installedLifecycleFixture();
     case "/api/notes":
       return request.method === "POST" ? note(99, "Cleanup note") : { notes: [] };
     case "/api/scans/history":
@@ -2963,6 +3016,31 @@ function defaultResponse(request) {
     default:
       return {};
   }
+}
+
+function installedLifecycleFixture() {
+  return {
+    paths: {
+      applicationExecutable: "C:\\Users\\tester\\AppData\\Local\\Glacial\\glacial.exe",
+      installationDirectory: "C:\\Users\\tester\\AppData\\Local\\Glacial",
+      backendExecutable: "C:\\Users\\tester\\AppData\\Local\\Glacial\\glacial-backend.exe",
+      runtimeFiles: "C:\\Users\\tester\\AppData\\Local\\Glacial\\_internal",
+      applicationData: "C:\\Users\\tester\\AppData\\Local\\com.glacial.desktop\\data",
+      database: "C:\\Users\\tester\\AppData\\Local\\com.glacial.desktop\\data\\glacial.db",
+      configuration: "C:\\Users\\tester\\AppData\\Local\\com.glacial.desktop\\data\\glacial.db (settings table; no separate configuration file)",
+      logDirectory: "C:\\Users\\tester\\AppData\\Local\\com.glacial.desktop\\logs",
+      migrationBackups: "C:\\Users\\tester\\AppData\\Local\\com.glacial.desktop\\data\\migration-backups",
+      recoveryBackups: "C:\\Users\\tester\\AppData\\Local\\com.glacial.desktop\\data\\recovery-backups",
+      temporaryDirectory: "C:\\Users\\tester\\AppData\\Local\\Temp",
+      installerMetadata: "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Glacial",
+      uninstaller: "C:\\Users\\tester\\AppData\\Local\\Glacial\\uninstall.exe",
+    },
+    uninstall: {
+      default: "preserve-application-data",
+      optionalRemoval: "Delete application data",
+      projectFiles: "never removed",
+    },
+  };
 }
 
 function project(name, path) {

@@ -233,6 +233,15 @@ class DatabaseLifecycleTests(unittest.TestCase):
         finally:
             connection.close()
 
+    def create_v1(self, *, realistic: bool = False) -> None:
+        self.create_current_unversioned(realistic=realistic)
+        connection = self.raw_connection()
+        try:
+            connection.execute("PRAGMA user_version = 1")
+            connection.commit()
+        finally:
+            connection.close()
+
     def backup_files(self) -> list[Path]:
         directory = state_lifecycle.migration_backup_directory(self.database_path)
         return sorted(directory.glob("*")) if directory.exists() else []
@@ -343,6 +352,7 @@ class DatabaseLifecycleTests(unittest.TestCase):
             "core with records": self.create_core_legacy,
             "scan history before checkpoint additions": self.create_pre_checkpoint_column_legacy,
             "complete 0.9.2": self.create_current_unversioned,
+            "installed 0.9.5 schema v1": self.create_v1,
         }
         for index, (label, creator) in enumerate(creators.items()):
             with self.subTest(shape=label):
@@ -357,6 +367,22 @@ class DatabaseLifecycleTests(unittest.TestCase):
                 self.assertEqual(len(self.backup_files()), 1)
                 database.init_db()
                 self.assertEqual(len(self.backup_files()), 1)
+
+    def test_v1_installed_predecessor_migrates_once_without_changing_records(self) -> None:
+        self.create_v1(realistic=True)
+        before = self.schema_snapshot()
+
+        database.init_db()
+
+        self.assert_current_database()
+        self.assertEqual(self.schema_snapshot(), before)
+        backups = self.backup_files()
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(self._pragma_value(backups[0], "user_version"), 1)
+        after_first_start = self.database_path.read_bytes()
+        database.init_db()
+        self.assertEqual(self.database_path.read_bytes(), after_first_start)
+        self.assertEqual(len(self.backup_files()), 1)
 
     def test_realistic_related_records_and_verified_backup_survive_migration(self) -> None:
         self.create_current_unversioned(realistic=True)

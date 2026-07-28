@@ -1,6 +1,6 @@
 # Glacial State Lifecycle and Recovery Policy
 
-Status: v1 policy baseline for Glacial 0.9.6. This document describes source-level behavior and required future acceptance. It is not evidence that installed, crash, power-loss, upgrade, reset, or uninstall behavior has passed.
+Status: implemented v1 policy baseline for Glacial 0.9.6. Focused G049 installed evidence is recorded in [installed-lifecycle-evidence.md](installed-lifecycle-evidence.md). Clean-machine, interruption, public-candidate, and final release acceptance remain separate.
 
 ## Ownership boundary
 
@@ -9,7 +9,7 @@ Status: v1 policy baseline for Glacial 0.9.6. This document describes source-lev
 | State family | Storage | Contents and ownership |
 | --- | --- | --- |
 | SQLite database | `<Glacial data directory>/glacial.db` | The authoritative application database. Release desktop builds pass Tauri's application-local data directory plus `data`; development builds use the separated `development/data` directory. |
-| Database schema version | SQLite database header through `PRAGMA user_version` | The sole authoritative relational schema version. `DATABASE_SCHEMA_VERSION` is `1` in Glacial 0.9.6. It is not duplicated as an authoritative setting or JSON field. |
+| Database schema version | SQLite database header through `PRAGMA user_version` | The sole authoritative relational schema version. `DATABASE_SCHEMA_VERSION` is `2` in Glacial 0.9.6. It is not duplicated as an authoritative setting or JSON field. |
 | Settings | `settings` | Workspace-root selection. |
 | Projects and metadata | `projects` | Registration path, display name, description, type, and registration time. A row is a registration; it does not make the project directory application-owned. |
 | Immutable scans and scan metadata | `scans` | Append-only scan identity, time, risk, findings JSON, bounded counts, summary, coverage, reviewed/ignored-file metadata, dependency analysis, and related scanner metadata. |
@@ -25,6 +25,7 @@ Status: v1 policy baseline for Glacial 0.9.6. This document describes source-lev
 | Guided-review dismissal state | WebView local storage key `glacial.guided-review.dismissed.v1` | At most 100 normalized project-path dismissals. It is convenience state, not review completion or approval. |
 | Application log | Tauri application log directory, `backend-startup.log` | Bounded, token-redacted startup diagnostics. The current implementation truncates the file at each startup rather than keeping a historical rotating log. |
 | Verified migration backups | `<Glacial data directory>/migration-backups/*.db` | Complete SQLite-safe pre-migration recovery artifacts. They may contain every state family already present in the source database. |
+| Reset recovery backups | `<Glacial data directory>/recovery-backups/*.db` | SQLite-safe backups for valid state and verified byte-for-byte backups for malformed state created before confirmed reset. |
 | Migration backup temporary files | The migration-backup directory, dot-prefixed `*.tmp` plus SQLite sidecars | Operation-owned transient files. They are never accepted as backups and are removed after success or handled failure. |
 
 ### Not application-owned state
@@ -44,7 +45,7 @@ Unregister, migration, backup, future reset, or uninstall logic must never reint
 
 ### Supported versions and shapes
 
-Schema version `1` is the smallest honest first version: every database before Glacial 0.9.3 was unversioned and therefore reports `user_version = 0`.
+Schema version `1` is the smallest honest first version: every database before Glacial 0.9.3 was unversioned and therefore reports `user_version = 0`. Glacial 0.9.6 publishes schema version `2` as its installed-upgrade compatibility marker; the ordered `1 -> 2` migration validates and preserves the complete v1 schema and records, creates a verified backup, and changes only `user_version`.
 
 Glacial 0.9.6 supports:
 
@@ -66,12 +67,12 @@ For new or table-empty state Glacial:
 3. Begins `BEGIN IMMEDIATE`.
 4. Creates the complete current schema and the default workspace-root setting.
 5. Verifies required tables, columns, constraints, indexes, foreign keys, JSON envelopes, and integrity inside the transaction.
-6. Sets `PRAGMA user_version = 1` as the final migration publication statement.
+6. Sets `PRAGMA user_version = 2` as the final migration publication statement.
 7. Commits, closes, reopens read-only, and verifies the published version and complete schema.
 
 No migration backup is created because there is no predecessor state to recover.
 
-### Legacy migration sequence
+### Supported migration sequence
 
 For a nonempty supported version-0 database Glacial:
 
@@ -80,9 +81,9 @@ For a nonempty supported version-0 database Glacial:
 3. Records SQLite schema/data change counters.
 4. Creates and verifies the pre-migration backup without changing the source.
 5. Begins `BEGIN IMMEDIATE`, then confirms the version and schema/data counters did not change during preparation.
-6. Applies the ordered `0 -> 1` migration once: creates missing recognized objects, adds only the known scan-history and checkpoint predecessor columns, and preserves or creates the workspace-root setting.
+6. Applies the ordered migrations exactly once each as needed: `0 -> 1` creates missing recognized objects and known predecessor columns; `1 -> 2` validates the complete v1 shape and preserves every record without table changes.
 7. Verifies the complete current schema, constraints, indexes, foreign keys, JSON envelopes, `foreign_key_check`, and `integrity_check`.
-8. Sets `PRAGMA user_version = 1` last.
+8. Sets `PRAGMA user_version = 2` last.
 9. Commits and closes.
 10. Reopens read-only and verifies the published version and complete state before startup may continue.
 
@@ -103,7 +104,7 @@ The dedicated location is `<Glacial data directory>/migration-backups`. The data
 
 Names follow:
 
-`glacial-pre-migration-v0-to-v1-<UTC timestamp>-<random suffix>.db`
+`glacial-pre-migration-v<SOURCE>-to-v2-<UTC timestamp>-<random suffix>.db`
 
 Publication is:
 
@@ -120,12 +121,12 @@ Verified migration backups are retained indefinitely in the v1 policy unless a f
 
 ## Future, corrupt, malformed, and downgrade behavior
 
-- A `user_version` greater than `1` fails closed with an instruction to use the newer Glacial version. Glacial does not modify, reset, downgrade, or replace the file.
+- A `user_version` greater than `2` fails closed with an instruction to use the newer Glacial version. Glacial does not modify, reset, downgrade, or replace the file.
 - A nonzero version for which no ordered migration exists fails closed and preserves the file.
 - SQLite open, schema inspection, integrity, constraint, foreign-key, or recognized JSON-envelope failure stops normal startup. Glacial does not delete, truncate, recreate, or silently repair the database.
 - Unsupported unversioned shapes fail before backup or migration because Glacial cannot claim to understand them.
 - Automatic restore is prohibited. Recovery requires an explicit documented user action.
-- Downgrading application binaries is unsupported. An older Glacial version is not guaranteed to understand schema version `1`, and a backup from a newer schema is not guaranteed to open in an older version.
+- Downgrading application binaries is unsupported. An older Glacial version is not guaranteed to understand schema version `2`, and a backup from a newer schema is not guaranteed to open in an older version.
 
 ## Persistent mutation inventory
 
@@ -133,8 +134,8 @@ Verified migration backups are retained indefinitely in the v1 policy unless a f
 
 | Operation | API or internal entrypoint | Tables/files touched | Cardinality | Transaction mode | Rollback expectation | Duplicate/stale/concurrency behavior | Existing evidence | Missing evidence | Required G046 evidence | Later artifact evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Initialize new database | startup `init_db` | All schema objects, default `settings`, `user_version` | Multi-object | Explicit immediate | No partial schema/version publication | Repeated v1 startup is read-only/idempotent | Prior startup tests | No prior explicit version evidence | New/current idempotency, schema/FK/index/integrity checks | Installed-edition first run in G050 |
-| Migrate supported legacy database | startup `initialize_database` | Recognized schema objects/columns, setting if absent, `user_version`, backup file | Multi-object/file | Verified backup, then explicit immediate | Every schema/data change and version publication rolls back pre-commit | Version/counters rechecked after lock; retry safe | Historical source shapes | No prior migration registry or rollback proof | All predecessor fixtures, preserved records, injected pre-publication failure, retry recovery | Installed-edition upgrade and forced-process acceptance in G050/G057 |
+| Initialize new database | startup `init_db` | All schema objects, default `settings`, `user_version` | Multi-object | Explicit immediate | No partial schema/version publication | Repeated v2 startup is read-only/idempotent | Source tests and G049 installed first run | Clean-machine matrix remains | New/current idempotency, schema/FK/index/integrity checks | G049 installed first run; G056 clean-machine repeat |
+| Migrate supported predecessor database | startup `initialize_database` | Recognized schema objects/columns, setting if absent, `user_version`, backup file | Multi-object/file | Verified backup, then explicit immediate | Every schema/data change and version publication rolls back pre-commit | Version/counters rechecked after lock; retry safe | Historical fixtures and G049 installed v1-to-v2 upgrade | Power-loss acceptance remains | All predecessor fixtures, preserved records, injected pre-publication failure, retry recovery | G049 installed migration-once/readback; G056 interruption repeat |
 | Publish migration backup | `_create_verified_backup` | Temporary and final backup files | Multi-file publication | SQLite backup plus atomic no-overwrite link | Failure removes incomplete temp/final; source unchanged | Unique name; collision fails closed | None before G046 | Power-loss publication acceptance | Verification, atomic observation, collision, failed cleanup tests | Filesystem interruption on artifact hosts |
 | Set workspace root | `PUT /api/config/project-root`; `set_setting` | One `settings` row | Single record | Implicit single-write | Row unchanged on exception | Upsert; path validated before write; last committed update wins | `test_project_lifecycle`, desktop startup tests | Concurrent desktop acceptance | Inventory and retained targeted test | Installed-edition path persistence in G050 |
 | Create project and register it | `POST /api/projects` | New external project directory, one `projects` row | Cross-resource | Directory creation then implicit DB write; no shared transaction | DB write rolls back; an already-created empty directory can remain if DB registration fails | Existing folder rejects; DB key rejects duplicate path | Source inspection and frontend flow tests | Dedicated cross-resource failure cleanup evidence | Explicitly record the non-atomic boundary; do not overclaim `V1-DATA-001` | Desktop create failure/retry acceptance |
@@ -155,6 +156,7 @@ Verified migration backups are retained indefinitely in the v1 policy unless a f
 | Append activity event | `append_activity_event` called only by owning mutation | One activity row | Dependent record | Owner's transaction | Never commits independently of required primary mutation | `(project_id, dedupe_key)` suppresses defined duplicates | Activity tests | Artifact interruption | Exercised through representative owner families | G050/G057 |
 | Save/clear UI session state | `writeSessionState`, `clearSessionState` | WebView local storage key | Single value | Web storage operation | Failure returns false and does not become security evidence | Versioned parser; malformed/cross-workspace values ignored | `sessionState.test.js` | Real WebView persistence/reset | Inventory | G050 |
 | Dismiss guided review | `dismissGuidedReview` | WebView local storage key | Single bounded value | Web storage operation | Storage failure retains prior in-memory list | Normalized, deduped, capped at 100; not review evidence | `guidedReview.test.js` | Real WebView persistence/reset | Inventory | G050 |
+| Reset application state | `POST /api/state/reset`; Settings confirmation | Active SQLite schema, two Glacial WebView keys, recovery backup | Multi-object/file | Backup, then exclusive SQLite transaction for valid state; atomic file replacement for malformed state | Valid-state schema recreation rolls back; malformed replacement restores prior file if initialization fails | Exact confirmation phrase; lock fails honestly; backups/logs retained; project paths are never traversed | Focused backend/UI tests and G049 native reset/readback | Interrupted reset and manual restore acceptance remain | Backup, lock, malformed, unavailable, project non-deletion tests | G049 installed reset/restart; G056 interruption/manual restore |
 | Write startup diagnostics | Rust `StartupDiagnostics` | `backend-startup.log` | One bounded file | Truncate on startup; bounded atomicity is not claimed | Diagnostic failure blocks owned-backend startup rather than exposing token | Full token redacted; output capped | Rust diagnostics test | Installed log location/permissions | Inventory and source decision | G050/G057 |
 | Write generated `AGENTS.md` | `POST /api/agents/write` | External project-root `AGENTS.md` and operation temp | Single external file | Separate atomic writer contract | Existing file requires confirmation; failures clean owned temp | Stale/link/hardlink/path checks; explicit overwrite | `test_agents.py` | Desktop dialog acceptance | Classified outside application-state reset/unregister | G050 |
 | Download report/brief/package | Frontend download actions | User download destination | External export | Browser download boundary | Failed download does not mutate SQLite/project | Explicit user action; stale package rejected | Remediation/report tests | Installed-edition download acceptance | Classified outside managed state | G050/G057 |
@@ -168,26 +170,26 @@ Verified migration backups are retained indefinitely in the v1 policy unless a f
 - Migration backups persist indefinitely until a future explicit reviewed retention flow exists.
 - Operation-owned migration temporary files are removed after success or handled failure. A verified published backup is not temporary.
 - The startup log is replaced at each launch and bounded to the implementation maximum; no multi-day log-retention period is currently promised.
-- Installed-edition upgrade and exact application-owned state locations still require G050/G057 artifact evidence. There is no supported cross-edition or relocation contract.
+- G049 verifies the exact installed paths and the v0.9.5 schema-v1 to v0.9.6 schema-v2 upgrade on one Windows x64 host. Clean-machine and final-candidate repetition remain required. There is no supported cross-edition or relocation contract.
 
 ## Reset contract
 
-Glacial 0.9.6 does not expose a reset route or prominent reset UI. Any future supported reset must satisfy all of the following:
+Glacial 0.9.6 exposes a Settings action for a full application-state reset. The installed contract is:
 
-1. It is an explicit user action, never a response to startup, schema, integrity, migration, or content failure.
-2. Glacial and all concurrent state mutations are stopped before replacement.
-3. It affects only application-owned state and never deletes, modifies, traverses, or “cleans” registered project directories or downloaded exports.
-4. It offers or requires a verified backup unless the user explicitly declines in an approved future flow.
-5. It removes or archives only the exact documented application-state targets selected by that flow.
-6. The next startup creates a new schema-version-1 database.
+1. The user must enter the exact confirmation phrase `RESET GLACIAL APPLICATION DATA`; reset is never an automatic response to startup, schema, integrity, migration, or content failure.
+2. The backend acquires an exclusive database transaction before recreating valid application state. A lock or concurrent mutation causes an honest failure rather than partial success.
+3. The reset affects only the active SQLite application schema and the two documented Glacial WebView convenience-state keys. It never deletes, modifies, traverses, or “cleans” registered project directories or downloaded exports.
+4. A verified timestamped recovery backup is mandatory before any existing database is reset.
+5. Migration backups, reset recovery backups, and backend startup logs are retained.
+6. Successful reset publishes a clean schema-version-2 database with the default workspace setting.
 7. Old state is not automatically merged into the new database.
-8. Reset of WebView convenience state and logs is explicit about those separate stores.
+8. Malformed SQLite state uses a bounded file-replacement path with restoration of the prior bytes if clean initialization fails.
 
-Installed-edition reset UX, permissions, interrupted reset, path readback, and clean-machine acceptance remain G050/G057 work.
+G049 verifies the installed Settings UX, actual-path readback, successful reset, retained backups/logs, untouched project marker, and clean restart on one Windows x64 host. Interrupted reset, manual restore, and clean-machine acceptance remain G056/G057 work.
 
 ## Backup and manual restore contract
 
-- Automatic backups occur only before migration of a nonempty supported predecessor database.
+- Automatic verified backups occur before migration of a nonempty supported predecessor database and before reset of an existing database.
 - A future user-requested backup must use SQLite-safe backup semantics, the same safe-destination and verification principles, and explicit user intent.
 - Glacial must be fully closed before manually replacing `glacial.db`.
 - Preserve the displaced database separately; do not overwrite the only recovery copy.
@@ -199,8 +201,8 @@ Installed-edition reset UX, permissions, interrupted reset, path readback, and c
 
 ## Uninstall boundary
 
-Application uninstallation must never remove scanned project files, generated project instructions, or downloaded exports. G046 does not claim what the current NSIS uninstaller retains or removes from application-local data, WebView storage, or logs because no current installed artifact was exercised. Exact installed paths, upgrade retention, reset, and uninstall retention/removal behavior remain mandatory G050/G057 acceptance evidence.
+Application uninstallation must never remove scanned project files, generated project instructions, or downloaded exports. The v0.9.6 current-user NSIS uninstaller preserves application data, migration/reset backups, and logs by default. Its optional unchecked data-removal control targets only the Glacial bundle-id roots under the current user's local and roaming application-data directories. G049 natively verified the default uninstall path and source-inspected the optional removal branch; the checked removal branch still requires native clean-machine acceptance in G056/G057.
 
 ## Evidence boundary
 
-The G046 tests prove controlled source-level behavior: recognized schema migrations, version publication, logical rollback, backup verification/publication/collision handling, future/corrupt/malformed rejection, and representative multi-record transaction coupling. They do not prove sudden process termination, parent crash, OS crash, power loss, disk-full behavior at every statement, antivirus interference, filesystem corruption, installer upgrade, unsupported relocation, reset UX, or uninstall behavior. Those claims remain blocked until their assigned desktop and release-candidate handoffs produce artifact evidence.
+The G046 tests prove controlled source-level behavior: recognized schema migrations, version publication, logical rollback, backup verification/publication/collision handling, future/corrupt/malformed rejection, and representative multi-record transaction coupling. G049 adds one-host installed evidence for predecessor install, first run, schema-v1 to schema-v2 in-place upgrade, repeated startup, reset/restart, same-version reinstall, default uninstall retention, parent-owned backend cleanup, and project-file non-deletion. It does not prove graceful close for the predecessor build, sudden process termination during writes/reset, OS crash, power loss, disk-full behavior at every statement, antivirus interference, filesystem corruption, the optional checked uninstall-removal branch, clean-machine portability, signed/public-candidate provenance, or rollback. Those claims remain blocked until their assigned desktop and release-candidate handoffs produce artifact evidence.

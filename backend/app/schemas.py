@@ -27,6 +27,13 @@ class ProjectRootUpdate(BaseModel):
     project_root: str = Field(min_length=1, max_length=1000)
 
 
+class ApplicationStateReset(BaseModel):
+    confirmation: Literal["RESET GLACIAL APPLICATION DATA"]
+
+    class Config:
+        extra = "forbid"
+
+
 class ProjectPathRequest(BaseModel):
     project_path: str = Field(min_length=1, max_length=1000)
 

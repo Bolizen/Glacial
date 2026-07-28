@@ -210,6 +210,16 @@ export function dismissGuidedReview(projectPath, current, storage = browserStora
 }
 
 
+export function clearGuidedReviewDismissals(storage = browserStorage()) {
+  try {
+    storage?.removeItem(GUIDED_REVIEW_DISMISSALS_KEY);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+
 function checklistStep(id, label, complete, detail) {
   return { id, label, complete: complete === true, detail };
 }

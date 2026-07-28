@@ -4,11 +4,13 @@ CHANGELOG_ENTRIES = [
     {
         "version": "0.9.6",
         "date": "2026-07-27",
-        "title": "Hex-secret redaction correction",
+        "title": "Hex-secret redaction and installed lifecycle correction",
         "changes": [
             "Corrected the G048 privacy boundary so generic free text redacts standalone 40-128 character hexadecimal values by default, including values in evidence, paths, errors, diagnostics, reports, and generated outputs.",
             "Preserved legitimate commits, checksums, signing hashes, dependency identities, and Glacial fingerprints only through explicit field-specific validation; digest-like characters or prefixes alone no longer grant trusted treatment.",
-            "Retained deterministic remediation packages, schema versions, the installed-only product boundary, and the NOT READY verdict while native installed-app privacy inspection remains outstanding.",
+            "Added actual installed path inventory and an exact-confirmation application-state reset with a mandatory recovery backup; project files, backups, and logs remain untouched.",
+            "Advanced SQLite state to schema version 2 through an ordered idempotent migration and documented the current-user NSIS default-retention and optional data-removal boundaries.",
+            "Recorded focused one-host installed upgrade/reset/reinstall/default-uninstall evidence while retaining deterministic remediation packages, the installed-only product boundary, and the NOT READY verdict.",
         ],
     },
     {

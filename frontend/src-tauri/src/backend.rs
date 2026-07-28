@@ -34,6 +34,12 @@ use crate::windows_job::ProcessWaitHandle;
 
 const AUTH_TOKEN_ENV: &str = "GLACIAL_DESKTOP_AUTH_TOKEN";
 const DATA_DIR_ENV: &str = "GLACIAL_DESKTOP_DATA_DIR";
+const APPLICATION_EXECUTABLE_ENV: &str = "GLACIAL_DESKTOP_APPLICATION_EXECUTABLE";
+const INSTALL_DIR_ENV: &str = "GLACIAL_DESKTOP_INSTALL_DIR";
+const BACKEND_EXECUTABLE_ENV: &str = "GLACIAL_DESKTOP_BACKEND_EXECUTABLE";
+const RUNTIME_DIR_ENV: &str = "GLACIAL_DESKTOP_RUNTIME_DIR";
+const LOG_DIR_ENV: &str = "GLACIAL_DESKTOP_LOG_DIR";
+const TEMP_DIR_ENV: &str = "GLACIAL_DESKTOP_TEMP_DIR";
 #[cfg(not(debug_assertions))]
 const SIDECAR_NAME: &str = "glacial-backend";
 const STARTUP_PREFIX: &str = "GLACIAL_BACKEND_READY ";
@@ -231,13 +237,25 @@ impl BackendSupervisor {
 
 struct DesktopPaths {
     data_dir: PathBuf,
+    log_dir: PathBuf,
     log_file: PathBuf,
+    application_executable: PathBuf,
+    install_dir: PathBuf,
+    backend_executable: PathBuf,
+    runtime_dir: PathBuf,
+    temp_dir: PathBuf,
     #[cfg(debug_assertions)]
     debug_backend: BackendPaths,
 }
 
 impl DesktopPaths {
     fn resolve(app: &AppHandle) -> Result<Self, StartupError> {
+        let application_executable =
+            std::env::current_exe().map_err(|_| StartupError::ApplicationData)?;
+        let install_dir = application_executable
+            .parent()
+            .ok_or(StartupError::ApplicationData)?
+            .to_path_buf();
         let data_root = app
             .path()
             .app_local_data_dir()
@@ -256,11 +274,27 @@ impl DesktopPaths {
 
         fs::create_dir_all(&data_dir).map_err(|_| StartupError::ApplicationData)?;
         fs::create_dir_all(&log_dir).map_err(|_| StartupError::ApplicationData)?;
+        let temp_dir = app
+            .path()
+            .temp_dir()
+            .map_err(|_| StartupError::ApplicationData)?;
+        #[cfg(debug_assertions)]
+        let debug_backend = resolve_backend_paths(Path::new(env!("CARGO_MANIFEST_DIR")))?;
+        #[cfg(debug_assertions)]
+        let backend_executable = debug_backend.python.clone();
+        #[cfg(not(debug_assertions))]
+        let backend_executable = install_dir.join("glacial-backend.exe");
         Ok(Self {
             data_dir,
+            log_dir: log_dir.clone(),
             log_file: log_dir.join("backend-startup.log"),
+            application_executable,
+            install_dir: install_dir.clone(),
+            backend_executable,
+            runtime_dir: install_dir.join("_internal"),
+            temp_dir,
             #[cfg(debug_assertions)]
-            debug_backend: resolve_backend_paths(Path::new(env!("CARGO_MANIFEST_DIR")))?,
+            debug_backend,
         })
     }
 }
@@ -308,6 +342,12 @@ fn launch_backend(
 ) -> Result<LaunchedBackend, StartupError> {
     let mut command = authenticated_backend_command(&paths.debug_backend, token, &paths.data_dir);
     command
+        .env(APPLICATION_EXECUTABLE_ENV, &paths.application_executable)
+        .env(INSTALL_DIR_ENV, &paths.install_dir)
+        .env(BACKEND_EXECUTABLE_ENV, &paths.backend_executable)
+        .env(RUNTIME_DIR_ENV, &paths.runtime_dir)
+        .env(LOG_DIR_ENV, &paths.log_dir)
+        .env(TEMP_DIR_ENV, &paths.temp_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -349,7 +389,13 @@ fn launch_backend(
         .sidecar(SIDECAR_NAME)
         .map_err(|_| StartupError::MissingSidecar)?
         .env(AUTH_TOKEN_ENV, token)
-        .env(DATA_DIR_ENV, &paths.data_dir);
+        .env(DATA_DIR_ENV, &paths.data_dir)
+        .env(APPLICATION_EXECUTABLE_ENV, &paths.application_executable)
+        .env(INSTALL_DIR_ENV, &paths.install_dir)
+        .env(BACKEND_EXECUTABLE_ENV, &paths.backend_executable)
+        .env(RUNTIME_DIR_ENV, &paths.runtime_dir)
+        .env(LOG_DIR_ENV, &paths.log_dir)
+        .env(TEMP_DIR_ENV, &paths.temp_dir);
     let (mut receiver, child) = command.spawn().map_err(|_| StartupError::Spawn)?;
     let process_id = child.pid();
     let job = match JobObject::assign_process(process_id) {
