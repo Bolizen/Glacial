@@ -138,12 +138,14 @@ if (verdictMatches.length !== 1) fail(`expected exactly one Markdown overall ver
 if (verdictMatches[0][1] !== snapshot.overall_verdict) fail("Markdown and JSON verdicts differ");
 if (snapshot.overall_verdict !== "NOT READY") fail("current evidence requires NOT READY");
 const expectedClassificationChanges = [
-  ["V1-DESKTOP-005", "UNKNOWN", "PARTIAL"],
-  ["V1-DOC-002", "FAIL", "PARTIAL"],
+  ["V1-DATA-005", "PARTIAL", "PASS"],
+  ["V1-DESKTOP-002", "PARTIAL", "PASS"],
+  ["V1-DESKTOP-003", "PARTIAL", "PASS"],
+  ["V1-DESKTOP-005", "PARTIAL", "PASS"],
 ];
 const actualClassificationChanges = (snapshot.classification_changes ?? []).map(({ id, from, to }) => [id, from, to]);
 if (JSON.stringify(actualClassificationChanges) !== JSON.stringify(expectedClassificationChanges)) {
-  fail("G049 readiness classification changes are missing or incorrect");
+  fail("G050 readiness classification changes are missing or incorrect");
 }
 
 const versionMatches = [...audit.matchAll(/^- Audited product version: `([^`]+)`$/gm)];

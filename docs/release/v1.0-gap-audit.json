@@ -2,34 +2,46 @@
   "schema_version": "1.0.0",
   "product": "Glacial",
   "audited_version": "0.9.7",
-  "audited_commit": "297299c635444c5e43a10578405e69f912a1e1a5",
-  "generated_at_utc": "2026-07-28T03:22:21Z",
+  "audited_commit": "778a75dea8a3df13e1674a9e77b35025b79ac7b2",
+  "generated_at_utc": "2026-07-28T04:36:38Z",
   "overall_verdict": "NOT READY",
   "scope_decision": "Glacial v1 supports only the installed Windows x64 NSIS edition; the retired portable edition does not close any installed lifecycle or release requirement.",
   "classification_changes": [
     {
-      "id": "V1-DESKTOP-005",
-      "from": "UNKNOWN",
-      "to": "PARTIAL",
-      "reason": "G049 adds focused one-host installed path, upgrade, reset, reinstall, default-uninstall, and project-file non-deletion evidence; clean-machine and remaining lifecycle acceptance are incomplete."
+      "id": "V1-DATA-005",
+      "from": "PARTIAL",
+      "to": "PASS",
+      "reason": "G049 and G050 together document and natively verify exact installed paths, retention, reset, verified backup, manual restore, reinstall, both uninstall variants, and project-file preservation."
     },
     {
-      "id": "V1-DOC-002",
-      "from": "FAIL",
-      "to": "PARTIAL",
-      "reason": "G049 documents exact installed lifecycle paths and reset/uninstall behavior, but stable task-oriented guidance and clean-reader/clean-machine validation remain incomplete."
+      "id": "V1-DESKTOP-002",
+      "from": "PARTIAL",
+      "to": "PASS",
+      "reason": "G050 observes bounded graceful, forced-parent, and controlled startup-failure cleanup with no orphan backend and no new visible console window."
+    },
+    {
+      "id": "V1-DESKTOP-003",
+      "from": "PARTIAL",
+      "to": "PASS",
+      "reason": "G050 concurrently launches the installed application and observes one effective frontend, one visible window, one backend, and intact SQLite state."
+    },
+    {
+      "id": "V1-DESKTOP-005",
+      "from": "PARTIAL",
+      "to": "PASS",
+      "reason": "G049 and G050 provide exact installed paths plus first-run, predecessor upgrade, reset, recovery, reinstall, both uninstall variants, and project-state preservation on the supported installed NSIS edition."
     }
   ],
   "status_counts": {
-    "PASS": 36,
-    "PARTIAL": 18,
+    "PASS": 40,
+    "PARTIAL": 14,
     "FAIL": 5,
     "UNKNOWN": 2,
     "NOT_APPLICABLE": 0
   },
   "priority_counts": {
     "P0": 0,
-    "P1": 25,
+    "P1": 21,
     "P2": 0,
     "P3": 0
   },
@@ -404,18 +416,18 @@
       "area": "Data integrity and state lifecycle",
       "status": "PARTIAL",
       "priority": "P1",
-      "summary": "Migration/reset rollback, integrity, and cleanup are tested, with focused installed forced-parent evidence; real write-boundary interruption remains unaccepted.",
+      "summary": "Migration/reset rollback, integrity, and cleanup are tested, including a process-boundary installed reset interruption; OS power-loss and lower-level filesystem faults remain unaccepted.",
       "evidence": [
         "backend/tests/test_database_lifecycle.py integrity, rollback, and retry recovery",
         "backend/tests/test_agents.py failure cleanup",
         "frontend/src-tauri/src/backend.rs startup cleanup",
-        "docs/release/installed-lifecycle-evidence.md forced predecessor-parent cleanup and post-upgrade/reset integrity"
+        "docs/release/installed-lifecycle-evidence.md predecessor cleanup and post-upgrade/reset integrity",
+        "docs/release/g050-installed-lifecycle-acceptance.md interruption after verified recovery-backup publication with unchanged current state, successful retry, and SQLite integrity"
       ],
-      "gap": "No controlled termination during representative writes/reset, startup-failure recovery, OS crash, filesystem interruption, or power-loss record proves conservative recovery at real interruption boundaries.",
-      "recommended_remediation": "Exercise controlled interruption at startup and representative write/reset boundaries against disposable installed state.",
+      "gap": "The process-boundary case does not prove recovery after OS power loss, low-level filesystem interruption, disk full, antivirus interference, or filesystem corruption.",
+      "recommended_remediation": "Retain the focused interruption evidence and execute the remaining declared fault classes where safely practical against disposable installed state.",
       "closure_evidence": [
-        "Dated SQLite integrity checks.",
-        "Installed-edition conservative interruption recovery/readback record."
+        "Dated OS/filesystem interruption evidence with SQLite integrity and conservative recovery/readback."
       ],
       "waiver_permitted": false
     },
@@ -461,21 +473,22 @@
     {
       "id": "V1-DATA-005",
       "area": "Data integrity and state lifecycle",
-      "status": "PARTIAL",
-      "priority": "P1",
-      "summary": "State retention/reset/backup/restore/uninstall policy and focused installed flows are explicit, but clean-machine and remaining recovery acceptance are incomplete.",
+      "status": "PASS",
+      "priority": null,
+      "summary": "State retention, reset, backup, restore, reinstall, uninstall, and project-preservation behavior are documented and accepted against the installed edition.",
       "evidence": [
         "frontend/src-tauri/src/backend.rs app-local data and log path source",
         "docs/release/state-lifecycle-policy.md complete state-family inventory and lifecycle policy",
         "backend/app/state_lifecycle.py verified automatic migration backups",
         "backend/app/installed_lifecycle.py exact path inventory and reset implementation",
-        "docs/release/installed-lifecycle-evidence.md one-host upgrade/reset/reinstall/default-uninstall record"
+        "docs/installed-windows-lifecycle.md task-oriented retention, reset, restore, update, and uninstall guidance",
+        "docs/release/installed-lifecycle-evidence.md G049 predecessor upgrade and G050 exact-source lifecycle acceptance",
+        "docs/release/g050-installed-lifecycle-acceptance.md interrupted reset, manual restore, reinstall, both uninstall variants, and unchanged project marker"
       ],
-      "gap": "Manual restore, interrupted reset, clean-machine execution, and the optional checked uninstall-data removal path remain unproven.",
-      "recommended_remediation": "Execute the remaining clean-machine, interruption, manual-restore, and checked-removal acceptance against the frozen candidate.",
+      "gap": "",
+      "recommended_remediation": "",
       "closure_evidence": [
-        "User-facing lifecycle documentation.",
-        "G056 installed recovery and exact retained/removed path acceptance."
+        "Retain the lifecycle guide and repeat the same matrix against the frozen release candidate."
       ],
       "waiver_permitted": false
     },
@@ -635,38 +648,38 @@
     {
       "id": "V1-DESKTOP-002",
       "area": "Desktop application lifecycle",
-      "status": "PARTIAL",
-      "priority": "P1",
-      "summary": "Owned-backend termination and console suppression exist with focused installed forced-parent evidence, but the complete artifact lifecycle matrix is incomplete.",
+      "status": "PASS",
+      "priority": null,
+      "summary": "Graceful exit, forced parent termination, and controlled startup failure end the owned backend within bounded intervals without an observed console-window flash.",
       "evidence": [
         "frontend/src-tauri/src/windows_job.rs kill-on-close",
         "frontend/src-tauri/src/backend.rs bounded kill/wait",
         "frontend/src-tauri/src/main.rs windows_subsystem",
         "G043 development shutdown observation",
-        "G049 installed forced-parent cleanup with no owned backend left behind"
+        "docs/release/g050-installed-lifecycle-acceptance.md graceful, forced-parent, startup-failure, process-tree, and 50 ms console-window observations"
       ],
-      "gap": "The v0.9.5 predecessor did not close through CloseMainWindow within 10 seconds; current graceful exit, parent crash, startup failure, and console-flash acceptance remain absent.",
-      "recommended_remediation": "Run the remaining process-tree and visual lifecycle matrix on the frozen candidate.",
+      "gap": "",
+      "recommended_remediation": "",
       "closure_evidence": [
-        "No orphan after graceful, forced, parent-crash, and startup-failure cases plus no console flash."
+        "Repeat bounded process-tree and visual observations against the frozen release candidate."
       ],
       "waiver_permitted": false
     },
     {
       "id": "V1-DESKTOP-003",
       "area": "Desktop application lifecycle",
-      "status": "PARTIAL",
-      "priority": "P1",
-      "summary": "Single-instance controls and repeated installed startup evidence exist, but concurrent two-launch acceptance is absent.",
+      "status": "PASS",
+      "priority": null,
+      "summary": "Concurrent installed launch activates the existing instance without a second backend or database corruption.",
       "evidence": [
         "frontend/src-tauri/src/main.rs tauri_plugin_single_instance",
         "frontend/src-tauri/src/backend.rs DuplicateSpawn guard",
-        "G049 repeated current startup and same-version reinstall with stable database state"
+        "docs/release/g050-installed-lifecycle-acceptance.md concurrent two-launch process, window, and SQLite observation"
       ],
-      "gap": "No concurrent installed two-launch observation proves one window, one backend, and safe shared state.",
-      "recommended_remediation": "Add a bounded concurrent two-launch acceptance case.",
+      "gap": "",
+      "recommended_remediation": "",
       "closure_evidence": [
-        "Installed window, process, and database observation."
+        "Repeat the installed two-launch observation against the frozen release candidate."
       ],
       "waiver_permitted": false
     },
@@ -675,15 +688,15 @@
       "area": "Desktop application lifecycle",
       "status": "PARTIAL",
       "priority": "P1",
-      "summary": "Startup failures are handled in source and G049 verified clean recovery after a rejected reset attempt, but real candidate startup-failure evidence is missing.",
+      "summary": "Startup failures are handled in source and G050 accepts a real missing-sidecar failure/recovery, but the remaining declared failure variants are unproven.",
       "evidence": [
         "frontend/src-tauri/src/backend.rs StartupError paths and bounded diagnostics",
         "frontend/src-tauri/src/main.rs startup-error URL",
         "frontend/public/startup-error.js inert textContent rendering",
-        "G049 rejected preliminary reset and successful corrected-artifact recovery"
+        "docs/release/g050-installed-lifecycle-acceptance.md bounded missing-sidecar error, unchanged database, zero owned backend, restored sidecar hash, and successful recovery"
       ],
-      "gap": "Controlled real startup-failure paths and candidate resource recovery have not been accepted.",
-      "recommended_remediation": "Exercise safe synthetic startup failures without weakening Windows controls.",
+      "gap": "Crash, malformed startup message, unavailable data directory, and interrupted-start variants have not all received installed acceptance.",
+      "recommended_remediation": "Exercise the remaining safe synthetic startup failures without weakening Windows controls.",
       "closure_evidence": [
         "Error screenshots.",
         "Redacted log readback.",
@@ -694,19 +707,20 @@
     {
       "id": "V1-DESKTOP-005",
       "area": "Desktop application lifecycle",
-      "status": "PARTIAL",
-      "priority": "P1",
-      "summary": "Focused installed first-run, state, upgrade, reset, recovery, reinstall, and default-uninstall behavior is evidenced, but clean-machine closure remains incomplete.",
+      "status": "PASS",
+      "priority": null,
+      "summary": "The supported installed edition uses documented state locations and has accepted first-run, upgrade, reset, recovery, reinstall, and uninstall behavior.",
       "evidence": [
         "frontend/src-tauri/src/backend.rs app-local data/log resolution without executable-location inference",
         "NSIS-only Tauri and release configuration",
-        "docs/release/installed-lifecycle-evidence.md exact paths and one-host native lifecycle record"
+        "docs/installed-windows-lifecycle.md installed lifecycle instructions",
+        "docs/release/installed-lifecycle-evidence.md G049 predecessor upgrade evidence",
+        "docs/release/g050-installed-lifecycle-acceptance.md clean Glacial-state first run, exact paths, reset/recovery, reinstall, both uninstall variants, and project preservation"
       ],
-      "gap": "The host was not a clean Windows machine; optional checked data removal, manual recovery restore, interruption, and final signed-candidate acceptance remain unproven.",
-      "recommended_remediation": "Repeat the complete lifecycle matrix on supported clean environments using the frozen candidate.",
+      "gap": "",
+      "recommended_remediation": "",
       "closure_evidence": [
-        "Exact path inventory.",
-        "Dated clean-machine first-run, upgrade, reset, recovery, and both uninstall variants."
+        "Repeat the complete lifecycle matrix on each declared supported environment using the frozen release candidate."
       ],
       "waiver_permitted": false
     },
@@ -860,15 +874,15 @@
       "summary": "The mandatory clean pre-RC repository-wide Codex Security Deep Security Scan and reportable-finding closure have not occurred.",
       "evidence": [
         "docs/release/v1.0-readiness-contract.md permanent V1-SEC-007 gate",
-        "docs/release/v1.0-remediation-sequence.md G053 Deep Security Scan and G054 closure handoffs",
+        "docs/release/v1.0-remediation-sequence.md G054 Deep Security Scan and G055 closure handoffs",
         "G048 explicitly did not run a Deep Security Scan"
       ],
-      "gap": "No canonical G053 threat model, repeated discovery, coverage ledger, validation, attack-path/severity analysis, finding write-ups, hardening portfolio, generated report, or G054 remediation/closure evidence exists.",
-      "recommended_remediation": "Run G053 without repository edits, then close every reportable finding and material deferred surface through bounded G054 remediation with post-fix validation.",
+      "gap": "No canonical G054 threat model, repeated discovery, coverage ledger, validation, attack-path/severity analysis, finding write-ups, hardening portfolio, generated report, or G055 remediation/closure evidence exists.",
+      "recommended_remediation": "Run G054 without repository edits, then close every reportable finding and material deferred surface through bounded G055 remediation with post-fix validation.",
       "closure_evidence": [
         "Exact clean pre-RC source commit and complete canonical Codex Security Deep Security Scan artifacts.",
         "Explicit deferred/incomplete coverage ledger.",
-        "Post-fix validation and attack-path closure for every reportable finding before G055."
+        "Post-fix validation and attack-path closure for every reportable finding before G056."
       ],
       "waiver_permitted": false
     },
@@ -915,14 +929,15 @@
       "area": "Release engineering and supply-chain integrity",
       "status": "PARTIAL",
       "priority": "P1",
-      "summary": "Installed-only NSIS construction is implemented and focused internal artifacts were exercised, but no clean-source signed candidate proves it.",
+      "summary": "Installed-only NSIS construction produced an exact clean-source internal artifact with installed-payload readback, but no signed public candidate or candidate manifest exists.",
       "evidence": [
         "NSIS-only Tauri and release scripts",
         "Signed application capture retained as installer evidence",
         "One-artifact manifest, checksum, and release tests",
-        "G049 exact unsigned internal v0.9.5/v0.9.6 installer hashes and installed payload readback"
+        "G049 exact unsigned internal v0.9.5/v0.9.6 installer hashes and installed payload readback",
+        "G050 exact clean-source v0.9.7 installer name, size, SHA-256, signing state, source commit, and installed payload hashes"
       ],
-      "gap": "The v0.9.6 artifact is not a clean-source, commit-provenanced, signed/public-trust candidate and has no candidate manifest.",
+      "gap": "The accepted v0.9.7 artifact is unsigned internal evidence, not a public-trust candidate, and has no candidate manifest.",
       "recommended_remediation": "Construct one bounded public-RC installer after upstream blockers close.",
       "closure_evidence": [
         "Candidate installer inventory.",
@@ -972,12 +987,13 @@
       "area": "Release engineering and supply-chain integrity",
       "status": "FAIL",
       "priority": "P1",
-      "summary": "The complete stable release, lifecycle acceptance, and withdrawal procedure is absent.",
+      "summary": "Focused installed lifecycle acceptance is complete, but the final stable-candidate, publication, authorization, and withdrawal procedure is absent.",
       "evidence": [
         "Partial release notes and signing verification guidance",
-        "G049 focused one-host install, first-run, upgrade, reset, reinstall, and default-uninstall evidence"
+        "G049 predecessor upgrade evidence",
+        "G050 clean-state first run, concurrent launch, process cleanup, startup-failure recovery, reset/restore, reinstall, both uninstall variants, and project preservation"
       ],
-      "gap": "No complete clean-machine final-RC lifecycle acceptance, checked data-removal run, GitHub Release contents procedure, stable authorization checklist, or rollback/withdrawal procedure exists.",
+      "gap": "No frozen signed final-RC lifecycle acceptance across the declared support matrix, GitHub Release contents procedure, stable authorization checklist, or rollback/withdrawal procedure exists.",
       "recommended_remediation": "Define the installed-edition release playbook and execute it against the final RC.",
       "closure_evidence": [
         "Dated final-candidate lifecycle acceptance.",
@@ -996,7 +1012,7 @@
       "evidence": [
         "README.md",
         "SECURITY.md",
-        "RELEASE_NOTES.md 0.9.6 entry",
+        "RELEASE_NOTES.md 0.9.7 entry",
         "Readiness document links and disclaimer"
       ],
       "gap": "",
@@ -1011,14 +1027,15 @@
       "area": "Documentation, legal, and support readiness",
       "status": "PARTIAL",
       "priority": "P1",
-      "summary": "Focused installed lifecycle documentation exists, but stable task-oriented installation and troubleshooting guidance is incomplete.",
+      "summary": "Task-oriented installed lifecycle guidance now covers installation, first run, update, reset, manual restore, uninstall, and troubleshooting, but independent execution remains incomplete.",
       "evidence": [
-        "README.md developer clone, Python, npm, Tauri setup",
-        "README.md manual test notes",
-        "docs/release/installed-lifecycle-evidence.md exact paths, update/reset/recovery/uninstall boundaries, unsupported relocation, and evidence limits"
+        "README.md lifecycle-guide link",
+        "docs/installed-windows-lifecycle.md task-oriented installed-edition guide",
+        "docs/release/installed-lifecycle-evidence.md exact acceptance boundary",
+        "docs/release/g050-installed-lifecycle-acceptance.md native execution of lifecycle procedures"
       ],
-      "gap": "Stable task-oriented installation, first-run, and troubleshooting guidance independent of developer tooling is incomplete and has not received clean-reader or clean-machine validation.",
-      "recommended_remediation": "Write the remaining task-oriented installed-edition user guide and validate every supported instruction on clean machines.",
+      "gap": "The complete guide has not received an independent clean-reader execution across the declared support matrix.",
+      "recommended_remediation": "Run a clean-reader review and execute every supported instruction against the frozen candidate on each declared supported environment.",
       "closure_evidence": [
         "Clean-reader review.",
         "Clean-machine completion of every instruction."
