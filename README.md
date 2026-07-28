@@ -21,6 +21,7 @@ Glacial is an early stage local-first project focused on project scanning, safet
 - [v1.0 owner decisions](docs/release/v1.0-owner-decisions.md)
 - [Agent Remediation format policy](docs/release/agent-remediation-format-policy.md)
 - [Data privacy and disclosure boundary](docs/release/data-privacy-boundary.md)
+- [Installed Windows lifecycle guide](docs/installed-windows-lifecycle.md)
 - [recommended remediation sequence](docs/release/v1.0-remediation-sequence.md)
 
 These are planning and release-governance artifacts. They are not proof that Glacial is secure, complete, or ready for v1.0 release.

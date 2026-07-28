@@ -15,7 +15,7 @@ const sequence = readFileSync(sequencePath, "utf8");
 const idPattern = /^V1-(VER|SCAN|FS|DATA|AGENT|DESKTOP|SEC|REL|DOC|UX)-\d{3}$/;
 const allowedStatuses = new Set(["PASS", "PARTIAL", "FAIL", "UNKNOWN", "NOT_APPLICABLE"]);
 const allowedPriorities = new Set(["P0", "P1", "P2", "P3"]);
-const expectedSequenceHeadings = ["G047", "G048", "G049", "G050", "G051", "G052", "G053", "G054", "G055", "G056", "G057"];
+const expectedSequenceHeadings = ["G047", "G048", "G049", "G050", "G051", "G052", "G053", "G054", "G055", "G056", "G057", "G058"];
 const installedOnlyDecision = "Glacial v1 does not provide or support a portable binary edition. The supported Windows product is the installed NSIS edition.";
 
 function fail(message) {

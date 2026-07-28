@@ -1,6 +1,18 @@
-# Glacial 0.9.6 installed lifecycle evidence
+# Glacial installed lifecycle evidence
 
-Status: internal G049 evidence recorded 2026-07-27 on the Windows x64 development host. This is focused installed-edition evidence, not a public release candidate, clean-machine matrix, signing report, or v1 authorization.
+Status: G049 focused evidence and G050 Glacial 0.9.7 installed lifecycle acceptance are recorded. This is internal installed-edition evidence, not a public release candidate, public signing report, or v1 authorization.
+
+The complete G050 environment, artifact provenance, acceptance matrix, process observations, SQLite results, path inventory, marker hashes, uninstall inventory, defects, and limitations are in [G050 installed lifecycle acceptance](g050-installed-lifecycle-acceptance.md). Task-oriented installation, update, reset, manual restoration, uninstall, and troubleshooting instructions are in the [Installed Windows lifecycle guide](../installed-windows-lifecycle.md).
+
+## G050 acceptance closure
+
+The accepted unsigned internal installer is `Glacial_0.9.7_x64-setup.exe`, 16,116,199 bytes, SHA-256 `8BB1627DA3E41993763E9DF147BC6AC34D03F8B0F30C9D899796B4B1C0F38003`, built from exact source commit `518cf498929152799d656ee6e27cfedc81b98cbe`.
+
+On the Icefields Windows 11 x64 VMware guest, a genuinely clean Glacial current-user state passed clean install/first run, concurrent launch, graceful and forced-parent cleanup, controlled missing-sidecar startup failure/recovery, process-boundary interrupted reset/recovery, manual verified-backup restoration, same-version reinstall, default uninstall retention, explicitly checked uninstall-data removal, and project-file non-deletion. No runtime fix or rebuild was required.
+
+The G050 acceptance closes the focused installed lifecycle behavior, but not public signing, final release-candidate acceptance, multi-version Windows support, power-loss simulation, native hostile privacy-sink coverage, accessibility, deep security scanning, rollback/withdrawal, or v1 authorization.
+
+## Historical G049 evidence
 
 ## Authoritative Windows path contract
 

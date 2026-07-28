@@ -170,7 +170,7 @@ Verified migration backups are retained indefinitely in the v1 policy unless a f
 - Migration backups persist indefinitely until a future explicit reviewed retention flow exists.
 - Operation-owned migration temporary files are removed after success or handled failure. A verified published backup is not temporary.
 - The startup log is replaced at each launch and bounded to the implementation maximum; no multi-day log-retention period is currently promised.
-- G049 verifies the exact installed paths and the v0.9.5 schema-v1 to v0.9.6 schema-v2 upgrade on one Windows x64 host. Clean-machine and final-candidate repetition remain required. There is no supported cross-edition or relocation contract.
+- G049 verifies the exact installed paths and the v0.9.5 schema-v1 to v0.9.6 schema-v2 upgrade on one Windows x64 host. G050 repeats clean Glacial-state first run on the Icefields Windows 11 x64 VMware guest and completes concurrent launch, graceful/forced cleanup, controlled startup failure, interrupted reset, manual restore, reinstall, and both uninstall variants against an exact-source v0.9.7 artifact. Final frozen-candidate repetition remains required. There is no supported cross-edition or relocation contract.
 
 ## Reset contract
 
@@ -185,7 +185,7 @@ Glacial 0.9.7 exposes a Settings action for a full application-state reset. The 
 7. Old state is not automatically merged into the new database.
 8. Malformed SQLite state uses a bounded file-replacement path with restoration of the prior bytes if clean initialization fails.
 
-G049 verifies the installed Settings UX, actual-path readback, successful reset, retained backups/logs, untouched project marker, and clean restart on one Windows x64 host. Interrupted reset, manual restore, and clean-machine acceptance remain G056/G057 work.
+G049 verifies the installed Settings UX, actual-path readback, successful reset, retained backups/logs, untouched project marker, and clean restart on one Windows x64 host. G050 verifies a process-boundary interruption after recovery-backup publication but before the exclusive reset transaction, unchanged current state after termination, successful later reset, and exact manual restoration from the verified backup. The [Installed Windows lifecycle guide](../installed-windows-lifecycle.md) documents the supported replacement procedure.
 
 ## Backup and manual restore contract
 
@@ -201,8 +201,8 @@ G049 verifies the installed Settings UX, actual-path readback, successful reset,
 
 ## Uninstall boundary
 
-Application uninstallation must never remove scanned project files, generated project instructions, or downloaded exports. The v0.9.7 current-user NSIS uninstaller preserves application data, migration/reset backups, and logs by default. Its optional unchecked data-removal control targets only the Glacial bundle-id roots under the current user's local and roaming application-data directories. G049 natively verified the default uninstall path and source-inspected the optional removal branch; G050 owns native checked-removal acceptance.
+Application uninstallation must never remove scanned project files, generated project instructions, or downloaded exports. The v0.9.7 current-user NSIS uninstaller preserves application data, migration/reset backups, and logs by default. Its optional unchecked data-removal control targets only the Glacial bundle-id roots under the current user's local and roaming application-data directories. G050 natively verifies both the default-retention path and explicit checked removal, including unchanged parent-directory neighbors and a byte-identical registered-project marker.
 
 ## Evidence boundary
 
-The G046 tests prove controlled source-level behavior: recognized schema migrations, version publication, logical rollback, backup verification/publication/collision handling, future/corrupt/malformed rejection, and representative multi-record transaction coupling. G049 adds one-host installed evidence for predecessor install, first run, schema-v1 to schema-v2 in-place upgrade, repeated startup, reset/restart, same-version reinstall, default uninstall retention, parent-owned backend cleanup, and project-file non-deletion. It does not prove graceful close for the predecessor build, sudden process termination during writes/reset, OS crash, power loss, disk-full behavior at every statement, antivirus interference, filesystem corruption, the optional checked uninstall-removal branch, clean-machine portability, signed/public-candidate provenance, or rollback. Those claims remain blocked until their assigned desktop and release-candidate handoffs produce artifact evidence.
+The G046 tests prove controlled source-level behavior: recognized schema migrations, version publication, logical rollback, backup verification/publication/collision handling, future/corrupt/malformed rejection, and representative multi-record transaction coupling. G049 adds predecessor upgrade/reset evidence. G050 adds exact-source installed first run, concurrent launch, graceful and forced-parent cleanup, controlled startup failure/recovery, interrupted reset/recovery, manual restoration, same-version reinstall, both uninstall variants, and project-file non-deletion. It does not prove OS-level power loss, disk-full behavior at every statement, antivirus interference, filesystem corruption, public signing, final frozen-candidate provenance, rollback/withdrawal, or multi-version Windows support.
