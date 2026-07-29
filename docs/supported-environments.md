@@ -2,7 +2,7 @@
 
 Glacial v1 is limited to a current-user Windows x64 installation produced by the NSIS installer. The repository is still `NOT READY`; this matrix records the tested boundary and the work still required before v1 authorization.
 
-| Area | v0.9.10 boundary |
+| Area | v0.9.11 boundary |
 | --- | --- |
 | Product edition | Installed NSIS edition only |
 | Processor architecture | x64 |

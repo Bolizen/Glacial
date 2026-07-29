@@ -2039,7 +2039,7 @@ test("Settings renders bounded development build identity and matching owned bac
   const identity = document.querySelector(".build-identity");
   assert.ok(identity);
   assert.match(identity.textContent, /Glacial/);
-  assert.match(identity.textContent, /0\.9\.10/);
+  assert.match(identity.textContent, /0\.9\.11/);
   assert.match(identity.textContent, /development/);
   assert.match(identity.textContent, /Source commitUnavailable/);
   assert.match(identity.textContent, /Trust classificationunsigned/);
@@ -3104,7 +3104,7 @@ function defaultResponse(request) {
   }
 }
 
-function backendRuntimeIdentityFixture(version = "0.9.10") {
+function backendRuntimeIdentityFixture(version = "0.9.11") {
   return {
     schema_version: 1,
     product_name: "Glacial",

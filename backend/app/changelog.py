@@ -2,6 +2,16 @@ from __future__ import annotations
 
 CHANGELOG_ENTRIES = [
     {
+        "version": "0.9.11",
+        "date": "2026-07-29",
+        "title": "Installed privacy and failure-recovery acceptance",
+        "changes": [
+            "Exercised the installed Tauri/WebView2 application against a disposable hostile project and inspected its owned database, state, logs, exports, generated instructions, clipboard, downloads, packages, and temporary outputs.",
+            "Accepted safe startup-failure and interrupted-state variants with bounded user-facing errors, owned-process cleanup, SQLite integrity checks, restoration, and normal-startup recovery.",
+            "Kept physical power-loss and low-level filesystem corruption outside simulated fault claims, retained the failed deep-security gate, and produced no public candidate, signing, tag, release, or publication.",
+        ],
+    },
+    {
         "version": "0.9.10",
         "date": "2026-07-28",
         "title": "Runtime identity and signer readiness",

@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0.0",
   "product": "Glacial",
-  "audited_version": "0.9.10",
+  "audited_version": "0.9.11",
   "audited_commit": "1d580221a1275aec5f355131028c9911e30c7191",
   "generated_at_utc": "2026-07-28T16:50:24Z",
   "overall_verdict": "NOT READY",
@@ -131,7 +131,7 @@
       "area": "Product identity and version integrity",
       "status": "PASS",
       "priority": null,
-      "summary": "Authoritative source versions agree on 0.9.10 and are machine-validated.",
+      "summary": "Authoritative source versions agree on 0.9.11 and are machine-validated.",
       "evidence": [
         "frontend/package.json and package-lock.json",
         "frontend/src-tauri/tauri.conf.json, Cargo.toml, and Cargo.lock",
@@ -203,11 +203,11 @@
       "area": "Product identity and version integrity",
       "status": "PASS",
       "priority": null,
-      "summary": "Documentation identifies 0.9.10 as a bounded pre-v1 identity, dependency, and signer-readiness milestone and does not imply a public release candidate, stable status, or v1 authorization.",
+      "summary": "Documentation identifies 0.9.11 as a bounded pre-v1 installed privacy and failure-recovery milestone and does not imply security closure, a public release candidate, stable status, or v1 authorization.",
       "evidence": [
         "README.md Current Status",
-        "RELEASE_NOTES.md 0.9.10 entry",
-        "backend/app/changelog.py 0.9.10 entry",
+        "RELEASE_NOTES.md 0.9.11 entry",
+        "backend/app/changelog.py 0.9.11 entry",
         "docs/release/v1.0-gap-audit.md NOT READY verdict"
       ],
       "gap": "",
@@ -1078,7 +1078,7 @@
       "evidence": [
         "README.md",
         "SECURITY.md",
-        "RELEASE_NOTES.md 0.9.10 entry",
+        "RELEASE_NOTES.md 0.9.11 entry",
         "Readiness document links and disclaimer"
       ],
       "gap": "",

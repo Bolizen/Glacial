@@ -143,7 +143,7 @@ class DesktopAuthenticationTests(unittest.TestCase):
             {
                 "schema_version": 1,
                 "product_name": "Glacial",
-                "product_version": "0.9.10",
+                "product_version": "0.9.11",
                 "component": "owned-backend",
             },
         )

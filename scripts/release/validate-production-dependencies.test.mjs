@@ -16,14 +16,14 @@ function fixture() {
   };
   return {
     manifest: {
-      version: "0.9.10",
+      version: "0.9.11",
       dependencies,
       overrides: { postcss: "8.5.18" },
     },
     lock: {
-      version: "0.9.10",
+      version: "0.9.11",
       packages: {
-        "": { version: "0.9.10", dependencies: { ...dependencies } },
+        "": { version: "0.9.11", dependencies: { ...dependencies } },
         "node_modules/@tauri-apps/api": { version: "2.11.1" },
         "node_modules/@vitejs/plugin-react": { version: "5.2.0" },
         "node_modules/react": { version: "19.2.7" },

@@ -203,11 +203,11 @@ export function verifyReleaseSource(gitPath) {
     cargo: cargoVersion(join(FRONTEND, "src-tauri", "Cargo.toml")),
     cargoLock: lockVersion(join(FRONTEND, "src-tauri", "Cargo.lock")),
   };
-  for (const [name, version] of Object.entries(versions)) if (version !== "0.9.10") throw new Error(`${name} identifies version ${version ?? "unknown"}; expected 0.9.10.`);
-  if (readFileSync(join(REPOSITORY, "backend", "app", "version.py"), "utf8").trim() !== 'GLACIAL_VERSION = "0.9.10"') throw new Error("Backend version constant does not identify 0.9.10.");
-  if (!readFileSync(join(REPOSITORY, "backend", "app", "changelog.py"), "utf8").includes('"version": "0.9.10"')) throw new Error("Backend release metadata does not identify 0.9.10.");
+  for (const [name, version] of Object.entries(versions)) if (version !== "0.9.11") throw new Error(`${name} identifies version ${version ?? "unknown"}; expected 0.9.11.`);
+  if (readFileSync(join(REPOSITORY, "backend", "app", "version.py"), "utf8").trim() !== 'GLACIAL_VERSION = "0.9.11"') throw new Error("Backend version constant does not identify 0.9.11.");
+  if (!readFileSync(join(REPOSITORY, "backend", "app", "changelog.py"), "utf8").includes('"version": "0.9.11"')) throw new Error("Backend release metadata does not identify 0.9.11.");
   validateProductionDependencies(packageJson, packageLock);
-  return { root, branch, commit, originMain, version: "0.9.10", versions, status: "" };
+  return { root, branch, commit, originMain, version: "0.9.11", versions, status: "" };
 }
 
 export function assertSameReleaseSource(before, after) {

@@ -1,6 +1,6 @@
 [package]
 name = "glacial"
-version = "0.9.10"
+version = "0.9.11"
 description = "Glacial by Icefields, a local-first project safety dashboard"
 authors = ["Icefields"]
 homepage = "https://icefields.dev"

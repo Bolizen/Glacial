@@ -2,7 +2,7 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 
 import { developmentBuildIdentity, validateBuildIdentity } from "./buildIdentityContract.js";
 
-const FALLBACK_VERSION = "0.9.10";
+const FALLBACK_VERSION = "0.9.11";
 
 export function normalizeBackendIdentity(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -45,4 +45,3 @@ export async function requestHostBuildIdentity(dependencies = {}) {
   const invokeImpl = dependencies.invokeImpl || invoke;
   return validateBuildIdentity(await invokeImpl("build_identity"));
 }
-

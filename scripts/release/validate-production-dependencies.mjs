@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const REPOSITORY = resolve(dirname(SCRIPT_PATH), "..", "..");
 const FRONTEND = join(REPOSITORY, "frontend");
-const EXPECTED_VERSION = "0.9.10";
+const EXPECTED_VERSION = "0.9.11";
 const EXPECTED_POSTCSS_OVERRIDE = "8.5.18";
 const EXACT_SEMVER = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 
@@ -84,4 +84,3 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(SCRIPT_PATH)) {
     process.exitCode = 1;
   }
 }
-

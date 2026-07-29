@@ -4,7 +4,7 @@ import test from "node:test";
 import { createBuildIdentity } from "./buildIdentityContract.js";
 import { normalizeBackendIdentity, reconcileRuntimeIdentity } from "./runtimeIdentity.js";
 
-const VERSION = "0.9.10";
+const VERSION = "0.9.11";
 const COMMIT = "a".repeat(40);
 
 function internalIdentity(overrides = {}) {
@@ -77,4 +77,3 @@ test("backend identity rejects malformed or excessive identity shapes", () => {
     component: "owned-backend",
   }), /version is invalid/);
 });
-

@@ -1,3 +1,15 @@
+# Glacial 0.9.11 Installed Privacy and Failure-Recovery Acceptance
+
+Glacial 0.9.11 records installed-runtime privacy-sink, startup-failure, and state-recovery acceptance against an unsigned internal Windows installer. It is not a public release candidate or stable release, and the repository remains `NOT READY`.
+
+## Installed acceptance scope
+
+- Exercises the real installed Tauri/WebView2 application and its owned backend against a disposable hostile project using synthetic credential, path, markup, control-character, and error canaries.
+- Inspects SQLite, application state, logs, visible diagnostics, reports, clipboard, downloads, the Remediation Brief and Package, generated root `AGENTS.md`, and temporary and backup files while retaining bounded useful evidence.
+- Exercises safe startup and state-interruption failures with process cleanup, database integrity, restoration, and successful retry evidence.
+- Retains physical power-loss and low-level filesystem corruption as unproven boundaries and leaves `V1-SEC-007` failed because G054 failed before discovery and G055 was cancelled before discovery.
+- Creates no Deep Security Scan, public signer configuration, release candidate, tag, GitHub Release, or publication.
+
 # Glacial 0.9.10 Runtime Identity and Signer Readiness
 
 Glacial 0.9.10 adds bounded runtime/build identity, exact direct production dependency declarations, and a preflight-only public-signer evaluation path. It is an unsigned internal pre-v1 evidence build, not a public release candidate or stable release, and the repository remains `NOT READY`.
