@@ -6,6 +6,8 @@ Glacial 0.9.11 records installed-runtime privacy-sink, startup-failure, and stat
 
 - Exercises the real installed Tauri/WebView2 application and its owned backend against a disposable hostile project using synthetic credential, path, markup, control-character, and error canaries.
 - Inspects SQLite, application state, logs, visible diagnostics, reports, clipboard, downloads, the Remediation Brief and Package, generated root `AGENTS.md`, and temporary and backup files while retaining bounded useful evidence.
+- Routes sequential installed report, brief, and package exports through one bounded native Downloads writer with allowlisted generated names, same-directory temporary publication, and no overwrite.
+- Disables WebView browser-level general autofill so project, review, and generated-instruction form values are not copied into WebView profile storage.
 - Exercises safe startup and state-interruption failures with process cleanup, database integrity, restoration, and successful retry evidence.
 - Retains physical power-loss and low-level filesystem corruption as unproven boundaries and leaves `V1-SEC-007` failed because G054 failed before discovery and G055 was cancelled before discovery.
 - Creates no Deep Security Scan, public signer configuration, release candidate, tag, GitHub Release, or publication.

@@ -7,6 +7,8 @@ CHANGELOG_ENTRIES = [
         "title": "Installed privacy and failure-recovery acceptance",
         "changes": [
             "Exercised the installed Tauri/WebView2 application against a disposable hostile project and inspected its owned database, state, logs, exports, generated instructions, clipboard, downloads, packages, and temporary outputs.",
+            "Routed repeated installed report, brief, and package exports through one bounded native Downloads writer with allowlisted generated names and no overwrite.",
+            "Disabled WebView browser-level general autofill so synthetic project and review form values are not copied into the browser profile database.",
             "Accepted safe startup-failure and interrupted-state variants with bounded user-facing errors, owned-process cleanup, SQLite integrity checks, restoration, and normal-startup recovery.",
             "Kept physical power-loss and low-level filesystem corruption outside simulated fault claims, retained the failed deep-security gate, and produced no public candidate, signing, tag, release, or publication.",
         ],

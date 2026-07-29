@@ -8,6 +8,7 @@ import {
   normalizeActivityPage,
 } from "./activity.js";
 import { requestApi } from "./apiTransport.js";
+import { saveExportBlob } from "./downloads.js";
 import {
   dependencyStatusDescription,
   dependencyStatusLabel,
@@ -522,12 +523,18 @@ export function App() {
     }
   }
 
-  function downloadRemediationBrief() {
+  async function downloadRemediationBrief() {
     const data = remediationBrief.data;
     if (!data?.markdown) return;
     try {
-      exportMarkdown(data.markdown, safeRemediationBriefFileName(data.fileName, data.scanId));
-      setRemediationBrief((current) => ({ ...current, status: "Brief download started." }));
+      const result = await exportMarkdown(
+        data.markdown,
+        safeRemediationBriefFileName(data.fileName, data.scanId),
+      );
+      setRemediationBrief((current) => ({
+        ...current,
+        status: result.status === "saved" ? "Brief saved to Downloads." : "Brief download started.",
+      }));
     } catch {
       setRemediationBrief((current) => ({ ...current, status: "Could not download the brief." }));
     }
@@ -577,13 +584,13 @@ export function App() {
       }
       const packageSha256 = validateStructuredDigest(result?.sha256, "sha256");
       const bytes = decodeBase64(result.packageBase64);
-      exportBlob(
+      const download = await exportBlob(
         new Blob([bytes], { type: "application/zip" }),
         safeRemediationPackageFileName(result.fileName, data.scanId),
       );
       setRemediationBrief((current) => ({
         ...current,
-        status: `Package download started. SHA-256: ${packageSha256}`,
+        status: `${download.status === "saved" ? "Package saved to Downloads." : "Package download started."} SHA-256: ${packageSha256}`,
       }));
     } catch (error) {
       if (remediationPackageRequestRef.current !== packageRequestId) return;
@@ -1800,6 +1807,16 @@ export function App() {
     }
   }
 
+  async function downloadScanReport() {
+    if (!displayedReportMarkdown) return;
+    try {
+      const result = await exportScanReport(displayedReportMarkdown);
+      setMessage(result.status === "saved" ? "Report saved to Downloads." : "Report download started.");
+    } catch {
+      setMessage("Could not download the report.");
+    }
+  }
+
   return (
     <main className="app-shell">
       <aside className="sidebar">
@@ -1873,7 +1890,7 @@ export function App() {
             <div className="topbar-actions">
               {selectedSection !== "review" ? (
                 <>
-                  <button type="button" className="secondary-button" onClick={() => exportScanReport(displayedReportMarkdown)} disabled={!displayedReportMarkdown}>
+                  <button type="button" className="secondary-button" onClick={downloadScanReport} disabled={!displayedReportMarkdown}>
                     Export Report
                   </button>
                   <button type="button" className="secondary-button" onClick={copyReportMarkdown} disabled={!displayedReportMarkdown}>
@@ -1924,7 +1941,7 @@ export function App() {
                     isScanning={isScanning}
                     reportActionsDisabled={!displayedReportMarkdown}
                     runScanDisabled={!selectedPath || isScanning || selectedProject?.available === false}
-                    onExport={() => exportScanReport(displayedReportMarkdown)}
+                    onExport={downloadScanReport}
                     onCopy={copyReportMarkdown}
                     onRunScan={runScan}
                   />
@@ -4813,24 +4830,17 @@ function formatFindingTypeDelta(latestSummary = {}, previousSummary = {}) {
   return changes.length > 0 ? changes.join(", ") : "No finding-type changes";
 }
 
-function exportScanReport(content) {
-  exportMarkdown(content, "scan-report.md");
+async function exportScanReport(content) {
+  return exportMarkdown(content, "scan-report.md");
 }
 
-function exportMarkdown(content, fileName) {
+async function exportMarkdown(content, fileName) {
   const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
-  exportBlob(blob, fileName);
+  return exportBlob(blob, fileName);
 }
 
-function exportBlob(blob, fileName) {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = fileName;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
+async function exportBlob(blob, fileName) {
+  return saveExportBlob(blob, fileName);
 }
 
 function safeRemediationBriefFileName(value, scanId) {
