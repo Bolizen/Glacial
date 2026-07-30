@@ -2,8 +2,8 @@
   "schema_version": "1.0.0",
   "product": "Glacial",
   "audited_version": "0.9.11",
-  "audited_commit": "1d580221a1275aec5f355131028c9911e30c7191",
-  "generated_at_utc": "2026-07-28T16:50:24Z",
+  "audited_commit": "83d6a351c21228a1a397fe51a251f47b4550e6fe",
+  "generated_at_utc": "2026-07-29T05:51:43Z",
   "overall_verdict": "NOT READY",
   "scope_decision": "Glacial v1 supports only the installed Windows x64 NSIS edition; the retired portable edition does not close any installed lifecycle or release requirement.",
   "classification_changes": [
@@ -90,18 +90,30 @@
       "from": "PARTIAL",
       "to": "PASS",
       "reason": "G053 pins every direct frontend production dependency to the exact committed lock version, proves package/lock root parity and an unchanged normalized resolved graph, preserves PostCSS 8.5.18, and integrates the validator into clean release-source preflight."
+    },
+    {
+      "id": "V1-FS-006",
+      "from": "PARTIAL",
+      "to": "PASS",
+      "reason": "G056 repeats the hostile workflow in the exact installed Tauri/WebView2 edition and inspects SQLite, WebView state, logs, visible errors, clipboard, report, brief, package, generated AGENTS.md, downloads, and temporary outputs while retaining bounded safe evidence."
+    },
+    {
+      "id": "V1-DESKTOP-004",
+      "from": "PARTIAL",
+      "to": "PASS",
+      "reason": "G056 accepts eleven controlled installed startup failure/interruption variants plus normal retry with bounded errors, redacted logs, no orphan, no fixture console window, byte-identical database state, and exact sidecar restoration."
     }
   ],
   "status_counts": {
-    "PASS": 49,
-    "PARTIAL": 9,
+    "PASS": 51,
+    "PARTIAL": 7,
     "FAIL": 3,
     "UNKNOWN": 0,
     "NOT_APPLICABLE": 0
   },
   "priority_counts": {
     "P0": 0,
-    "P1": 12,
+    "P1": 10,
     "P2": 0,
     "P3": 0
   },
@@ -432,9 +444,9 @@
     {
       "id": "V1-FS-006",
       "area": "Filesystem and project safety",
-      "status": "PARTIAL",
-      "priority": "P1",
-      "summary": "The cross-surface privacy boundary is inventoried and enforced, but native installed-WebView readback remains incomplete.",
+      "status": "PASS",
+      "priority": null,
+      "summary": "The cross-surface privacy boundary is enforced and accepted in the exact installed Tauri/WebView2 edition.",
       "evidence": [
         "docs/release/data-privacy-boundary.md field-level sink inventory",
         "backend/app/privacy.py persistence and disclosure controls",
@@ -443,14 +455,12 @@
         "scripts/desktop/windows-signing.mjs build/release diagnostic and path controls",
         "backend/tests/test_privacy_boundary.py hostile persistence/export inspection",
         "frontend, Rust, and Node hostile disclosure tests",
-        "G048 development Reports computer-use inspection"
+        "docs/release/g056-installed-privacy-failure-recovery.md exact installed profile, SQLite, log, UI, clipboard, export, package, generated-file, download, and temporary-output inspection"
       ],
-      "gap": "The native installed Tauri WebView and its real installed app-data, SQLite, startup-log, download/clipboard-history, and temporary-output surfaces were not inspected with the hostile fixture.",
-      "recommended_remediation": "Repeat the bounded hostile workflow against an internal installed candidate and search those exact native surfaces without expanding into lifecycle acceptance.",
+      "gap": "",
+      "recommended_remediation": "",
       "closure_evidence": [
-        "Native installed application-state, database, and startup-log readback.",
-        "Installed report, download, clipboard, package, generated-file, and temporary-output canary search.",
-        "Documented safe fields retained across every inspected native sink."
+        "Retain the hostile source tests and repeat the exact installed sink matrix when a frozen public candidate exists or a sink boundary changes."
       ],
       "waiver_permitted": false
     },
@@ -478,16 +488,17 @@
       "area": "Data integrity and state lifecycle",
       "status": "PARTIAL",
       "priority": "P1",
-      "summary": "Migration/reset rollback, integrity, and cleanup are tested, including a process-boundary installed reset interruption; OS power-loss and lower-level filesystem faults remain unaccepted.",
+      "summary": "Migration/reset rollback, integrity, cleanup, installed process interruption, and malformed-state fail-closed behavior are accepted; physical power-loss and low-level platform faults remain unaccepted.",
       "evidence": [
         "backend/tests/test_database_lifecycle.py integrity, rollback, and retry recovery",
         "backend/tests/test_agents.py failure cleanup",
         "frontend/src-tauri/src/backend.rs startup cleanup",
         "docs/release/installed-lifecycle-evidence.md predecessor cleanup and post-upgrade/reset integrity",
-        "docs/release/g050-installed-lifecycle-acceptance.md interruption after verified recovery-backup publication with unchanged current state, successful retry, and SQLite integrity"
+        "docs/release/g050-installed-lifecycle-acceptance.md interruption after verified recovery-backup publication with unchanged current state, successful retry, and SQLite integrity",
+        "docs/release/g056-installed-privacy-failure-recovery.md 74 ms interrupted-start cleanup, byte-identical retry, malformed-database fail-closed preservation, exact restoration, and integrity readback"
       ],
-      "gap": "The process-boundary case does not prove recovery after OS power loss, low-level filesystem interruption, disk full, antivirus interference, or filesystem corruption.",
-      "recommended_remediation": "Retain the focused interruption evidence and execute the remaining declared fault classes where safely practical against disposable installed state.",
+      "gap": "Controlled process interruption and source-level disk-full/lock/write faults do not prove recovery after physical OS power loss, kernel/filesystem crash timing, real media failure, or antivirus filter-driver interference.",
+      "recommended_remediation": "Retain the focused interruption evidence and execute the remaining physical/platform fault classes only in an isolated environment where they can be induced without risking user data.",
       "closure_evidence": [
         "Dated OS/filesystem interruption evidence with SQLite integrity and conservative recovery/readback."
       ],
@@ -748,21 +759,20 @@
     {
       "id": "V1-DESKTOP-004",
       "area": "Desktop application lifecycle",
-      "status": "PARTIAL",
-      "priority": "P1",
-      "summary": "Startup failures are handled in source and G050 accepts a real missing-sidecar failure/recovery, but the remaining declared failure variants are unproven.",
+      "status": "PASS",
+      "priority": null,
+      "summary": "Installed startup crash, sidecar, message, timeout, health, directory, diagnostic, and interruption failures are bounded, actionable, and recover cleanly.",
       "evidence": [
         "frontend/src-tauri/src/backend.rs StartupError paths and bounded diagnostics",
         "frontend/src-tauri/src/main.rs startup-error URL",
         "frontend/public/startup-error.js inert textContent rendering",
-        "docs/release/g050-installed-lifecycle-acceptance.md bounded missing-sidecar error, unchanged database, zero owned backend, restored sidecar hash, and successful recovery"
+        "docs/release/g050-installed-lifecycle-acceptance.md bounded missing-sidecar error, unchanged database, zero owned backend, restored sidecar hash, and successful recovery",
+        "docs/release/g056-installed-privacy-failure-recovery.md eleven installed failure/interruption variants, redacted log, no console window, no orphan, exact resource restoration, and normal retry"
       ],
-      "gap": "Crash, malformed startup message, unavailable data directory, and interrupted-start variants have not all received installed acceptance.",
-      "recommended_remediation": "Exercise the remaining safe synthetic startup failures without weakening Windows controls.",
+      "gap": "",
+      "recommended_remediation": "",
       "closure_evidence": [
-        "Error screenshots.",
-        "Redacted log readback.",
-        "Clean process and resource state."
+        "Repeat the bounded matrix when backend-supervisor, startup-error, path-resolution, or containment controls change."
       ],
       "waiver_permitted": false
     },
@@ -935,18 +945,19 @@
       "area": "Security and privacy posture",
       "status": "FAIL",
       "priority": "P1",
-      "summary": "The mandatory clean pre-RC repository-wide Codex Security Deep Security Scan and reportable-finding closure have not occurred.",
+      "summary": "The mandatory clean pre-RC repository-wide Codex Security Deep Security Scan and reportable-finding closure have not occurred; G054 failed before discovery and G055 was cancelled before discovery.",
       "evidence": [
         "docs/release/v1.0-readiness-contract.md permanent V1-SEC-007 gate",
-        "docs/release/v1.0-remediation-sequence.md G054 Deep Security Scan and G055 closure handoffs",
-        "G048 explicitly did not run a Deep Security Scan"
+        "docs/release/v1.0-remediation-sequence.md failed G054, cancelled G055, and mandatory fresh G057/G058 security handoffs",
+        "G048 explicitly did not run a Deep Security Scan",
+        "G054 worker spawn failed with EPERM before discovery; G055 was cancelled before discovery; neither produced a canonical finding count or security artifact"
       ],
-      "gap": "No canonical G054 threat model, repeated discovery, coverage ledger, validation, attack-path/severity analysis, finding write-ups, hardening portfolio, generated report, or G055 remediation/closure evidence exists.",
-      "recommended_remediation": "Run G054 without repository edits, then close every reportable finding and material deferred surface through bounded G055 remediation with post-fix validation.",
+      "gap": "No canonical threat model, repeated discovery, coverage ledger, validation, attack-path/severity analysis, finding write-ups, hardening portfolio, generated report, or remediation/closure evidence exists. The failed/cancelled attempts are not a zero-finding result.",
+      "recommended_remediation": "Run a fresh no-edit G057 Deep Security Scan from clean aligned source, then close every reportable finding and material deferred surface through bounded G058 remediation with post-fix validation.",
       "closure_evidence": [
         "Exact clean pre-RC source commit and complete canonical Codex Security Deep Security Scan artifacts.",
         "Explicit deferred/incomplete coverage ledger.",
-        "Post-fix validation and attack-path closure for every reportable finding before G056."
+        "Post-fix validation and attack-path closure for every reportable finding before release-candidate construction."
       ],
       "waiver_permitted": false
     },

@@ -1,6 +1,6 @@
 # Glacial State Lifecycle and Recovery Policy
 
-Status: v1 policy baseline for Glacial 0.9.11. G049, G050, and G056 installed evidence is recorded in [installed-lifecycle-evidence.md](installed-lifecycle-evidence.md) and the G056 acceptance record. Public-candidate and final release acceptance remain separate.
+Status: v1 policy baseline for Glacial 0.9.11. G049/G050 installed evidence is recorded in [installed-lifecycle-evidence.md](installed-lifecycle-evidence.md), and current interruption/failure evidence is recorded in [G056 installed privacy-sink and failure-recovery closure](g056-installed-privacy-failure-recovery.md). Public-candidate and final release acceptance remain separate.
 
 ## Ownership boundary
 

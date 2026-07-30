@@ -152,10 +152,12 @@ const expectedClassificationChanges = [
   ["V1-UX-004", "UNKNOWN", "PASS"],
   ["V1-UX-005", "PARTIAL", "PASS"],
   ["V1-REL-001", "PARTIAL", "PASS"],
+  ["V1-FS-006", "PARTIAL", "PASS"],
+  ["V1-DESKTOP-004", "PARTIAL", "PASS"],
 ];
 const actualClassificationChanges = (snapshot.classification_changes ?? []).map(({ id, from, to }) => [id, from, to]);
 if (JSON.stringify(actualClassificationChanges) !== JSON.stringify(expectedClassificationChanges)) {
-  fail("G052 readiness classification changes are missing or incorrect");
+  fail("readiness classification changes are missing or incorrect");
 }
 
 const versionMatches = [...audit.matchAll(/^- Audited product version: `([^`]+)`$/gm)];

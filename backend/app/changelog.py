@@ -10,7 +10,8 @@ CHANGELOG_ENTRIES = [
             "Routed repeated installed report, brief, and package exports through one bounded native Downloads writer with allowlisted generated names and no overwrite.",
             "Disabled WebView browser-level general autofill so synthetic project and review form values are not copied into the browser profile database.",
             "Accepted safe startup-failure and interrupted-state variants with bounded user-facing errors, owned-process cleanup, SQLite integrity checks, restoration, and normal-startup recovery.",
-            "Kept physical power-loss and low-level filesystem corruption outside simulated fault claims, retained the failed deep-security gate, and produced no public candidate, signing, tag, release, or publication.",
+            "Kept physical power-loss and low-level filesystem corruption outside simulated fault claims; G054 failed before discovery and G055 was cancelled before discovery, so no Deep Security Scan result or finding count exists.",
+            "Produced no public candidate, signing, tag, release, publication, stable-readiness claim, or v1 authorization.",
         ],
     },
     {

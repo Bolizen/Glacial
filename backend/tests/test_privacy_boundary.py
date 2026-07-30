@@ -32,6 +32,7 @@ from app.schemas import (
     ProjectPathRequest,
     TrustProfileRequest,
 )
+from app.version import GLACIAL_VERSION
 
 
 FAKE_AWS_KEY = "AKIAIOSFODNN7EXAMPLE"
@@ -420,7 +421,7 @@ class PrivacyPersistenceAndExportTests(unittest.TestCase):
             project_name=hostile_text(),
             project_identity=str(self.project),
             scan=unreviewed_scan,
-            generator_version="0.9.7",
+            generator_version=GLACIAL_VERSION,
         )
         package = build_remediation_package(
             project_name=hostile_text(),

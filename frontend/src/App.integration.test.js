@@ -1339,6 +1339,7 @@ test("scan and copy success notices expire and are never persisted", async () =>
     const request = await fetchHarness.next("/api/scans", { method: "POST" });
     const complete = withCompleteness(scan(22, "none", "2026-07-11T12:22:00Z"), { complete: true });
     await finishScan(request, complete, [complete]);
+    await openReports();
     await click(buttonWithText("Copy Markdown"));
     const toastStack = document.querySelector(".notice-stack");
     assert.equal(toastStack.parentElement.classList.contains("workspace"), true);

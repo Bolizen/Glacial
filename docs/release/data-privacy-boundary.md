@@ -141,10 +141,30 @@ G048 completed a bounded development inspection, but not a native installed-WebV
 
 This inspection did not use the native installed Tauri WebView, real installed app-data/database/log directories, installed download/clipboard history, or an installed candidate's temporary files. It therefore does not satisfy the installed-inspection condition required to move `V1-FS-006` to `PASS`. Those exact surfaces remain the closure requirement. The result must not be interpreted as G050 lifecycle, reset, recovery, upgrade, uninstall, accessibility, clean-machine, signing, or release-candidate acceptance.
 
+## Installed G056 closure
+
+G056 completes the previously retained installed condition against exact clean
+implementation commit `83d6a351c21228a1a397fe51a251f47b4550e6fe` and an
+unsigned internal NSIS install. The native hostile workflow inspects real
+SQLite, WebView/application state, startup logs, visible UI/errors, report and
+brief clipboard/download forms, every package member, generated root
+`AGENTS.md`, non-overwriting Downloads behavior, and temporary outputs.
+
+All 12 canonical synthetic credential/host/environment/markup canary classes
+are absent across the final 289-file installed profile and every inspected
+export. Safe redaction markers, relative paths, scanner rules, counts,
+provenance, and package checksums remain. Two defects found during acceptance
+are corrected: repeated exports use one bounded atomic Tauri-native Downloads
+writer, and WebView general autofill is disabled so form values do not enter
+browser profile storage. Exact hashes, sink results, process observations, and
+limitations are recorded in
+[G056 installed privacy-sink and failure-recovery closure](g056-installed-privacy-failure-recovery.md).
+This evidence moves `V1-FS-006` to `PASS`.
+
 ## Remaining limitations
 
 - Secret recognition is deliberately layered and deterministic but cannot prove recognition of every future credential syntax. Accepted evidence remains bounded and sinks re-sanitize legacy values.
 - Production child-process inheritance is not yet reduced to a complete environment allowlist; the owned token/data-directory values are protected, no environment dump exists, and release/signing children already use minimal allowlists.
-- Exact installed state/WebView/log paths, ACLs, upgrade/reset/recovery/uninstall behavior, and forced-process cleanup remain G050/G057 work.
-- Public privacy/support/legal language is G051 work.
-- No release candidate, public signature, installer publication, tag, GitHub Release, or Codex Security Deep Security Scan is evidence for G048 or G049.
+- Installed state/WebView/log sink inspection closes in G056. Frozen public-candidate repetition, ACL/environment support breadth, and final release acceptance remain future work.
+- Public privacy/support/legal language closes in G051; final artifact notice readback and owner/legal sign-off remain separate.
+- No release candidate, public signature, installer publication, tag, GitHub Release, or completed Codex Security Deep Security Scan is evidence for G048, G049, or G056.
