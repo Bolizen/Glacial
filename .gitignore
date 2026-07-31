@@ -1,12 +1,29 @@
-backend/data/
-backend/.venv/
-frontend/node_modules/
-frontend/dist/
-frontend/src-tauri/target/
+# Build, dependency, and installer staging output
+.desktop-build/
+**/.desktop-build/
+node_modules/
+dist/
+build/
+target/
 frontend/src-tauri/gen/
 frontend/src-tauri/binaries/
-.desktop-build/
-*.pyc
+
+# Local Python environments and interpreter caches
+.venv/
+venv/
+*.py[cod]
 __pycache__/
 
+# Test and coverage output
+.pytest_cache/
+.coverage
+coverage/
+htmlcov/
+
+# Local application state and transient diagnostics
 .codex/
+backend/data/
+*.log
+*.tmp
+*.sqlite
+*.sqlite3
