@@ -710,8 +710,8 @@ test("release package commands and established version sources identify 0.9.12",
   assert.match(signingDocs, /Glacial v0\.9\.11 is intended/);
   assert.match(formatPolicy, /Glacial application version \| `0\.9\.11`/);
   assert.match(lifecyclePolicy, /Status: v1 policy baseline for Glacial 0\.9\.11\./);
-  assert.match(readinessAudit, /Audited product version: `0\.9\.11`/);
-  assert.equal(readinessSnapshot.audited_version, "0.9.11");
+  assert.match(readinessAudit, /Audited product version: `0\.9\.12`/);
+  assert.equal(readinessSnapshot.audited_version, "0.9.12");
 });
 
 test("candidate publication is failure-atomic and never overwrites existing candidates", () => {

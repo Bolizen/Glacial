@@ -137,6 +137,24 @@ const verdictMatches = [...audit.matchAll(/\*\*Overall verdict: (READY|CONDITION
 if (verdictMatches.length !== 1) fail(`expected exactly one Markdown overall verdict, found ${verdictMatches.length}`);
 if (verdictMatches[0][1] !== snapshot.overall_verdict) fail("Markdown and JSON verdicts differ");
 if (snapshot.overall_verdict !== "NOT READY") fail("current evidence requires NOT READY");
+const expectedStageDecisions = {
+  source_freeze: "AUTHORIZED",
+  internal_candidate: "AUTHORIZED",
+  public_release_candidate: "BLOCKED",
+  stable_publication: "BLOCKED",
+  release_authorization: "NONE",
+  next_handoff: "G066 — Glacial Frozen-Baseline Deep Security Scan and Closure",
+};
+if (JSON.stringify(snapshot.stage_decisions) !== JSON.stringify(expectedStageDecisions)) {
+  fail("G065 stage decisions are missing or incorrect");
+}
+for (const line of [
+  "**SOURCE FREEZE: AUTHORIZED.**",
+  "**INTERNAL CANDIDATE: AUTHORIZED.**",
+  "**PUBLIC RELEASE CANDIDATE: BLOCKED.**",
+  "**STABLE PUBLICATION: BLOCKED.**",
+  "**RELEASE AUTHORIZATION: NONE.**",
+]) if (!audit.includes(line)) fail(`Markdown lacks ${line}`);
 const expectedClassificationChanges = [
   ["V1-DATA-005", "PARTIAL", "PASS"],
   ["V1-DESKTOP-002", "PARTIAL", "PASS"],
@@ -154,6 +172,7 @@ const expectedClassificationChanges = [
   ["V1-REL-001", "PARTIAL", "PASS"],
   ["V1-FS-006", "PARTIAL", "PASS"],
   ["V1-DESKTOP-004", "PARTIAL", "PASS"],
+  ["V1-SEC-007", "FAIL", "PARTIAL"],
 ];
 const actualClassificationChanges = (snapshot.classification_changes ?? []).map(({ id, from, to }) => [id, from, to]);
 if (JSON.stringify(actualClassificationChanges) !== JSON.stringify(expectedClassificationChanges)) {
@@ -163,7 +182,7 @@ if (JSON.stringify(actualClassificationChanges) !== JSON.stringify(expectedClass
 const versionMatches = [...audit.matchAll(/^- Audited product version: `([^`]+)`$/gm)];
 if (versionMatches.length !== 1) fail(`expected one Markdown audited version, found ${versionMatches.length}`);
 if (versionMatches[0][1] !== snapshot.audited_version) fail("Markdown and JSON audited versions differ");
-if (snapshot.audited_version !== "0.9.11") fail(`expected audited version 0.9.11, found ${snapshot.audited_version}`);
+if (snapshot.audited_version !== "0.9.12") fail(`expected audited version 0.9.12, found ${snapshot.audited_version}`);
 
 const commitMatches = [...audit.matchAll(/^- Audited behavioral baseline commit: `([0-9a-f]{40})`$/gm)];
 if (commitMatches.length !== 1) fail(`expected one Markdown audited commit, found ${commitMatches.length}`);

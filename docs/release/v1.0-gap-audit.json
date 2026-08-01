@@ -1,11 +1,19 @@
 {
   "schema_version": "1.0.0",
   "product": "Glacial",
-  "audited_version": "0.9.11",
-  "audited_commit": "83d6a351c21228a1a397fe51a251f47b4550e6fe",
-  "generated_at_utc": "2026-07-29T05:51:43Z",
+  "audited_version": "0.9.12",
+  "audited_commit": "f1275a58849fc9309ffc8c900d98c97a4e964d53",
+  "generated_at_utc": "2026-08-01T14:56:40Z",
   "overall_verdict": "NOT READY",
   "scope_decision": "Glacial v1 supports only the installed Windows x64 NSIS edition; the retired portable edition does not close any installed lifecycle or release requirement.",
+  "stage_decisions": {
+    "source_freeze": "AUTHORIZED",
+    "internal_candidate": "AUTHORIZED",
+    "public_release_candidate": "BLOCKED",
+    "stable_publication": "BLOCKED",
+    "release_authorization": "NONE",
+    "next_handoff": "G066 — Glacial Frozen-Baseline Deep Security Scan and Closure"
+  },
   "classification_changes": [
     {
       "id": "V1-DATA-005",
@@ -102,12 +110,18 @@
       "from": "PARTIAL",
       "to": "PASS",
       "reason": "G056 accepts eleven controlled installed startup failure/interruption variants plus normal retry with bounded errors, redacted logs, no orphan, no fixture console window, byte-identical database state, and exact sidecar restoration."
+    },
+    {
+      "id": "V1-SEC-007",
+      "from": "FAIL",
+      "to": "PARTIAL",
+      "reason": "G060 produced a complete standard single-pass whole-repository threat model, coverage ledger, validation, attack-path analysis, canonical report, and three validated findings; G061 remediated all three and G062/G063 verified the affected and full backend test contracts. The permanent Deep Security Scan requirement remains incomplete because repeated independent discovery and post-fix deep-scan closure against the final pre-RC baseline have not occurred."
     }
   ],
   "status_counts": {
     "PASS": 51,
-    "PARTIAL": 7,
-    "FAIL": 3,
+    "PARTIAL": 8,
+    "FAIL": 2,
     "UNKNOWN": 0,
     "NOT_APPLICABLE": 0
   },
@@ -143,7 +157,7 @@
       "area": "Product identity and version integrity",
       "status": "PASS",
       "priority": null,
-      "summary": "Authoritative source versions agree on 0.9.11 and are machine-validated.",
+      "summary": "Authoritative source versions agree on 0.9.12 and are machine-validated.",
       "evidence": [
         "frontend/package.json and package-lock.json",
         "frontend/src-tauri/tauri.conf.json, Cargo.toml, and Cargo.lock",
@@ -215,11 +229,11 @@
       "area": "Product identity and version integrity",
       "status": "PASS",
       "priority": null,
-      "summary": "Documentation identifies 0.9.11 as a bounded pre-v1 installed privacy and failure-recovery milestone and does not imply security closure, a public release candidate, stable status, or v1 authorization.",
+      "summary": "Documentation identifies 0.9.12 as a bounded pre-v1 security-remediation milestone and does not imply Deep Security Scan closure, a public release candidate, stable status, or v1 authorization.",
       "evidence": [
         "README.md Current Status",
-        "RELEASE_NOTES.md 0.9.11 entry",
-        "backend/app/changelog.py 0.9.11 entry",
+        "RELEASE_NOTES.md 0.9.12 entry",
+        "backend/app/changelog.py 0.9.12 entry",
         "docs/release/v1.0-gap-audit.md NOT READY verdict"
       ],
       "gap": "",
@@ -318,6 +332,7 @@
         "backend/app/database.py legacy unknown handling",
         "backend/tests/test_scanner.py",
         "backend/tests/test_scan_completeness.py",
+        "G060 validated scanner coverage findings and G061-G062 remediation/verification",
         "SECURITY.md"
       ],
       "gap": "",
@@ -631,7 +646,8 @@
         "docs/release/v1.0-owner-decisions.md V1-DEC-001",
         "backend/app/remediation_brief.py MAX_REMEDIATION_FINDINGS",
         "Brief and package included/unresolved/omitted metadata",
-        "backend/tests/test_remediation_brief.py 99, 100, 101, and mixed-severity cap matrix"
+        "backend/tests/test_remediation_brief.py 99, 100, 101, and mixed-severity cap matrix",
+        "G063 authoritative 0.9.12 cap-boundary and complete backend-suite closure"
       ],
       "gap": "",
       "recommended_remediation": "",
@@ -649,7 +665,8 @@
       "evidence": [
         "backend/app/remediation_package.py fixed member and ZIP metadata",
         "backend/tests/test_remediation_brief.py deterministic/checksum tests",
-        "G043 equal download SHA-256 values"
+        "G043 equal download SHA-256 values",
+        "G063 checksum verification across every 0.9.12 cap case"
       ],
       "gap": "",
       "recommended_remediation": "",
@@ -845,6 +862,7 @@
         "backend/app/privacy.py central secret, path, control, excerpt, exception, and recursive scan sanitization",
         "frontend/src/privacy.js disclosure-sink sanitization",
         "backend/app/dependency_trust.py selector sanitization",
+        "G060 low-severity VCS-selector finding and G061-G062 persistence-bound remediation/verification",
         "backend/app/remediation_brief.py relative paths and bounded evidence",
         "scripts/desktop/windows-signing.mjs sanitized build/release diagnostics",
         "Hostile Python, frontend, Rust, and Node targeted tests"
@@ -943,17 +961,19 @@
     {
       "id": "V1-SEC-007",
       "area": "Security and privacy posture",
-      "status": "FAIL",
+      "status": "PARTIAL",
       "priority": "P1",
-      "summary": "The mandatory clean pre-RC repository-wide Codex Security Deep Security Scan and reportable-finding closure have not occurred; G054 failed before discovery and G055 was cancelled before discovery.",
+      "summary": "A complete standard whole-repository security scan found three validated issues and all three are remediated and verified, but the permanent repeated-discovery Deep Security Scan gate remains incomplete on the final pre-RC baseline.",
       "evidence": [
         "docs/release/v1.0-readiness-contract.md permanent V1-SEC-007 gate",
-        "docs/release/v1.0-remediation-sequence.md failed G054, cancelled G055, and mandatory fresh G057/G058 security handoffs",
-        "G048 explicitly did not run a Deep Security Scan",
-        "G054 worker spawn failed with EPERM before discovery; G055 was cancelled before discovery; neither produced a canonical finding count or security artifact"
+        "G060 standard single-pass scan at 8fd11897dfb80b7dc594a36738e3a0716da3a663: 342/342 tracked files accounted for, complete coverage, threat model, 4 candidates, 3 validated findings (1 medium, 2 low), attack paths, canonical report and SARIF",
+        "G061 remediation commit 0e868a391a546250093ffb65e5750023cadedd93 closes all three validated findings",
+        "G062 exact reproductions, 129-test affected backend surface, 55-test affected frontend surface, targeted integration, and production build passed",
+        "G063 complete backend suite: 226 passed, 0 failed, 0 errors, 3 documented platform skips",
+        "G057 failed before discovery and G059 was cancelled before discovery; neither is a Deep Security Scan result"
       ],
-      "gap": "No canonical threat model, repeated discovery, coverage ledger, validation, attack-path/severity analysis, finding write-ups, hardening portfolio, generated report, or remediation/closure evidence exists. The failed/cancelled attempts are not a zero-finding result.",
-      "recommended_remediation": "Run a fresh no-edit G057 Deep Security Scan from clean aligned source, then close every reportable finding and material deferred surface through bounded G058 remediation with post-fix validation.",
+      "gap": "G060 was explicitly standard and single-pass, not the contract-required Deep Security Scan with repeated independent discovery. It predates the G061 remediation and G063 final test commit, and no post-fix deep-scan canonical closure or hardening portfolio exists for f1275a58849fc9309ffc8c900d98c97a4e964d53.",
+      "recommended_remediation": "Run one fresh no-edit repository-wide Deep Security Scan with repeated independent discovery against the frozen f1275a58849fc9309ffc8c900d98c97a4e964d53 behavioral baseline, then validate and close any new reportable finding before public release-candidate construction.",
       "closure_evidence": [
         "Exact clean pre-RC source commit and complete canonical Codex Security Deep Security Scan artifacts.",
         "Explicit deferred/incomplete coverage ledger.",
