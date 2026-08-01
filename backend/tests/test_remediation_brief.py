@@ -20,6 +20,7 @@ from app.finding_reviews import finding_fingerprint
 from app.remediation_brief import MAX_REMEDIATION_FINDINGS, build_remediation_snapshot
 from app.remediation_package import PACKAGE_MEMBERS, build_remediation_package
 from app.schemas import RemediationBriefRequest, RemediationPackageRequest
+from app.version import GLACIAL_VERSION
 
 
 class RemediationBriefTests(unittest.TestCase):
@@ -341,7 +342,7 @@ class RemediationBriefTests(unittest.TestCase):
                 snapshot = build_remediation_snapshot(
                     project_name="Cap boundary",
                     project_identity="cap-boundary-project",
-                    generator_version="0.9.7",
+                    generator_version=GLACIAL_VERSION,
                     scan=scan,
                 )
                 brief = snapshot["brief"]
@@ -384,6 +385,10 @@ class RemediationBriefTests(unittest.TestCase):
                 with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
                     findings_json = json.loads(archive.read("findings.json"))
                     manifest = json.loads(archive.read("manifest.json"))
+                    checksums = archive.read("CHECKSUMS.sha256").decode("ascii").splitlines()
+                    for line in checksums:
+                        digest, name = line.split("  ", 1)
+                        self.assertEqual(digest, hashlib.sha256(archive.read(name)).hexdigest())
                 self.assertEqual(
                     [finding["affected_path"] for finding in findings_json["findings"]],
                     expected_paths,

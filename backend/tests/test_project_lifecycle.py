@@ -289,7 +289,13 @@ class ProjectLifecycleTests(unittest.TestCase):
             "expectedLockfiles": ["package-lock.json"],
         })
         self.assertEqual(updated["riskTolerance"], "normal")
-        self.assertEqual(main.get_trust_profile(str(self.project)), updated)
+        self.assertTrue(updated["activity_recorded"])
+        retrieved = main.get_trust_profile(str(self.project))
+        self.assertNotIn("activity_recorded", retrieved)
+        self.assertEqual(
+            retrieved,
+            {key: value for key, value in updated.items() if key != "activity_recorded"},
+        )
 
         with database.get_connection() as connection:
             stored = json.loads(connection.execute(
