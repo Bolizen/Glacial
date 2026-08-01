@@ -18,6 +18,8 @@ COMPLETENESS_COUNT_FIELDS = (
     "unsafePathCount",
     "dependencyAnalysisFailureCount",
     "policyExcludedFileCount",
+    "builtInExcludedDirectoryCount",
+    "unsupportedEncodingFileCount",
     "resourceBudgetExceededCount",
 )
 
@@ -530,6 +532,7 @@ def _coverage_snapshot(row: Any) -> dict[str, Any] | None:
         return None
     reviewed_paths = metadata.get("reviewedFiles")
     ignored_paths = metadata.get("ignoredFiles")
+    built_in_excluded_paths = metadata.get("builtInExcludedDirectories", [])
     if (
         not isinstance(reviewed_paths, list)
         or any(not isinstance(item, str) for item in reviewed_paths)
@@ -537,6 +540,9 @@ def _coverage_snapshot(row: Any) -> dict[str, Any] | None:
         or not isinstance(ignored_paths, list)
         or any(not isinstance(item, str) for item in ignored_paths)
         or len(ignored_paths) != ignored
+        or not isinstance(built_in_excluded_paths, list)
+        or any(not isinstance(item, str) for item in built_in_excluded_paths)
+        or len(built_in_excluded_paths) > counts["builtInExcludedDirectoryCount"]
     ):
         return None
     return {
@@ -547,11 +553,13 @@ def _coverage_snapshot(row: Any) -> dict[str, Any] | None:
             counts["oversizedFileCount"]
             + counts["unsafePathCount"]
             + counts["policyExcludedFileCount"]
+            + counts["builtInExcludedDirectoryCount"]
         ),
         "failedFiles": (
             counts["traversalFailureCount"]
             + counts["fileInspectionFailureCount"]
             + counts["dependencyAnalysisFailureCount"]
+            + counts["unsupportedEncodingFileCount"]
         ),
     }
 
@@ -567,6 +575,7 @@ def _metadata_source(scan: dict[str, Any]) -> dict[str, Any]:
         "lockfiles": scan.get("lockfiles"),
         "lifecycleScripts": scan.get("lifecycleScripts"),
         "ignoredFiles": scan.get("ignoredFiles"),
+        "builtInExcludedDirectories": scan.get("builtInExcludedDirectories"),
         "reviewedFiles": scan.get("reviewedFiles"),
     }
     dependency = scan.get("dependencyTrust")
@@ -609,6 +618,7 @@ def _comparison_scan(row: Any) -> dict[str, Any]:
         "lockfiles": metadata.get("lockfiles"),
         "lifecycleScripts": metadata.get("lifecycleScripts"),
         "ignoredFiles": metadata.get("ignoredFiles"),
+        "builtInExcludedDirectories": metadata.get("builtInExcludedDirectories", []),
         "reviewedFiles": metadata.get("reviewedFiles"),
         "scanCompleteness": metadata.get("scanCompleteness"),
         "scanMetadataReliable": _raw_scan_metadata_reliable(metadata),
@@ -621,6 +631,9 @@ def _raw_scan_metadata_reliable(metadata: dict[str, Any]) -> bool:
         value = metadata.get(field)
         if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
             return False
+    built_in_exclusions = metadata.get("builtInExcludedDirectories", [])
+    if not isinstance(built_in_exclusions, list) or any(not isinstance(item, str) for item in built_in_exclusions):
+        return False
     scripts = metadata.get("lifecycleScripts")
     return isinstance(scripts, list) and all(
         isinstance(item, dict)

@@ -325,7 +325,7 @@ function requireAbsoluteFile(path, name, dryRun) {
 
 function validateReleaseId(value) {
   if (!value) return null;
-  if (!/^Glacial-0\.9\.11-[0-9a-f]{12}-[0-9]{8}T[0-9]{6}Z$/i.test(value)) throw new Error("Invalid internal release id.");
+  if (!/^Glacial-0\.9\.12-[0-9a-f]{12}-[0-9]{8}T[0-9]{6}Z$/i.test(value)) throw new Error("Invalid internal release id.");
   return value;
 }
 

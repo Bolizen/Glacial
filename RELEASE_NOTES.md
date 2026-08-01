@@ -1,3 +1,7 @@
+# Glacial 0.9.12 Scan Coverage and Metadata Remediation
+
+Glacial 0.9.12 fixes three validated scanner defects: built-in directory exclusions now make coverage explicitly incomplete, malformed UTF-8 files are not counted as reviewed, and raw Node VCS shorthand selectors are removed from persisted dependency metadata. This focused remediation does not authorize Glacial 1.0 or establish release readiness.
+
 # Glacial 0.9.11 Installed Privacy and Failure-Recovery Acceptance
 
 Glacial 0.9.11 records installed-runtime privacy-sink, startup-failure, and state-recovery acceptance against an unsigned internal Windows installer. It is not a public release candidate or stable release, and the repository remains `NOT READY`.

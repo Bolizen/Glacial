@@ -112,6 +112,8 @@ function coverageEvidence(scan) {
     "unsafePathCount",
     "dependencyAnalysisFailureCount",
     "policyExcludedFileCount",
+    "builtInExcludedDirectoryCount",
+    "unsupportedEncodingFileCount",
     "resourceBudgetExceededCount",
   ];
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -540,6 +542,8 @@ function coverageExamples(value) {
     unsafePathCount: "unsafe paths",
     dependencyAnalysisFailureCount: "dependency-analysis failures",
     policyExcludedFileCount: "policy exclusions",
+    builtInExcludedDirectoryCount: "built-in directory exclusions",
+    unsupportedEncodingFileCount: "unsupported UTF-8 files",
     resourceBudgetExceededCount: "resource budget limits",
   };
   return Object.entries(labels)

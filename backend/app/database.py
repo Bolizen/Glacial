@@ -129,6 +129,7 @@ def row_to_scan(row: sqlite3.Row) -> dict[str, Any]:
         "lifecycleScripts": _metadata_list(metadata, "lifecycleScripts"),
         "secretFiles": _metadata_list(metadata, "secretFiles"),
         "ignoredFiles": _metadata_list(metadata, "ignoredFiles"),
+        "builtInExcludedDirectories": _metadata_list(metadata, "builtInExcludedDirectories"),
         "reviewedFiles": _metadata_list(metadata, "reviewedFiles"),
         "zone": str(metadata.get("zone") or "Unknown"),
         "scanCompleteness": _scan_completeness(metadata),
@@ -216,6 +217,8 @@ def _scan_completeness(metadata: dict[str, Any]) -> dict[str, Any] | None:
         "unsafePathCount",
         "dependencyAnalysisFailureCount",
         "policyExcludedFileCount",
+        "builtInExcludedDirectoryCount",
+        "unsupportedEncodingFileCount",
         "resourceBudgetExceededCount",
     )
     counts = {
@@ -227,6 +230,10 @@ def _scan_completeness(metadata: dict[str, Any]) -> dict[str, Any] | None:
     counts["policyExcludedFileCount"] = max(
         counts["policyExcludedFileCount"],
         len(_metadata_list(metadata, "ignoredFiles")),
+    )
+    counts["builtInExcludedDirectoryCount"] = max(
+        counts["builtInExcludedDirectoryCount"],
+        len(_metadata_list(metadata, "builtInExcludedDirectories")),
     )
     issue_count = sum(counts.values())
     return {
@@ -247,6 +254,12 @@ def _scan_metadata_reliable(metadata: dict[str, Any]) -> bool:
         not isinstance(metadata.get(field), list)
         or any(not isinstance(item, str) for item in metadata[field])
         for field in string_list_fields
+    ):
+        return False
+
+    built_in_exclusions = metadata.get("builtInExcludedDirectories", [])
+    if not isinstance(built_in_exclusions, list) or any(
+        not isinstance(item, str) for item in built_in_exclusions
     ):
         return False
 

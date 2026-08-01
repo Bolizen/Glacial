@@ -11,6 +11,8 @@ const SCAN_COUNT_FIELDS = [
   "unsafePathCount",
   "dependencyAnalysisFailureCount",
   "policyExcludedFileCount",
+  "builtInExcludedDirectoryCount",
+  "unsupportedEncodingFileCount",
   "resourceBudgetExceededCount",
 ];
 

@@ -80,6 +80,8 @@ class ScanComparisonTests(unittest.TestCase):
                 "unsafePathCount": 0,
                 "dependencyAnalysisFailureCount": 0,
                 "policyExcludedFileCount": 1,
+                "builtInExcludedDirectoryCount": 0,
+                "unsupportedEncodingFileCount": 0,
                 "resourceBudgetExceededCount": 0,
                 "issueCount": issue_count + 1,
             },

@@ -2,6 +2,17 @@ from __future__ import annotations
 
 CHANGELOG_ENTRIES = [
     {
+        "version": "0.9.12",
+        "date": "2026-07-31",
+        "title": "Scan coverage and dependency metadata remediation",
+        "changes": [
+            "Records built-in directory exclusions as bounded, project-relative incomplete-coverage metadata instead of silently omitting them.",
+            "Rejects malformed UTF-8 during text inspection and reports the affected file as explicitly unreviewed.",
+            "Removes raw Node VCS shorthand selectors from persisted dependency locators while retaining opaque revision identity.",
+            "Keeps Glacial pre-v1 and does not independently authorize a 1.0 release.",
+        ],
+    },
+    {
         "version": "0.9.11",
         "date": "2026-07-29",
         "title": "Installed privacy and failure-recovery acceptance",

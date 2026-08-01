@@ -450,18 +450,27 @@ test("exports complete, incomplete, and unknown scan coverage conservatively", (
       oversizedFileCount: 3,
       unsafePathCount: 1,
       policyExcludedFileCount: 4,
+      builtInExcludedDirectoryCount: 6,
+      unsupportedEncodingFileCount: 7,
       resourceBudgetExceededCount: 5,
-      issueCount: 16,
+      issueCount: 29,
     },
-  }, emptyReport, null, { configured: false });
+  }, {
+    ...emptyReport,
+    builtInExcludedDirectories: ["build", "src/BuIlD"],
+  }, null, { configured: false });
   assert.match(incomplete, /^## Scan completeness$/m);
   assert.match(incomplete, /^Status: Incomplete$/m);
   assert.match(incomplete, /Directory traversal failures: 1/);
   assert.match(incomplete, /File inspection\/read failures: 2/);
   assert.match(incomplete, /Oversized files skipped: 3/);
   assert.match(incomplete, /Repository policy exclusions: 4/);
+  assert.match(incomplete, /Built-in directory exclusions: 6/);
+  assert.match(incomplete, /Unsupported UTF-8 files: 7/);
   assert.match(incomplete, /Scanner resource budgets exceeded: 5/);
-  assert.match(incomplete, /Total inspection issues: 16/);
+  assert.match(incomplete, /Total inspection issues: 29/);
+  assert.match(incomplete, /^- `build`$/m);
+  assert.match(incomplete, /^- `src\/BuIlD`$/m);
   assert.match(incomplete, /No manifests recorded in this scan; coverage incomplete\./);
   assert.match(incomplete, /No lockfiles recorded in this scan; coverage incomplete\./);
   assert.match(incomplete, /No package lifecycle scripts recorded in this scan; coverage incomplete\./);

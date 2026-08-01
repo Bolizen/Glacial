@@ -630,6 +630,8 @@ test("incomplete scan with no findings remains explicitly unverified", async () 
     oversizedFileCount: 1,
     unsafePathCount: 0,
     policyExcludedFileCount: 1,
+    builtInExcludedDirectoryCount: 0,
+    unsupportedEncodingFileCount: 0,
     resourceBudgetExceededCount: 1,
   };
   await renderApp([{
@@ -3105,7 +3107,7 @@ function defaultResponse(request) {
   }
 }
 
-function backendRuntimeIdentityFixture(version = "0.9.11") {
+function backendRuntimeIdentityFixture(version = "0.9.12") {
   return {
     schema_version: 1,
     product_name: "Glacial",
@@ -3359,6 +3361,8 @@ function withCompleteness(value, completeness) {
     unsafePathCount: completeness.unsafePathCount || 0,
     dependencyAnalysisFailureCount: completeness.dependencyAnalysisFailureCount || 0,
     policyExcludedFileCount: completeness.policyExcludedFileCount || 0,
+    builtInExcludedDirectoryCount: completeness.builtInExcludedDirectoryCount || 0,
+    unsupportedEncodingFileCount: completeness.unsupportedEncodingFileCount || 0,
     resourceBudgetExceededCount: completeness.resourceBudgetExceededCount || 0,
   };
   return {

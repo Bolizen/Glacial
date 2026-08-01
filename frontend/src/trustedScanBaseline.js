@@ -166,6 +166,8 @@ function validCompleteness(value) {
     "unsafePathCount",
     "dependencyAnalysisFailureCount",
     "policyExcludedFileCount",
+    "builtInExcludedDirectoryCount",
+    "unsupportedEncodingFileCount",
     "resourceBudgetExceededCount",
   ];
   if (fields.some((field) => !Number.isSafeInteger(value[field]) || value[field] < 0)) return false;

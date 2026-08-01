@@ -3431,6 +3431,7 @@ function ScanReport({ result, report, completionState, comparison, trustContext,
           <div className="scan-detail-toggles">
             <PathDetails title="Reviewed files" items={report.reviewedFiles} recordedCount={report.reviewedFileCount} emptyText="No reviewed files recorded for this scan." guidance={SCAN_GUIDANCE.reviewedFiles} />
             <PathDetails title="Ignored files" items={report.ignoredFiles} recordedCount={report.ignoredFileCount} emptyText="No files ignored by .glacialignore." guidance={SCAN_GUIDANCE.ignoredFiles} />
+            <PathDetails title="Built-in excluded directories" items={report.builtInExcludedDirectories} recordedCount={report.completeness.builtInExcludedDirectoryCount} emptyText="No built-in directory exclusions recorded." guidance="These directories were not traversed and make scan coverage incomplete." />
           </div>
         </>
       ) : null}
@@ -3566,6 +3567,8 @@ function ScanCompletenessSummary({ completeness, viewMode, isScanning, onRunScan
           <span>Unsafe paths skipped: {completeness.unsafePathCount}</span>
           <span>Dependency analysis failures: {completeness.dependencyAnalysisFailureCount}</span>
           <span>Repository policy exclusions: {completeness.policyExcludedFileCount}</span>
+          <span>Built-in directory exclusions: {completeness.builtInExcludedDirectoryCount}</span>
+          <span>Unsupported UTF-8 files: {completeness.unsupportedEncodingFileCount}</span>
           <span>Scanner resource budgets exceeded: {completeness.resourceBudgetExceededCount}</span>
           <span>Total issues: {completeness.issueCount}</span>
         </div>
@@ -4442,6 +4445,7 @@ function buildScanReport(result) {
     totalFindings: result?.findingCount ?? findings.length,
     reviewedFileCount,
     ignoredFileCount: result?.ignoredFileCount ?? ignoredFiles.length,
+    builtInExcludedDirectories: scanArray(result, "builtInExcludedDirectories"),
     reviewedFiles,
     manifests,
     lockfiles,

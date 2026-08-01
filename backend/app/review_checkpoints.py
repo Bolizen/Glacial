@@ -666,6 +666,8 @@ def _coverage_identity(row: Any) -> dict[str, Any] | None:
         "unsafePathCount",
         "dependencyAnalysisFailureCount",
         "policyExcludedFileCount",
+        "builtInExcludedDirectoryCount",
+        "unsupportedEncodingFileCount",
         "resourceBudgetExceededCount",
     )
     if any(
@@ -814,6 +816,9 @@ def _baseline_metadata_snapshot(row: Any) -> dict[str, Any] | None:
         for field in string_fields
     ):
         return None
+    built_in_exclusions = metadata.get("builtInExcludedDirectories", [])
+    if not isinstance(built_in_exclusions, list) or any(not isinstance(item, str) for item in built_in_exclusions):
+        return None
     scripts = metadata.get("lifecycleScripts")
     if (
         not isinstance(scripts, list)
@@ -827,6 +832,7 @@ def _baseline_metadata_snapshot(row: Any) -> dict[str, Any] | None:
         return None
     return {
         **{field: metadata[field] for field in string_fields},
+        "builtInExcludedDirectories": built_in_exclusions,
         "lifecycleScripts": scripts,
         "dependencyTrust": metadata.get("dependencyTrust"),
         "scanMetadataReliable": True,

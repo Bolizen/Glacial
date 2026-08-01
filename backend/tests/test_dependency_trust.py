@@ -602,6 +602,63 @@ class DependencyTrustPersistenceTests(unittest.TestCase):
             self.assertNotIn(secret, serialized)
         self.assertIn("packages.example", serialized)
 
+    def test_node_vcs_shorthand_selectors_are_sanitized_through_history(self) -> None:
+        specifications = {
+            "github-fragment": "github:owner/repository#selector-marker",
+            "gitlab-fragment": "gitlab:group/repository#token/like/path",
+            "bitbucket-query": "bitbucket:team/repository?access_token=query-marker",
+            "github-plain": "github:owner/plain",
+            "registry": "^1.2.3",
+            "url-vcs": "git+https://user:url-password@github.com/org/url.git?token=url-query#url-selector",
+            "scp-vcs": "git@github.com:org/scp.git#scp-selector",
+        }
+        (self.project / "package.json").write_text(
+            json.dumps({"dependencies": specifications}),
+            encoding="utf-8",
+        )
+        (self.project / "package-lock.json").write_text(
+            json.dumps({
+                "lockfileVersion": 3,
+                "packages": {
+                    "": {"dependencies": specifications},
+                    **{
+                        f"node_modules/{name}": {
+                            "version": specifications[name] if name == "github-fragment" else "0.0.0"
+                        }
+                        for name in specifications
+                    },
+                },
+            }),
+            encoding="utf-8",
+        )
+
+        current = main.run_scan(ProjectPathRequest(project_path=str(self.project)))
+        history = main.scan_history(str(self.project))["scans"][0]
+        entries = {
+            entry["name"]: entry
+            for entry in history["dependencyTrust"]["entries"]
+            if entry.get("direct") is True
+        }
+
+        self.assertEqual(entries["github-fragment"]["requestedSpecification"], "github:owner/repository")
+        self.assertEqual(entries["github-fragment"]["lockedVersion"], "github:owner/repository")
+        self.assertEqual(entries["gitlab-fragment"]["requestedSpecification"], "gitlab:group/repository")
+        self.assertEqual(entries["bitbucket-query"]["requestedSpecification"], "bitbucket:team/repository")
+        self.assertEqual(entries["github-plain"]["requestedSpecification"], "github:owner/plain")
+        self.assertEqual(entries["registry"]["requestedSpecification"], "^1.2.3")
+        self.assertEqual(entries["url-vcs"]["requestedSpecification"], "git+https://github.com/org/url.git")
+        self.assertEqual(entries["scp-vcs"]["requestedSpecification"], "vcs:github.com/org/scp.git")
+        for name in ("github-fragment", "gitlab-fragment", "bitbucket-query", "url-vcs", "scp-vcs"):
+            self.assertRegex(entries[name]["vcsRequestedRevision"], r"^ref:sha256:[0-9a-f]{64}$")
+        self.assertNotIn("vcsRequestedRevision", entries["github-plain"])
+
+        serialized = json.dumps({"current": current, "history": history}, sort_keys=True)
+        for secret in (
+            "selector-marker", "token/like/path", "access_token=query-marker",
+            "user", "url-password", "url-query", "url-selector", "scp-selector",
+        ):
+            self.assertNotIn(secret, serialized)
+
 
 if __name__ == "__main__":
     unittest.main()

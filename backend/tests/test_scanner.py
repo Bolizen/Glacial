@@ -352,9 +352,14 @@ class ScannerCompletenessTests(unittest.TestCase):
         self.assertEqual(finding["observed"], observed)
         return finding
 
-    def assert_package_json_failure(self, result: dict[str, object], reason: str) -> None:
+    def assert_package_json_failure(
+        self,
+        result: dict[str, object],
+        reason: str,
+        issue_field: str = "fileInspectionFailureCount",
+    ) -> None:
         self.assertFalse(result["scanCompleteness"]["complete"])
-        self.assertEqual(result["scanCompleteness"]["fileInspectionFailureCount"], 1)
+        self.assertEqual(result["scanCompleteness"][issue_field], 1)
         self.assertEqual(result["scanCompleteness"]["dependencyAnalysisFailureCount"], 0)
         self.assertEqual(result["dependencyTrust"]["status"], "malformed")
         self.assertIn("package.json", result["dependencyTrust"]["failedFiles"])
@@ -408,7 +413,12 @@ class ScannerCompletenessTests(unittest.TestCase):
 
         result = scan_project(self.project_path)
 
-        self.assert_package_json_failure(result, "invalid-utf8")
+        self.assert_package_json_failure(result, "invalid-utf8", "unsupportedEncodingFileCount")
+        self.assertTrue(any(
+            finding["type"] == "unsupported-text-encoding"
+            and finding["path"] == "package.json"
+            for finding in result["findings"]
+        ))
 
     def test_deeply_nested_package_json_is_explicitly_incomplete(self) -> None:
         depth = 5_000
@@ -458,9 +468,72 @@ class ScannerCompletenessTests(unittest.TestCase):
             "unsafePathCount": 0,
             "dependencyAnalysisFailureCount": 0,
             "policyExcludedFileCount": 0,
+            "builtInExcludedDirectoryCount": 0,
+            "unsupportedEncodingFileCount": 0,
             "resourceBudgetExceededCount": 0,
             "issueCount": 0,
         })
+
+    def test_builtin_directory_exclusions_are_bounded_visible_and_separate_from_policy(self) -> None:
+        for directory in ("build", "dist", "src/BuIlD"):
+            target = self.project_path / directory
+            target.mkdir(parents=True)
+            (target / "hidden.ps1").write_text("Invoke-Expression $payload", encoding="utf-8")
+        (self.project_path / ".glacialignore").write_text("ignored.txt\n", encoding="utf-8")
+        (self.project_path / "ignored.txt").write_text("ordinary", encoding="utf-8")
+
+        result = scan_project(self.project_path)
+
+        self.assertEqual(result["builtInExcludedDirectories"], ["build", "dist", "src/BuIlD"])
+        self.assertEqual(result["ignoredFiles"], ["ignored.txt"])
+        self.assertEqual(result["scanCompleteness"]["builtInExcludedDirectoryCount"], 3)
+        self.assertEqual(result["scanCompleteness"]["policyExcludedFileCount"], 1)
+        self.assertEqual(result["scanCompleteness"]["issueCount"], 4)
+        self.assertFalse(result["scanCompleteness"]["complete"])
+        self.assertFalse(any("hidden.ps1" in path for path in result["reviewedFiles"]))
+
+    def test_builtin_directory_records_respect_the_result_record_budget(self) -> None:
+        for directory in ("build", "dist", "node_modules"):
+            (self.project_path / directory).mkdir()
+
+        with patch.object(scanner, "MAX_SCAN_RESULT_RECORDS", 2):
+            result = scan_project(self.project_path)
+
+        self.assertEqual(result["builtInExcludedDirectories"], ["build", "dist"])
+        self.assertEqual(result["scanCompleteness"]["builtInExcludedDirectoryCount"], 3)
+        self.assertEqual(result["scanCompleteness"]["resourceBudgetExceededCount"], 1)
+        self.assertEqual(result["scanCompleteness"]["issueCount"], 4)
+        self.assert_resource_budget(result, "result-records", 2, 3)
+
+    def test_malformed_utf8_is_an_explicit_incomplete_coverage_gap(self) -> None:
+        payload = b"ordinary prefix\n\xffeval(untrusted)"
+        (self.project_path / "malformed.py").write_bytes(payload)
+
+        result = scan_project(self.project_path)
+
+        self.assertNotIn("malformed.py", result["reviewedFiles"])
+        self.assertEqual(result["scanCompleteness"]["unsupportedEncodingFileCount"], 1)
+        self.assertEqual(result["scanCompleteness"]["issueCount"], 1)
+        self.assertFalse(result["scanCompleteness"]["complete"])
+        finding = next(item for item in result["findings"] if item["type"] == "unsupported-text-encoding")
+        self.assertEqual(finding["path"], "malformed.py")
+        self.assertEqual(finding["bytesRead"], len(payload))
+        self.assertIn("could not be safely interpreted as UTF-8", finding["explanation"])
+        self.assertFalse(any(item["type"] == "suspicious-text-pattern" for item in result["findings"]))
+
+    def test_malformed_dependency_metadata_is_not_double_counted(self) -> None:
+        (self.project_path / "package.json").write_bytes(b'{"dependencies":{"bad":"1"}}\xff')
+
+        result = scan_project(self.project_path)
+
+        self.assertNotIn("package.json", result["reviewedFiles"])
+        self.assertEqual(result["scanCompleteness"]["unsupportedEncodingFileCount"], 1)
+        self.assertEqual(result["scanCompleteness"]["dependencyAnalysisFailureCount"], 0)
+        self.assertEqual(result["scanCompleteness"]["issueCount"], 1)
+        self.assertEqual(
+            sum(item["type"] == "unsupported-text-encoding" for item in result["findings"]),
+            1,
+        )
 
     def test_oversized_ignore_policy_is_rejected_before_content_allocation(self) -> None:
         ignore_file = self.project_path / ".glacialignore"

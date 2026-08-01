@@ -4,7 +4,7 @@ import test from "node:test";
 import { createBuildIdentity } from "./buildIdentityContract.js";
 import { normalizeBackendIdentity, reconcileRuntimeIdentity } from "./runtimeIdentity.js";
 
-const VERSION = "0.9.11";
+const VERSION = "0.9.12";
 const COMMIT = "a".repeat(40);
 
 function internalIdentity(overrides = {}) {

@@ -149,6 +149,8 @@ class DatabaseLifecycleTests(unittest.TestCase):
                             "unsafePathCount": 0,
                             "dependencyAnalysisFailureCount": 0,
                             "policyExcludedFileCount": 0,
+                            "builtInExcludedDirectoryCount": 0,
+                            "unsupportedEncodingFileCount": 0,
                             "resourceBudgetExceededCount": 0,
                             "issueCount": 0,
                         },

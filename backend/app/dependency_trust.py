@@ -366,9 +366,9 @@ class _AnalysisState:
                     )
                     continue
                 name = _normalize_node_name(raw_name)
-                spec = _sanitize_spec(raw_spec)
-                group_entries[name] = spec
                 source_type, source_host = _classify_node_spec(raw_spec)
+                spec = _sanitize_vcs_locator(raw_spec) if source_type == "vcs" else _sanitize_spec(raw_spec)
+                group_entries[name] = spec
                 entry = _entry(
                     "node", name, group, direct=True,
                     requestedSpecification=spec,
@@ -530,10 +530,10 @@ class _AnalysisState:
         group = _node_direct_group(name, self.node_lock_root_groups) if direct else "transitive"
         entry = _entry(
             "node", name, group, direct=direct,
-            lockedVersion=_safe_text(version, 200),
+            lockedVersion=_sanitize_vcs_locator(version) if source_type == "vcs" else _safe_text(version, 200),
             sourceType=source_type,
             sourceIdentifier=source_host,
-            vcsResolvedRevision=_vcs_resolved_identity(resolved) if source_type == "vcs" else "",
+            vcsResolvedRevision=_vcs_resolved_identity(resolved or version) if source_type == "vcs" else "",
             integrity=_safe_text(integrity, 300),
             integrityPresent=bool(integrity),
             installScriptIndicator=package.get("hasInstallScript") is True,
@@ -1670,6 +1670,9 @@ def _entry(ecosystem: str, name: str, group: str, *, direct: bool, **values: Any
         "installScriptIndicator": values.pop("installScriptIndicator", False) is True,
     }
     result.update({key: value for key, value in values.items() if value not in (None, "", [], {})})
+    if "requestedSpecification" in result:
+        sanitizer = _sanitize_vcs_locator if result["sourceType"] == "vcs" else _sanitize_spec
+        result["requestedSpecification"] = sanitizer(result["requestedSpecification"])
     if str(result.get("sourceIdentifier", "")).startswith("http:"):
         result["insecureHttp"] = True
     return _compact(result)
@@ -1695,8 +1698,9 @@ def _classify_node_spec(spec: str) -> tuple[str, str]:
 def _classify_resolved_source(resolved: str, version: str, *, link: bool) -> tuple[str, str]:
     if link:
         return "local", "linked package"
-    if resolved.startswith(("git+", "git://")):
-        return "vcs", _safe_url_host(resolved)
+    remote = resolved or version
+    if remote.lower().startswith(("git+", "git://", "github:", "gitlab:", "bitbucket:")) or re.match(r"^[^@\s]+@[^:\s]+:", remote):
+        return "vcs", _safe_url_host(remote)
     if resolved.startswith("http://"):
         return "url", _safe_url_host(resolved, include_scheme=True)
     if resolved.startswith("https://"):
@@ -1786,6 +1790,11 @@ def _sanitize_spec(value: Any) -> str:
     if "://" in text:
         return _sanitize_url(text)
     lower = text.lower()
+    shorthand_match = re.match(r"^(github|gitlab|bitbucket):(.+)$", text, re.IGNORECASE)
+    if shorthand_match:
+        provider = shorthand_match.group(1).lower()
+        locator = re.split(r"[?#]", shorthand_match.group(2), maxsplit=1)[0].lstrip("/")
+        return _safe_text(f"{provider}:{locator}", 500)
     if lower.startswith(("file:", "link:")):
         prefix, local = text.split(":", 1)
         return f"{prefix.lower()}:{_sanitize_local_spec(local)}"
@@ -1878,8 +1887,8 @@ def _vcs_url_revision_value(value: str) -> str:
 
 
 def _vcs_fragment_identity(selector: str, value: str) -> str:
-    fragment = value.split("#", 1)[1] if "#" in value else ""
-    return _vcs_selector_identity(selector, fragment)
+    suffix = re.split(r"[?#]", value, maxsplit=1)
+    return _vcs_selector_identity(selector, suffix[1] if len(suffix) == 2 else "")
 
 
 def _vcs_requested_url_identity(value: str) -> str:

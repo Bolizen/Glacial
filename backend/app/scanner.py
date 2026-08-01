@@ -108,6 +108,7 @@ def scan_project(project_path: Path, previous_dependency_trust: dict[str, Any] |
     lifecycle_scripts: list[dict[str, str]] = []
     secret_files: list[str] = []
     ignored_files: list[str] = []
+    built_in_excluded_directories: list[str] = []
     reviewed_files: list[str] = []
     issue_counts = {
         "traversalFailureCount": 0,
@@ -116,6 +117,8 @@ def scan_project(project_path: Path, previous_dependency_trust: dict[str, Any] |
         "unsafePathCount": 0,
         "dependencyAnalysisFailureCount": 0,
         "policyExcludedFileCount": 0,
+        "builtInExcludedDirectoryCount": 0,
+        "unsupportedEncodingFileCount": 0,
         "resourceBudgetExceededCount": 0,
     }
     dependency_inputs: list[tuple[Path, str]] = []
@@ -280,6 +283,13 @@ def scan_project(project_path: Path, previous_dependency_trust: dict[str, Any] |
                     issue_counts["unsafePathCount"] += 1
                 continue
             if dirname.lower() in SKIP_DIRS:
+                issue_counts["builtInExcludedDirectoryCount"] += 1
+                if not append_result_record(
+                    built_in_excluded_directories,
+                    relative_path,
+                    relative_path,
+                ):
+                    break
                 continue
             safe_dirs.append(dirname)
         if stop_traversal:
@@ -444,6 +454,7 @@ def scan_project(project_path: Path, previous_dependency_trust: dict[str, Any] |
         "lifecycleScripts": sorted(lifecycle_scripts, key=lambda script: (script["path"], script["script"])),
         "secretFiles": sorted(secret_files),
         "ignoredFiles": sorted(ignored_files),
+        "builtInExcludedDirectories": sorted(built_in_excluded_directories),
         "reviewedFiles": sorted(reviewed_files),
         "reviewedFileCount": len(reviewed_files),
         "zone": _infer_zone(project_path),
@@ -521,7 +532,19 @@ def _inspect_file_content(
             reason="content-size-limit",
         )], [], "oversizedFileCount", len(content))
 
-    text = content.decode("utf-8", errors="ignore")
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError:
+        return _ContentInspection([_inspection_finding(
+            relative_path,
+            "unsupported-text-encoding",
+            "medium",
+            "The file could not be safely interpreted as UTF-8 and therefore was not fully reviewed.",
+            "Convert the file to valid UTF-8 or review it manually before trusting scan coverage.",
+            operation="decode-file-content",
+            reason="invalid-utf8",
+            bytesRead=len(content),
+        )], [], "unsupportedEncodingFileCount", len(content))
     findings: list[dict[str, Any]] = _scan_text_patterns(text, relative_path)
     lifecycle_scripts: list[dict[str, str]] = []
     if not is_package_json:

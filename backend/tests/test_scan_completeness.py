@@ -78,6 +78,7 @@ class ScanCompletenessPersistenceTests(unittest.TestCase):
             "lifecycleScripts": [],
             "secretFiles": [],
             "ignoredFiles": [],
+            "builtInExcludedDirectories": ["build", "src/BuIlD"],
             "reviewedFiles": [],
             "reviewedFileCount": 0,
             "zone": "Unknown",
@@ -89,8 +90,10 @@ class ScanCompletenessPersistenceTests(unittest.TestCase):
                 "unsafePathCount": 0,
                 "dependencyAnalysisFailureCount": 0,
                 "policyExcludedFileCount": 2,
+                "builtInExcludedDirectoryCount": 2,
+                "unsupportedEncodingFileCount": 1,
                 "resourceBudgetExceededCount": 1,
-                "issueCount": 4,
+                "issueCount": 7,
             },
         }
         payload = ProjectPathRequest(project_path=str(self.project_path))
@@ -105,6 +108,7 @@ class ScanCompletenessPersistenceTests(unittest.TestCase):
             project = main.list_projects()["projects"][0]
 
         self.assertEqual(current["scanCompleteness"], scan_result["scanCompleteness"])
+        self.assertEqual(current["builtInExcludedDirectories"], ["build", "src/BuIlD"])
         self.assertTrue(current["scanMetadataReliable"])
         self.assertEqual(history[0]["scanCompleteness"], scan_result["scanCompleteness"])
         self.assertTrue(history[0]["scanMetadataReliable"])
@@ -202,6 +206,8 @@ class ScanCompletenessPersistenceTests(unittest.TestCase):
             "unsafePathCount": 0,
             "dependencyAnalysisFailureCount": 0,
             "policyExcludedFileCount": 1,
+            "builtInExcludedDirectoryCount": 0,
+            "unsupportedEncodingFileCount": 0,
             "resourceBudgetExceededCount": 0,
             "issueCount": 1,
         }

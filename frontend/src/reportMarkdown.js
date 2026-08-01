@@ -107,6 +107,8 @@ export function normalizeScanCompleteness(result) {
       unsafePathCount: 0,
       dependencyAnalysisFailureCount: 0,
       policyExcludedFileCount: 0,
+      builtInExcludedDirectoryCount: 0,
+      unsupportedEncodingFileCount: 0,
       resourceBudgetExceededCount: 0,
       issueCount: 0,
     };
@@ -117,6 +119,11 @@ export function normalizeScanCompleteness(result) {
     oversizedFileCount: nonNegativeCount(value.oversizedFileCount),
     unsafePathCount: nonNegativeCount(value.unsafePathCount),
     dependencyAnalysisFailureCount: nonNegativeCount(value.dependencyAnalysisFailureCount),
+    builtInExcludedDirectoryCount: Math.max(
+      nonNegativeCount(value.builtInExcludedDirectoryCount),
+      Array.isArray(result?.builtInExcludedDirectories) ? result.builtInExcludedDirectories.length : 0,
+    ),
+    unsupportedEncodingFileCount: nonNegativeCount(value.unsupportedEncodingFileCount),
     resourceBudgetExceededCount: nonNegativeCount(value.resourceBudgetExceededCount),
     policyExcludedFileCount: Math.max(
       nonNegativeCount(value.policyExcludedFileCount),
@@ -286,6 +293,11 @@ export function buildScanReportMarkdown(result, report, comparison, trustContext
     formatMarkdownGuidance(SCAN_GUIDANCE.ignoredFiles),
     "",
     formatPathMetadataList(report?.ignoredFiles, report?.ignoredFileCount, coverageAwareEmptyText(completeness, "No files ignored by .glacialignore.", "No ignored files recorded in this scan")),
+    "",
+    "## Built-in excluded directories",
+    "Listed directories were not traversed under the scanner's built-in policy.",
+    "",
+    formatMarkdownList(report?.builtInExcludedDirectories, "No built-in directory exclusions recorded."),
     "",
     "## Reviewed files",
     formatMarkdownGuidance(SCAN_GUIDANCE.reviewedFiles),
@@ -505,6 +517,8 @@ function formatScanCompleteness(completeness) {
     `- Unsafe linked or hardlinked paths skipped: ${completeness.unsafePathCount}`,
     `- Dependency analysis failures: ${completeness.dependencyAnalysisFailureCount}`,
     `- Repository policy exclusions: ${completeness.policyExcludedFileCount}`,
+    `- Built-in directory exclusions: ${completeness.builtInExcludedDirectoryCount}`,
+    `- Unsupported UTF-8 files: ${completeness.unsupportedEncodingFileCount}`,
     `- Scanner resource budgets exceeded: ${completeness.resourceBudgetExceededCount}`,
     `- Total inspection issues: ${completeness.issueCount}`,
   ].join("\n");
