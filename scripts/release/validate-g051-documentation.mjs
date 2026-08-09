@@ -119,7 +119,6 @@ for (const [document, phrases] of requiredPhrases) {
 }
 
 const packageJson = JSON.parse(read("frontend/package.json"));
-const packageLock = JSON.parse(read("frontend/package-lock.json"));
 const tauri = JSON.parse(read("frontend/src-tauri/tauri.conf.json"));
 const cargoToml = read("frontend/src-tauri/Cargo.toml");
 const cargoLock = read("frontend/src-tauri/Cargo.lock");
@@ -131,8 +130,6 @@ const readiness = JSON.parse(read("docs/release/v1.0-gap-audit.json"));
 
 const versions = [
   ["frontend/package.json", packageJson.version],
-  ["frontend/package-lock.json", packageLock.version],
-  ["frontend/package-lock.json root", packageLock.packages[""].version],
   ["frontend/src-tauri/tauri.conf.json", tauri.version],
   ["frontend/src-tauri/Cargo.toml", cargoToml.match(/^version = "([^"]+)"/m)?.[1]],
   ["frontend/src-tauri/Cargo.lock", cargoLock.match(/name = "glacial"\r?\nversion = "([^"]+)"/)?.[1]],

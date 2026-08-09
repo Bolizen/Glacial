@@ -28,12 +28,12 @@
 - Do not use loose dependency ranges for production dependencies.
 - Prefer exact dependency versions in `package.json`.
 - Do not introduce `^` or `~` version ranges unless explicitly approved.
-- Do not run `npm update` unless explicitly approved.
-- Prefer `npm ci` over `npm install` when installing from an existing lockfile.
-- Treat `package-lock.json` as security-relevant and commit it.
-- Review dependency diffs before accepting changes to `package.json` or `package-lock.json`.
+- Do not run `pnpm update` unless explicitly approved.
+- Prefer `pnpm install --frozen-lockfile` over an unlocked install when installing from the existing lockfile.
+- Treat `pnpm-lock.yaml` as security-relevant and commit it.
+- Review dependency diffs before accepting changes to `package.json` or `pnpm-lock.yaml`.
 - Do not add new dependencies for trivial utilities that can be implemented safely with built-in APIs.
-- Keep `npm config get ignore-scripts` set to `true` unless a package script is explicitly reviewed and approved.
+- Keep pnpm dependency build scripts blocked unless a package is explicitly reviewed and narrowly allowed in `pnpm-workspace.yaml`.
 - If a dependency requires install scripts, explain why it is needed and ask before enabling scripts.
 
 

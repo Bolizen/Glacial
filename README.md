@@ -76,7 +76,7 @@ Third-party components remain under their own licenses. See [Third-party notices
 
 Clone the repository and prepare the backend and frontend dependencies from the repo root.
 
-Clean-room setup and verification have been completed with Python 3.12.13 and Python 3.13.13, Node.js 24.16.0, and npm 11.13.0. These are verified versions, not declared minimum-version guarantees.
+Clean-room setup and verification have been completed with Python 3.12.13 and Python 3.13.13 and Node.js 24.16.0. The frontend pins pnpm 11.16.0 through `packageManager`. These are verified versions, not declared minimum-version guarantees.
 
 ```bash
 git clone https://github.com/Bolizen/Glacial.git Glacial
@@ -113,13 +113,13 @@ If `requirements.lock.txt` is not present, install from `requirements.txt` inste
 
 ```bash
 cd frontend
-npm ci --ignore-scripts
-npm test
-npm run build
-npm audit --ignore-scripts
+pnpm install --frozen-lockfile
+pnpm test
+pnpm run build
+pnpm audit
 ```
 
-On Windows PowerShell, use the corresponding `npm.cmd ci --ignore-scripts`, `npm.cmd test`, `npm.cmd run build`, and `npm.cmd audit --ignore-scripts` commands.
+The pnpm `allowBuilds` map is intentionally narrow; only esbuild is approved because Vite requires its platform binary. Do not approve additional dependency scripts without review.
 
 ### Authenticated development
 
@@ -127,12 +127,12 @@ The supported full-stack development workflow is the Tauri development runner:
 
 ```powershell
 cd frontend
-npm.cmd run tauri:dev
+pnpm run tauri:dev
 ```
 
 Tauri starts the Vite frontend on `127.0.0.1`, generates a fresh 256-bit token, starts the backend on an ephemeral loopback port with that token in its environment, and attaches the token inside the API bridge. The token is not placed in Vite configuration, browser storage, application responses, or the database.
 
-Do not use a browser-opened `npm run dev` session as an API client. Browser-visible Vite environment variables are not an acceptable place for the backend token.
+Do not use a browser-opened `pnpm run dev` session as an API client. Browser-visible Vite environment variables are not an acceptable place for the backend token.
 
 ### Local service configuration
 

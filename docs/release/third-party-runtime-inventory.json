@@ -4,7 +4,8 @@
   "target": "Windows x64 current-user NSIS installed application",
   "reviewedAt": "2026-07-28",
   "sources": [
-    "frontend/package-lock.json",
+    "frontend/pnpm-lock.yaml",
+    "frontend/node_modules installed pnpm metadata",
     "backend/requirements.lock.txt",
     "backend/.venv installed metadata",
     "cargo tree --target x86_64-pc-windows-msvc --edges normal --locked --offline",
@@ -1287,7 +1288,7 @@
     "@tauri-apps/cli",
     "PyInstaller Python package and hooks",
     "Cargo and Rust toolchains",
-    "npm",
+    "pnpm",
     "test dependencies"
   ]
 }

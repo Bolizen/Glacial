@@ -2,11 +2,13 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { packageVersionKeys } from "./pnpm-lock.mjs";
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const frontend = join(repository, "frontend");
 const outputPath = join(repository, "docs", "release", "third-party-runtime-inventory.json");
 const cargoManifest = join(repository, "frontend", "src-tauri", "Cargo.toml");
-const packageLockPath = join(repository, "frontend", "package-lock.json");
+const pnpmLockPath = join(frontend, "pnpm-lock.yaml");
 const requirementsPath = join(repository, "backend", "requirements.lock.txt");
 const pythonSitePackages = join(repository, "backend", ".venv", "Lib", "site-packages");
 const cargoRegistry = join(process.env.USERPROFILE ?? "", ".cargo", "registry", "src");
@@ -87,13 +89,26 @@ function rustRuntime() {
   }).sort((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version));
 }
 
-function npmRuntime() {
-  const lock = JSON.parse(readFileSync(packageLockPath, "utf8"));
+function nodePackageManifest(name) {
+  const segments = name.split("/");
+  const candidates = [
+    join(frontend, "node_modules", ...segments, "package.json"),
+    join(frontend, "node_modules", ".pnpm", "node_modules", ...segments, "package.json"),
+  ];
+  const path = candidates.find((candidate) => existsSync(candidate));
+  if (!path) fail(`Installed pnpm package metadata is unavailable for ${name}`);
+  return JSON.parse(readFileSync(path, "utf8"));
+}
+
+function nodeRuntime() {
+  const locked = packageVersionKeys(readFileSync(pnpmLockPath, "utf8"));
   const names = ["@tauri-apps/api", "react", "react-dom", "scheduler"];
   return names.map((name) => {
-    const entry = lock.packages[`node_modules/${name}`];
-    if (!entry?.version || !entry?.license) fail(`Incomplete npm notice metadata for ${name}`);
-    return { name, version: entry.version, license: entry.license };
+    const manifest = nodePackageManifest(name);
+    if (!manifest.version || !manifest.license || !locked.has(`${name}@${manifest.version}`)) {
+      fail(`Incomplete or unlocked pnpm notice metadata for ${name}`);
+    }
+    return { name, version: manifest.version, license: manifest.license };
   });
 }
 
@@ -153,14 +168,15 @@ function inventory() {
     target: "Windows x64 current-user NSIS installed application",
     reviewedAt: "2026-07-28",
     sources: [
-      "frontend/package-lock.json",
+      "frontend/pnpm-lock.yaml",
+      "frontend/node_modules installed pnpm metadata",
       "backend/requirements.lock.txt",
       "backend/.venv installed metadata",
       "cargo tree --target x86_64-pc-windows-msvc --edges normal --locked --offline",
       "frontend/src-tauri/tauri.conf.json",
       "G050 PyInstaller and installed payload readback",
     ],
-    frontendRuntime: npmRuntime(),
+    frontendRuntime: nodeRuntime(),
     pythonRuntime: pythonRuntime(),
     rustRuntime: rustRuntime(),
     bundledNativeRuntime: [
@@ -181,7 +197,7 @@ function inventory() {
       "@tauri-apps/cli",
       "PyInstaller Python package and hooks",
       "Cargo and Rust toolchains",
-      "npm",
+      "pnpm",
       "test dependencies",
     ],
   };

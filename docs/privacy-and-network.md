@@ -27,7 +27,7 @@ Reports, remediation briefs, remediation packages, generated `AGENTS.md` files, 
 | Update checking | None; no runtime updater is configured |
 | NSIS installation when WebView2 is missing | Tauri's WebView2 download bootstrapper may contact Microsoft before the application runs |
 | Links in repository documentation | A user's browser contacts the selected site when the link is opened |
-| Source setup and dependency acquisition | Developer-invoked Git, npm, pip, Cargo, or OS tooling can contact their configured services |
+| Source setup and dependency acquisition | Developer-invoked Git, pnpm, pip, Cargo, or OS tooling can contact their configured services |
 | Signed release tooling | An explicitly invoked signer or RFC 3161 timestamp service can create outbound traffic |
 | GitHub release and support workflows | Maintainer- or user-invoked browser and release tooling contacts GitHub |
 

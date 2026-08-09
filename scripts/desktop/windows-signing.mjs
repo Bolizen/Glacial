@@ -404,21 +404,25 @@ export function resolveToolExecutable(name, env = process.env, options = {}) {
   return selected;
 }
 
-export function resolveNpmInvocation(env = process.env, options = {}) {
+export function resolvePnpmInvocation(env = process.env, options = {}) {
   const command = resolveToolExecutable("node.exe", env, options);
-  const npmLauncher = resolveToolExecutable("npm.cmd", env, options);
-  const npmCli = resolve(dirname(npmLauncher), "node_modules", "npm", "bin", "npm-cli.js");
-  if (!existsSync(npmCli) || !lstatSync(npmCli).isFile() || lstatSync(npmCli).isSymbolicLink()) {
-    throw new Error("Could not resolve npm to a direct JavaScript CLI entrypoint.");
-  }
+  const pnpmLauncher = resolveToolExecutable("pnpm.cmd", env, options);
+  const launcher = readFileSync(pnpmLauncher, "utf8");
+  const candidates = [...launcher.matchAll(/"%~dp0([^"\r\n]+\.(?:cjs|mjs|js))"/gi)]
+    .map((match) => resolve(dirname(pnpmLauncher), match[1]))
+    .filter((path) => /(?:^|[\\/])pnpm(?:[\\/]|\.(?:cjs|mjs|js)$)/i.test(path))
+    .filter((path, index, paths) => paths.findIndex((candidate) => candidate.toLowerCase() === path.toLowerCase()) === index)
+    .filter((path) => existsSync(path) && lstatSync(path).isFile() && !lstatSync(path).isSymbolicLink());
+  if (candidates.length !== 1) throw new Error("Could not resolve pnpm to one direct JavaScript CLI entrypoint.");
+  const [pnpmCli] = candidates;
   const forbiddenRoot = options.forbiddenRoot ? resolve(options.forbiddenRoot) : null;
   if (forbiddenRoot) {
-    const rel = relative(forbiddenRoot, npmCli);
+    const rel = relative(forbiddenRoot, pnpmCli);
     if (!rel || (!rel.startsWith(`..${sep}`) && rel !== ".." && !isAbsolute(rel))) {
-      throw new Error("Refusing a repository-local npm CLI entrypoint.");
+      throw new Error("Refusing a repository-local pnpm CLI entrypoint.");
     }
   }
-  return { command, prefixArgs: [npmCli] };
+  return { command, prefixArgs: [pnpmCli] };
 }
 
 export function createPowerShellInvocation(operation, payload, env = process.env) {

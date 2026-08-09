@@ -6,12 +6,12 @@
   "build": {
     "beforeDevCommand": {
       "cwd": "..",
-      "script": "npm.cmd run dev"
+      "script": "pnpm run dev"
     },
     "devUrl": "http://127.0.0.1:5173",
     "beforeBuildCommand": {
       "cwd": "..",
-      "script": "npm.cmd run build"
+      "script": "pnpm run build"
     },
     "frontendDist": "../dist"
   },

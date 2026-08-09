@@ -2,6 +2,7 @@
 .desktop-build/
 **/.desktop-build/
 node_modules/
+.pnpm-store/
 dist/
 build/
 target/

@@ -24,7 +24,7 @@ import {
   privacySafePath,
   removeSafeTree,
   resolvePrivacySafePath,
-  resolveNpmInvocation,
+  resolvePnpmInvocation,
   resolveToolExecutable,
   runCommand,
   sanitizeDiagnosticText,
@@ -193,12 +193,11 @@ export function verifyReleaseSource(gitPath) {
   if (commit !== originMain) throw new Error(`HEAD ${commit} does not match origin/main ${originMain}.`);
 
   const packageJson = readJson(join(FRONTEND, "package.json"));
-  const packageLock = readJson(join(FRONTEND, "package-lock.json"));
+  const pnpmLock = readFileSync(join(FRONTEND, "pnpm-lock.yaml"), "utf8");
+  const pnpmWorkspace = readFileSync(join(FRONTEND, "pnpm-workspace.yaml"), "utf8");
   const tauri = readJson(join(FRONTEND, "src-tauri", "tauri.conf.json"));
   const versions = {
     packageJson: packageJson.version,
-    packageLock: packageLock.version,
-    packageLockRoot: packageLock.packages?.[""]?.version,
     tauri: tauri.version,
     cargo: cargoVersion(join(FRONTEND, "src-tauri", "Cargo.toml")),
     cargoLock: lockVersion(join(FRONTEND, "src-tauri", "Cargo.lock")),
@@ -206,7 +205,7 @@ export function verifyReleaseSource(gitPath) {
   for (const [name, version] of Object.entries(versions)) if (version !== "0.9.12") throw new Error(`${name} identifies version ${version ?? "unknown"}; expected 0.9.12.`);
   if (readFileSync(join(REPOSITORY, "backend", "app", "version.py"), "utf8").trim() !== 'GLACIAL_VERSION = "0.9.12"') throw new Error("Backend version constant does not identify 0.9.12.");
   if (!readFileSync(join(REPOSITORY, "backend", "app", "changelog.py"), "utf8").includes('"version": "0.9.12"')) throw new Error("Backend release metadata does not identify 0.9.12.");
-  validateProductionDependencies(packageJson, packageLock);
+  validateProductionDependencies(packageJson, pnpmLock, pnpmWorkspace);
   return { root, branch, commit, originMain, version: "0.9.12", versions, status: "" };
 }
 
@@ -500,7 +499,7 @@ async function buildSignedRelease(releaseProfile) {
   if (process.platform !== "win32") throw new Error("The signed Windows release workflow must run on Windows.");
   const gitPath = resolveToolExecutable("git.exe", process.env, { forbiddenRoot: REPOSITORY });
   const rustcPath = resolveToolExecutable("rustc.exe", process.env, { forbiddenRoot: REPOSITORY });
-  const npm = resolveNpmInvocation(process.env, { forbiddenRoot: REPOSITORY });
+  const pnpm = resolvePnpmInvocation(process.env, { forbiddenRoot: REPOSITORY });
   const source = verifyReleaseSource(gitPath);
   const started = new Date();
   const buildStartedUtc = started.toISOString();
@@ -531,13 +530,13 @@ async function buildSignedRelease(releaseProfile) {
       });
       releaseEnvironment.GLACIAL_BUILD_IDENTITY_JSON = serializeBuildIdentity(state.buildIdentity);
       ensureSafeDirectory(DESKTOP_BUILD_ROOT, join(workRoot, "artifacts"));
-      writeFileSync(overlayPath, `${JSON.stringify(createTauriSigningOverlay(npm.command), null, 2)}\n`, { flag: "wx" });
+      writeFileSync(overlayPath, `${JSON.stringify(createTauriSigningOverlay(pnpm.command), null, 2)}\n`, { flag: "wx" });
       await runReleaseSteps([
         { name: "build-backend", run: () => { state.buildPython = validateDesktopBuildEnvironment(); buildBackend(state.buildPython); } },
         { name: "sign-backend", run: () => { state.backendSigningRecords = signBackendTree(PYINSTALLER_PAYLOAD, config); } },
         { name: "stage-backend", run: () => stageSignedBackend(rustcPath) },
         { name: "clean-tauri-release-output", run: () => removeSafeTree(REPOSITORY, TAURI_TARGET) },
-        { name: "tauri-build", run: () => runVisible(npm.command, [...npm.prefixArgs, "run", "tauri:build", "--", "--config", overlayPath], { cwd: FRONTEND, env: releaseEnvironment, secretValues }) },
+        { name: "tauri-build", run: () => runVisible(pnpm.command, [...pnpm.prefixArgs, "run", "tauri:build", "--", "--config", overlayPath], { cwd: FRONTEND, env: releaseEnvironment, secretValues }) },
         { name: "verify-tauri-output", run: () => {
           state.installer = findInstaller(source.version);
           state.workingApplication = join(TAURI_TARGET, "glacial.exe");

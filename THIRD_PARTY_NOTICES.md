@@ -16,7 +16,7 @@ The standard MIT, BSD-3-Clause, Apache-2.0, Python Software Foundation, OpenSSL,
 
 ## Build and development tools
 
-Vite, `@vitejs/plugin-react`, the Tauri CLI, PyInstaller, PyInstaller hooks, setuptools build tooling, Cargo, Rust, npm, and the remaining test dependencies are build or development inputs. They are not installed as standalone Glacial runtime packages. Generated or embedded portions, such as the PyInstaller bootloader and Vite runtime helpers, remain subject to their upstream terms and are represented in the runtime review.
+Vite, `@vitejs/plugin-react`, the Tauri CLI, PyInstaller, PyInstaller hooks, setuptools build tooling, Cargo, Rust, pnpm, and the remaining test dependencies are build or development inputs. They are not installed as standalone Glacial runtime packages. Generated or embedded portions, such as the PyInstaller bootloader and Vite runtime helpers, remain subject to their upstream terms and are represented in the runtime review.
 
 ## Project license
 

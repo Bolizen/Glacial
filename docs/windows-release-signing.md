@@ -11,26 +11,26 @@ Users should independently verify the Git commit, release manifest, `SHA256SUMS.
 Unsigned development is independent of release signing and never requires a certificate:
 
 ```powershell
-npm.cmd --prefix frontend run desktop:backend:plan
-npm.cmd --prefix frontend run desktop:backend
+pnpm --dir frontend run desktop:backend:plan
+pnpm --dir frontend run desktop:backend
 ```
 
-These npm commands invoke Node directly to plan or build the internal PyInstaller backend. They do not use `-ExecutionPolicy Bypass`, do not read signing configuration, and do not create a user-distributable application. Normal Tauri development and internal staging remain development workflows, not product distributions.
+These pnpm commands invoke Node directly to plan or build the internal PyInstaller backend. They do not use `-ExecutionPolicy Bypass`, do not read signing configuration, and do not create a user-distributable application. Normal Tauri development and internal staging remain development workflows, not product distributions.
 
 ### Signed preview
 
 The signed-preview profile is for internal development, local testing, and release-pipeline validation. It accepts either the existing valid self-signed certificate or a publicly trusted signer, but self-signed output is not automatically appropriate for public distribution.
 
 ```powershell
-npm.cmd --prefix frontend run release:windows:signed-preview:plan
-npm.cmd --prefix frontend run release:windows:signed-preview
+pnpm --dir frontend run release:windows:signed-preview:plan
+pnpm --dir frontend run release:windows:signed-preview
 ```
 
 The legacy commands remain exact signed-preview aliases and never select the public-release profile:
 
 ```powershell
-npm.cmd --prefix frontend run release:windows:plan
-npm.cmd --prefix frontend run release:windows:signed
+pnpm --dir frontend run release:windows:plan
+pnpm --dir frontend run release:windows:signed
 ```
 
 ### Public release candidate
@@ -38,8 +38,8 @@ npm.cmd --prefix frontend run release:windows:signed
 The public-rc profile is for a candidate that may be publicly distributed. It fails closed unless the disposable signer preflight derives `trustClassification` exactly equal to `publicly-trusted`; the existing self-signed certificate cannot satisfy this gate.
 
 ```powershell
-npm.cmd --prefix frontend run release:windows:public-rc:plan
-npm.cmd --prefix frontend run release:windows:public-rc
+pnpm --dir frontend run release:windows:public-rc:plan
+pnpm --dir frontend run release:windows:public-rc
 ```
 
 Both profiles retain the established RFC 3161 timestamp, exact signer identity, signature, installer-payload, restoration, hash, and atomic-publication checks. Each profile produces only the installed NSIS artifact and its release metadata. Glacial does not currently claim to possess or configure a publicly trusted code-signing certificate.
@@ -49,8 +49,8 @@ Both profiles retain the established RFC 3161 timestamp, exact signer identity, 
 The signer-only commands load the same redacted configuration and sign no Glacial product file. They validate the expected subject and exact thumbprint, current certificate validity, Code Signing EKU, usable private key or approved provider, disposable PE signature, RFC 3161 timestamp, observed Authenticode chain classification, profile trust gate, and disposable cleanup:
 
 ```powershell
-npm.cmd --prefix frontend run release:windows:signed-preview:signer-preflight
-npm.cmd --prefix frontend run release:windows:public-rc:signer-preflight
+pnpm --dir frontend run release:windows:signed-preview:signer-preflight
+pnpm --dir frontend run release:windows:public-rc:signer-preflight
 ```
 
 The result is bounded to profile, provider type, expected and observed public signer identity, observed trust, validity dates, Code Signing EKU, timestamp origin/presence, verification, and cleanup. It excludes credentials, private-key locations, raw environment values, provider credential responses, and host paths. A plan command remains a plan and is not signer verification. The public-RC signer preflight must fail when only the existing self-signed signer is available.
@@ -228,20 +228,20 @@ $env:GLACIAL_WINDOWS_SIGNTOOL_PATH = "C:\Program Files (x86)\Windows Kits\10\bin
 $env:GLACIAL_WINDOWS_TIMESTAMP_URL = "http://timestamp.digicert.com"
 $env:GLACIAL_WINDOWS_REQUIRE_TIMESTAMP = "1"
 
-npm.cmd --prefix frontend run release:windows:signed-preview:plan
+pnpm --dir frontend run release:windows:signed-preview:plan
 ```
 
 After separate certificate provisioning, a clean `main`, and `HEAD == origin/main`, produce an internal signed preview with:
 
 ```powershell
-npm.cmd --prefix frontend run release:windows:signed-preview
+pnpm --dir frontend run release:windows:signed-preview
 ```
 
 Plan or produce a public release candidate only after configuring a publicly trusted signer:
 
 ```powershell
-npm.cmd --prefix frontend run release:windows:public-rc:plan
-npm.cmd --prefix frontend run release:windows:public-rc
+pnpm --dir frontend run release:windows:public-rc:plan
+pnpm --dir frontend run release:windows:public-rc
 ```
 
 The coordinator performs this order:

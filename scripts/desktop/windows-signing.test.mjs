@@ -30,7 +30,7 @@ import {
   preflightSigningProvider,
   privacySafePath,
   removeSafeTree,
-  resolveNpmInvocation,
+  resolvePnpmInvocation,
   runCommand,
   sanitizeDiagnosticText,
   sha256,
@@ -664,7 +664,7 @@ test("dry-run plans and manifest fields report profile trust requirements honest
 
 test("release package commands and established version sources identify 0.9.12", () => {
   const packageJson = JSON.parse(readFileSync(join(REPOSITORY, "frontend", "package.json"), "utf8"));
-  const packageLock = JSON.parse(readFileSync(join(REPOSITORY, "frontend", "package-lock.json"), "utf8"));
+  const pnpmLock = readFileSync(join(REPOSITORY, "frontend", "pnpm-lock.yaml"), "utf8");
   const tauri = JSON.parse(readFileSync(join(REPOSITORY, "frontend", "src-tauri", "tauri.conf.json"), "utf8"));
   const cargo = readFileSync(join(REPOSITORY, "frontend", "src-tauri", "Cargo.toml"), "utf8");
   const cargoLock = readFileSync(join(REPOSITORY, "frontend", "src-tauri", "Cargo.lock"), "utf8");
@@ -696,9 +696,10 @@ test("release package commands and established version sources identify 0.9.12",
     legacySigned: "node ../scripts/desktop/Build-SignedWindowsRelease.mjs --profile signed-preview",
   });
   assert.deepEqual(
-    [packageJson.version, packageLock.version, packageLock.packages[""].version, tauri.version],
-    ["0.9.12", "0.9.12", "0.9.12", "0.9.12"],
+    [packageJson.version, packageJson.packageManager, tauri.version],
+    ["0.9.12", "pnpm@11.16.0", "0.9.12"],
   );
+  assert.match(pnpmLock, /^lockfileVersion: '9\.0'$/m);
   assert.match(cargo, /^version = "0\.9\.12"$/m);
   assert.match(cargoLock, /\[\[package\]\]\r?\nname = "glacial"\r?\nversion = "0\.9\.12"/);
   assert.match(releaseTool, /expected 0\.9\.12/);
@@ -797,11 +798,11 @@ test("ordinary unsigned development plans require neither signing nor PowerShell
   assert.throws(() => developmentPlan("build-portable"), /Expected build-backend/);
 });
 
-test("npm is launched through the absolute Node executable without a command shell", () => {
-  const npm = resolveNpmInvocation(process.env, { forbiddenRoot: REPOSITORY });
-  assert.ok(npm.command.toLowerCase().endsWith("node.exe"));
-  assert.ok(npm.prefixArgs[0].toLowerCase().endsWith("npm-cli.js"));
-  const result = runCommand(npm.command, [...npm.prefixArgs, "--version"], { env: minimalEnvironment(process.env) });
+test("pnpm is launched through the absolute Node executable without a command shell", () => {
+  const pnpm = resolvePnpmInvocation(process.env, { forbiddenRoot: REPOSITORY });
+  assert.ok(pnpm.command.toLowerCase().endsWith("node.exe"));
+  assert.match(pnpm.prefixArgs[0], /pnpm.*\.(?:cjs|mjs|js)$/i);
+  const result = runCommand(pnpm.command, [...pnpm.prefixArgs, "--version"], { env: minimalEnvironment(process.env) });
   assert.equal(result.status, 0);
   assert.match(result.stdout, /^\d+\.\d+\.\d+/);
 });
