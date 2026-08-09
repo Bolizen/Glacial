@@ -1,0 +1,53 @@
+{
+  "schemaVersion": "1.0.0",
+  "source": {
+    "indexUrl": "https://pypi.org/simple",
+    "metadataApi": "https://pypi.org/pypi/{name}/{version}/json",
+    "repository": "Python Package Index (PyPI)",
+    "capturedAt": "2026-08-09",
+    "method": "Downloaded with the explicitly selected CPython 3.13.13 Windows x64 interpreter using pip --isolated --no-cache-dir --only-binary=:all: --no-deps, SHA-256 hashed locally, and matched by exact filename and digest against the official PyPI JSON release metadata."
+  },
+  "runtimeContract": {
+    "name": "CPython",
+    "implementation": "cpython",
+    "version": "3.13.13",
+    "platform": "win32",
+    "bits": 64,
+    "machine": "AMD64"
+  },
+  "scopes": {
+    "backend-runtime": {
+      "lockPath": "backend/requirements.lock.txt",
+      "lockSha256": "a690ca6f6003adcbefc0ebc405904fa5ab3993fc9d430c3120668c46571f3e4a",
+      "artifacts": [
+        { "name": "annotated-doc", "version": "0.0.4", "filename": "annotated_doc-0.0.4-py3-none-any.whl", "sha256": "571ac1dc6991c450b25a9c2d84a3705e2ae7a53467b5d111c24fa8baabbed320" },
+        { "name": "annotated-types", "version": "0.7.0", "filename": "annotated_types-0.7.0-py3-none-any.whl", "sha256": "1f02e8b43a8fbbc3f3e0d4f0f4bfc8131bcb4eebe8849b8e5c773f3a1c582a53" },
+        { "name": "anyio", "version": "4.14.1", "filename": "anyio-4.14.1-py3-none-any.whl", "sha256": "4e5533c5b8ff0a24f5d7a176cbe6877129cd183893f66b537f8f227d10527d72" },
+        { "name": "click", "version": "8.4.2", "filename": "click-8.4.2-py3-none-any.whl", "sha256": "e6f9f66136c816745b9d65817da91d61d957fb16e02e4dcd0552553c5a197b76" },
+        { "name": "colorama", "version": "0.4.6", "filename": "colorama-0.4.6-py2.py3-none-any.whl", "sha256": "4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6" },
+        { "name": "fastapi", "version": "0.138.1", "filename": "fastapi-0.138.1-py3-none-any.whl", "sha256": "b994cae7ba8b82c976a728b544244de31333fa5f7d261f9a1dffe526444cae23" },
+        { "name": "h11", "version": "0.16.0", "filename": "h11-0.16.0-py3-none-any.whl", "sha256": "63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86" },
+        { "name": "idna", "version": "3.18", "filename": "idna-3.18-py3-none-any.whl", "sha256": "7f952cbe720b688055e3f87de14f5c3e5fdaa8bc3928985c4077ca689de849a2" },
+        { "name": "pydantic", "version": "2.13.4", "filename": "pydantic-2.13.4-py3-none-any.whl", "sha256": "45a282cde31d808236fd7ea9d919b128653c8b38b393d1c4ab335c62924d9aba" },
+        { "name": "pydantic_core", "version": "2.46.4", "filename": "pydantic_core-2.46.4-cp313-cp313-win_amd64.whl", "sha256": "6b3ace8194b0e5204818c92802dcdca7fc6d88aabbb799d7c795540d9cd6d292" },
+        { "name": "starlette", "version": "1.3.1", "filename": "starlette-1.3.1-py3-none-any.whl", "sha256": "c7372aae11c3c3f26a42df7bd626cec2f47d03483d261d369516a615a53714c6" },
+        { "name": "typing-inspection", "version": "0.4.2", "filename": "typing_inspection-0.4.2-py3-none-any.whl", "sha256": "4ed1cacbdc298c220f1bd249ed5287caa16f34d44ef4e9c3d0cbad5b521545e7" },
+        { "name": "typing_extensions", "version": "4.15.0", "filename": "typing_extensions-4.15.0-py3-none-any.whl", "sha256": "f0fa19c6845758ab08074a0cfa8b7aecb71c999ca73d62883bc25cc018c4e548" },
+        { "name": "uvicorn", "version": "0.49.0", "filename": "uvicorn-0.49.0-py3-none-any.whl", "sha256": "ba3d14c3ee7e41c6c654c46c9eb489d33213cdd30aa1696eab1374337c13f68f" }
+      ]
+    },
+    "desktop-build": {
+      "lockPath": "backend/desktop-build-requirements.lock",
+      "lockSha256": "42b8b4e26093115676ba98ad8637c693617214706812c3b38798a14e0f4e80ed",
+      "artifacts": [
+        { "name": "altgraph", "version": "0.17.5", "filename": "altgraph-0.17.5-py2.py3-none-any.whl", "sha256": "f3a22400bce1b0c701683820ac4f3b159cd301acab067c51c653e06961600597" },
+        { "name": "packaging", "version": "26.2", "filename": "packaging-26.2-py3-none-any.whl", "sha256": "5fc45236b9446107ff2415ce77c807cee2862cb6fac22b8a73826d0693b0980e" },
+        { "name": "pefile", "version": "2024.8.26", "filename": "pefile-2024.8.26-py3-none-any.whl", "sha256": "76f8b485dcd3b1bb8166f1128d395fa3d87af26360c2358fb75b80019b957c6f" },
+        { "name": "pyinstaller", "version": "6.21.0", "filename": "pyinstaller-6.21.0-py3-none-win_amd64.whl", "sha256": "7fae06c494ce0ebfe6bd3055c0e409def884f63af2e3705d06bd431ad9237fc7" },
+        { "name": "pyinstaller-hooks-contrib", "version": "2026.6", "filename": "pyinstaller_hooks_contrib-2026.6-py3-none-any.whl", "sha256": "fd13b8ac126b35361175edacd41a0d97080b75dd5f4b594ecefefff969509dd3" },
+        { "name": "pywin32-ctypes", "version": "0.2.3", "filename": "pywin32_ctypes-0.2.3-py3-none-any.whl", "sha256": "8a1513379d709975552d202d942d9837758905c8d01eb82b8bcc30918929e7b8" },
+        { "name": "setuptools", "version": "83.0.0", "filename": "setuptools-83.0.0-py3-none-any.whl", "sha256": "29b23c360f22f414dc7336bb39178cc7bcbf6021ed2733cde173f09dba19abb3" }
+      ]
+    }
+  }
+}

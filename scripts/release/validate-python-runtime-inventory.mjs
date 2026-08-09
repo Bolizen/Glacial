@@ -1,5 +1,5 @@
-import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, rmdirSync } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -16,6 +16,11 @@ import {
   WINDOWS_RELEASE_PYTHON,
   assertWindowsReleasePythonIdentity,
 } from "./release-contract.mjs";
+import {
+  loadPythonArtifactManifest,
+  renderHashedRequirements,
+  verifyWheelhouse,
+} from "./python-artifact-integrity.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const repository = resolve(dirname(scriptPath), "..", "..");
@@ -145,25 +150,49 @@ export function validatePythonRuntimeInventory(argv = process.argv.slice(2)) {
   if (existsSync(environmentPath)) fail(`Disposable Python environment already exists: ${privacySafePath(environmentPath)}`);
 
   const parent = dirname(environmentPath);
+  const wheelhouse = assertSafePath(repository, join(parent, `${basename(environmentPath)}-wheelhouse`));
+  const hashedRequirements = assertSafePath(repository, join(parent, `${basename(environmentPath)}-requirements.txt`));
+  if (existsSync(wheelhouse) || existsSync(hashedRequirements)) fail("Disposable Python integrity inputs already exist.");
   const parentExisted = existsSync(parent);
   const childEnvironment = minimalEnvironment(process.env, {
     PIP_DISABLE_PIP_VERSION_CHECK: "1",
+    PIP_CONFIG_FILE: "NUL",
+    PIP_NO_INPUT: "1",
     PYTHONNOUSERSITE: "1",
     PYTHONDONTWRITEBYTECODE: "1",
   });
   const baseIdentity = validateBaseInterpreter(options.python, childEnvironment);
+  const manifest = loadPythonArtifactManifest(repository);
+  const runtimeScope = manifest.scopes["backend-runtime"];
   let cleanupEnvironment = false;
+  let cleanupWheelhouse = false;
+  let cleanupRequirements = false;
   try {
     ensureSafeDirectory(repository, parent);
+    ensureSafeDirectory(repository, wheelhouse);
+    cleanupWheelhouse = true;
+    writeFileSync(hashedRequirements, renderHashedRequirements(runtimeScope), { encoding: "utf8", flag: "wx" });
+    cleanupRequirements = true;
+    const downloadArguments = [
+      "-m", "pip", "--isolated", "download", "--disable-pip-version-check", "--no-cache-dir", "--only-binary=:all:", "--no-deps",
+      "--require-hashes", "--requirement", hashedRequirements, "--dest", wheelhouse, "--index-url", manifest.source.indexUrl,
+    ];
+    run(baseIdentity.executable, downloadArguments, {
+      env: childEnvironment,
+      redactions: [baseIdentity.executable, wheelhouse, hashedRequirements],
+      timeoutMs: 900_000,
+    });
+    const verifiedArtifacts = verifyWheelhouse(runtimeScope, wheelhouse);
     cleanupEnvironment = true;
     run(baseIdentity.executable, ["-m", "venv", environmentPath], { env: childEnvironment, redactions: [baseIdentity.executable, environmentPath] });
     const environmentPython = join(environmentPath, "Scripts", "python.exe");
     if (!existsSync(environmentPython) || !lstatSync(environmentPython).isFile() || lstatSync(environmentPython).isSymbolicLink()) fail("Disposable virtual environment did not create a real Python executable.");
     const environmentIdentity = validateEnvironmentIdentity(environmentPython, environmentPath, baseIdentity.version, childEnvironment);
     const installArguments = [
-      "-m", "pip", "--isolated", "install", "--disable-pip-version-check", "--no-cache-dir", "--no-deps", "--requirement", requirementsPath,
+      "-m", "pip", "--isolated", "install", "--disable-pip-version-check", "--no-cache-dir", "--no-index", "--no-deps",
+      "--require-hashes", "--find-links", wheelhouse, "--requirement", hashedRequirements,
     ];
-    run(environmentPython, installArguments, { env: childEnvironment, redactions: [environmentPython, environmentPath], timeoutMs: 900_000 });
+    run(environmentPython, installArguments, { env: childEnvironment, redactions: [environmentPython, environmentPath, wheelhouse, hashedRequirements], timeoutMs: 900_000 });
     run(environmentPython, ["-m", "pip", "--isolated", "check"], { env: childEnvironment, redactions: [environmentPython, environmentPath] });
     const installedItems = runJson(environmentPython, ["-m", "pip", "--isolated", "list", "--format=json", "--disable-pip-version-check"], {
       env: childEnvironment,
@@ -192,6 +221,13 @@ export function validatePythonRuntimeInventory(argv = process.argv.slice(2)) {
       environment: privacySafePath(environmentPath),
       sitePackages: privacySafePath(environmentIdentity.sitePackages),
       installCommand: [privacySafePath(environmentPython), ...installArguments],
+      artifactIntegrity: {
+        manifest: privacySafePath(manifest.path),
+        manifestSha256: manifest.sha256,
+        source: manifest.source,
+        lockSha256: runtimeScope.lockSha256,
+        verifiedArtifacts,
+      },
       bootstrapExcludedFromRuntimeGraph: ["pip"],
       ...comparison,
       inventoryCheck: "PASS",
@@ -202,6 +238,8 @@ export function validatePythonRuntimeInventory(argv = process.argv.slice(2)) {
     return summary;
   } finally {
     if (cleanupEnvironment) removeSafeTree(repository, environmentPath);
+    if (cleanupWheelhouse) removeSafeTree(repository, wheelhouse);
+    if (cleanupRequirements && existsSync(hashedRequirements)) unlinkSync(hashedRequirements);
     if (!parentExisted && existsSync(parent) && readdirSync(parent).length === 0) rmdirSync(parent);
   }
 }

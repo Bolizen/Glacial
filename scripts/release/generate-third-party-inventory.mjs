@@ -17,7 +17,8 @@ const cargoManifest = join(repository, "frontend", "src-tauri", "Cargo.toml");
 const pnpmLockPath = join(frontend, "pnpm-lock.yaml");
 const requirementsPath = join(repository, "backend", "requirements.lock.txt");
 const defaultPythonSitePackages = join(repository, "backend", ".venv", "Lib", "site-packages");
-const cargoRegistry = join(process.env.USERPROFILE ?? "", ".cargo", "registry", "src");
+const cargoHome = process.env.CARGO_HOME || join(process.env.USERPROFILE ?? "", ".cargo");
+const cargoRegistry = join(cargoHome, "registry", "src");
 
 function fail(message) {
   throw new Error(message);
