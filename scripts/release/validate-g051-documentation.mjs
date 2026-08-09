@@ -2,9 +2,23 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { currentProductVersion } from "./release-contract.mjs";
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const expectedVersion = "0.9.11";
+
+function inventoryArguments(argv) {
+  if (argv.length === 0) return ["--check"];
+  const seen = new Set();
+  for (let index = 0; index < argv.length; index += 2) {
+    const name = argv[index];
+    const value = argv[index + 1];
+    if (!new Set(["--python-site-packages", "--python-runtime"]).has(name) || seen.has(name) || !value || value.startsWith("--")) {
+      throw new Error("Expected optional --python-site-packages <path> and --python-runtime <path>.");
+    }
+    seen.add(name);
+  }
+  return ["--check", ...argv];
+}
 
 function fail(message) {
   console.error(`G051 documentation validation failed: ${message}`);
@@ -119,6 +133,7 @@ for (const [document, phrases] of requiredPhrases) {
 }
 
 const packageJson = JSON.parse(read("frontend/package.json"));
+const expectedVersion = currentProductVersion(repository);
 const tauri = JSON.parse(read("frontend/src-tauri/tauri.conf.json"));
 const cargoToml = read("frontend/src-tauri/Cargo.toml");
 const cargoLock = read("frontend/src-tauri/Cargo.lock");
@@ -153,7 +168,7 @@ if (tauri.bundle?.createUpdaterArtifacts !== false) fail("Tauri updater artifact
 if (tauri.app?.windows?.[0]?.minWidth !== 960 || tauri.app?.windows?.[0]?.minHeight !== 640) fail("documented minimum window differs from Tauri configuration");
 
 try {
-  execFileSync(process.execPath, [join(repository, "scripts", "release", "generate-third-party-inventory.mjs"), "--check"], {
+  execFileSync(process.execPath, [join(repository, "scripts", "release", "generate-third-party-inventory.mjs"), ...inventoryArguments(process.argv.slice(2))], {
     cwd: repository,
     stdio: "inherit",
   });

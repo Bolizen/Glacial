@@ -39,6 +39,7 @@ import {
   serializeBuildIdentity,
 } from "../release/build-identity.mjs";
 import { validateProductionDependencies } from "../release/validate-production-dependencies.mjs";
+import { assertWindowsReleasePythonIdentity } from "../release/release-contract.mjs";
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const REPOSITORY = resolve(dirname(SCRIPT_PATH), "..", "..");
@@ -261,8 +262,11 @@ export function assertInterpreterIdentity(python, identity) {
 }
 
 function installedPackages(python, environment) {
-  const identity = JSON.parse(runText(python, ["-c", "import json, sys; print(json.dumps({'executable': sys.executable, 'prefix': sys.prefix}))"], { cwd: REPOSITORY, env: environment }));
+  const identity = JSON.parse(runText(python, ["-c", "import json, platform, struct, sys; print(json.dumps({'executable': sys.executable, 'prefix': sys.prefix, 'implementation': sys.implementation.name, 'version': platform.python_version(), 'platform': sys.platform, 'bits': struct.calcsize('P') * 8, 'machine': platform.machine()}))"], { cwd: REPOSITORY, env: environment }));
   assertInterpreterIdentity(python, identity);
+  assertWindowsReleasePythonIdentity(identity, {
+    selectionHint: "Provision the desktop build and backend runtime environments from the committed Windows release Python.",
+  });
   const result = JSON.parse(runText(python, ["-m", "pip", "list", "--format=json"], { cwd: REPOSITORY, env: environment }));
   return normalizeInstalledPackages(result);
 }

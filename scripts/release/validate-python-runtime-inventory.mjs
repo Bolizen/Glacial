@@ -12,13 +12,16 @@ import {
   sanitizeDiagnosticText,
 } from "../desktop/windows-signing.mjs";
 import { parseLockedPythonRequirements } from "./generate-third-party-inventory.mjs";
+import {
+  WINDOWS_RELEASE_PYTHON,
+  assertWindowsReleasePythonIdentity,
+} from "./release-contract.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const repository = resolve(dirname(scriptPath), "..", "..");
 const requirementsPath = join(repository, "backend", "requirements.lock.txt");
-const inventoryScript = join(repository, "scripts", "release", "generate-third-party-inventory.mjs");
+const currentReleaseValidator = join(repository, "scripts", "release", "validate-g051-documentation.mjs");
 const defaultEnvironment = join(repository, ".desktop-build", "runtime-inventory-venv");
-const verifiedPythonVersions = new Set(["3.12.13", "3.13.13"]);
 
 function fail(message) {
   throw new Error(message);
@@ -28,7 +31,7 @@ function canonicalizePackageName(value) {
   return value.toLowerCase().replaceAll(/[-_.]+/g, "-");
 }
 
-function parseArguments(argv) {
+export function parseArguments(argv) {
   let python;
   let environment = defaultEnvironment;
   for (let index = 0; index < argv.length; index += 1) {
@@ -86,8 +89,7 @@ function validateBaseInterpreter(python, environment) {
   ], { env: environment, redactions: [canonicalPython] });
   if (realpathSync.native(identity.executable).toLowerCase() !== canonicalPython.toLowerCase()) fail("Selected Python executable identity does not match --python.");
   if (resolve(identity.prefix).toLowerCase() !== resolve(identity.base_prefix).toLowerCase()) fail("--python must be a base interpreter, not a pre-existing virtual environment.");
-  if (identity.implementation !== "cpython" || identity.platform !== "win32" || identity.bits !== 64) fail("Python inventory validation requires 64-bit CPython on Windows.");
-  if (!verifiedPythonVersions.has(identity.version)) fail(`Python ${identity.version} is not a committed verified runtime version; expected 3.12.13 or 3.13.13.`);
+  assertWindowsReleasePythonIdentity(identity);
   return { ...identity, executable: canonicalPython };
 }
 
@@ -169,7 +171,11 @@ export function validatePythonRuntimeInventory(argv = process.argv.slice(2)) {
     });
     const comparison = compareLockedRuntimeGraph(readFileSync(requirementsPath), installedItems);
     assertLockedRuntimeGraph(comparison);
-    run(process.execPath, [inventoryScript, "--check", "--python-site-packages", environmentIdentity.sitePackages], {
+    run(process.execPath, [
+      currentReleaseValidator,
+      "--python-site-packages", environmentIdentity.sitePackages,
+      "--python-runtime", environmentPython,
+    ], {
       env: childEnvironment,
       redactions: [environmentIdentity.sitePackages, environmentPath],
       timeoutMs: 900_000,
@@ -189,6 +195,8 @@ export function validatePythonRuntimeInventory(argv = process.argv.slice(2)) {
       bootstrapExcludedFromRuntimeGraph: ["pip"],
       ...comparison,
       inventoryCheck: "PASS",
+      currentReleaseValidation: "PASS",
+      requiredPython: WINDOWS_RELEASE_PYTHON,
     };
     process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
     return summary;

@@ -1,6 +1,6 @@
 {
   "schemaVersion": "1.0.0",
-  "productVersion": "0.9.11",
+  "productVersion": "0.9.12",
   "target": "Windows x64 current-user NSIS installed application",
   "reviewedAt": "2026-07-28",
   "sources": [
@@ -8,6 +8,7 @@
     "frontend/node_modules installed pnpm metadata",
     "backend/requirements.lock.txt",
     "explicit installed Python metadata from backend/requirements.lock.txt",
+    "explicit CPython runtime identity against scripts/release/release-contract.mjs",
     "cargo tree --target x86_64-pc-windows-msvc --edges normal --locked --offline",
     "frontend/src-tauri/tauri.conf.json",
     "G050 PyInstaller and installed payload readback"

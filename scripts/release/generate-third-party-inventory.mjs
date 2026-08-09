@@ -3,6 +3,11 @@ import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, writeFi
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { packageVersionKeys } from "./pnpm-lock.mjs";
+import {
+  WINDOWS_RELEASE_PYTHON,
+  assertWindowsReleasePythonIdentity,
+  currentProductVersion,
+} from "./release-contract.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const repository = resolve(dirname(scriptPath), "..", "..");
@@ -49,6 +54,7 @@ export function resolvePythonSitePackages(value = defaultPythonSitePackages) {
 export function parseInventoryArguments(argv) {
   let check = false;
   let pythonSitePackages;
+  let pythonRuntime;
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--check") {
@@ -58,11 +64,38 @@ export function parseInventoryArguments(argv) {
       pythonSitePackages = argv[index + 1];
       if (!pythonSitePackages || pythonSitePackages.startsWith("--")) fail("--python-site-packages requires a path.");
       index += 1;
+    } else if (argument === "--python-runtime") {
+      if (pythonRuntime !== undefined) fail("--python-runtime may be provided only once.");
+      pythonRuntime = argv[index + 1];
+      if (!pythonRuntime || pythonRuntime.startsWith("--")) fail("--python-runtime requires an executable path.");
+      index += 1;
     } else {
       fail(`Unknown inventory argument: ${argument}`);
     }
   }
-  return { check, pythonSitePackages: resolvePythonSitePackages(pythonSitePackages) };
+  return { check, pythonSitePackages: resolvePythonSitePackages(pythonSitePackages), pythonRuntimePath: pythonRuntime };
+}
+
+function verifyPythonRuntime(value) {
+  if (value === undefined) return;
+  const resolved = repositoryChild(value, "Python runtime");
+  if (!existsSync(resolved) || !lstatSync(resolved).isFile() || lstatSync(resolved).isSymbolicLink()) {
+    fail(`Python runtime must be a real executable file: ${resolved}`);
+  }
+  const canonicalRepository = realpathSync.native(repository);
+  const canonical = realpathSync.native(resolved);
+  const child = relative(canonicalRepository, canonical);
+  if (!child || child === ".." || child.startsWith(`..${sep}`) || isAbsolute(child)) {
+    fail(`Python runtime escapes the repository: ${resolved}`);
+  }
+  const identity = JSON.parse(execFileSync(canonical, [
+    "-c",
+    "import json, platform, struct, sys; print(json.dumps({'executable': sys.executable, 'implementation': sys.implementation.name, 'version': platform.python_version(), 'platform': sys.platform, 'bits': struct.calcsize('P') * 8, 'machine': platform.machine()}))",
+  ], { cwd: repository, encoding: "utf8", windowsHide: true }));
+  if (realpathSync.native(identity.executable).toLowerCase() !== canonical.toLowerCase()) {
+    fail("Python runtime identity does not match --python-runtime.");
+  }
+  assertWindowsReleasePythonIdentity(identity);
 }
 
 function packageSection(text) {
@@ -217,10 +250,11 @@ export function pythonRuntime(pythonSitePackages, requirementsText = readFileSyn
   return runtime.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export function inventory({ pythonSitePackages = defaultPythonSitePackages } = {}) {
+export function inventory({ pythonSitePackages = defaultPythonSitePackages, pythonRuntimePath } = {}) {
+  verifyPythonRuntime(pythonRuntimePath);
   return {
     schemaVersion: "1.0.0",
-    productVersion: "0.9.11",
+    productVersion: currentProductVersion(),
     target: "Windows x64 current-user NSIS installed application",
     reviewedAt: "2026-07-28",
     sources: [
@@ -228,6 +262,7 @@ export function inventory({ pythonSitePackages = defaultPythonSitePackages } = {
       "frontend/node_modules installed pnpm metadata",
       "backend/requirements.lock.txt",
       "explicit installed Python metadata from backend/requirements.lock.txt",
+      "explicit CPython runtime identity against scripts/release/release-contract.mjs",
       "cargo tree --target x86_64-pc-windows-msvc --edges normal --locked --offline",
       "frontend/src-tauri/tauri.conf.json",
       "G050 PyInstaller and installed payload readback",
@@ -236,7 +271,7 @@ export function inventory({ pythonSitePackages = defaultPythonSitePackages } = {
     pythonRuntime: pythonRuntime(pythonSitePackages),
     rustRuntime: rustRuntime(),
     bundledNativeRuntime: [
-      { name: "CPython", version: "3.13.13", license: "PSF-2.0" },
+      { name: WINDOWS_RELEASE_PYTHON.name, version: WINDOWS_RELEASE_PYTHON.version, license: "PSF-2.0" },
       { name: "OpenSSL", version: "3.0.19", license: "Apache-2.0" },
       { name: "SQLite", version: "3.50.4", license: "blessing" },
       { name: "libffi", version: "8 ABI", license: "MIT" },

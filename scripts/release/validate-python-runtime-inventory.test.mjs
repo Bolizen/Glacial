@@ -1,9 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compareLockedRuntimeGraph } from "./validate-python-runtime-inventory.mjs";
+import { resolve } from "node:path";
+
+import {
+  compareLockedRuntimeGraph,
+  parseArguments,
+} from "./validate-python-runtime-inventory.mjs";
 
 const lock = "alpha==1.0.0\nbeta-package==2.0.0\n";
+
+test("clean validation uses only the explicitly selected interpreter", () => {
+  const selected = resolve("C:\\Selected Runtime\\python.exe");
+  assert.equal(parseArguments(["--python", selected]).python, selected);
+  assert.throws(() => parseArguments([]), /--python is required/);
+});
 
 test("locked runtime graph comparison excludes pip bootstrap tooling", () => {
   assert.deepEqual(compareLockedRuntimeGraph(lock, [
