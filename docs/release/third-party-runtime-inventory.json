@@ -7,7 +7,7 @@
     "frontend/pnpm-lock.yaml",
     "frontend/node_modules installed pnpm metadata",
     "backend/requirements.lock.txt",
-    "backend/.venv installed metadata",
+    "explicit installed Python metadata from backend/requirements.lock.txt",
     "cargo tree --target x86_64-pc-windows-msvc --edges normal --locked --offline",
     "frontend/src-tauri/tauri.conf.json",
     "G050 PyInstaller and installed payload readback"
@@ -83,11 +83,6 @@
     {
       "name": "pydantic_core",
       "version": "2.46.4",
-      "license": "MIT"
-    },
-    {
-      "name": "setuptools",
-      "version": "83.0.0",
       "license": "MIT"
     },
     {

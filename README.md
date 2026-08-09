@@ -109,6 +109,14 @@ python -m venv .venv
 
 If `requirements.lock.txt` is not present, install from `requirements.txt` instead. The API runs at `http://127.0.0.1:8000` by default. On Windows without permission to create symlinks, three real symlink integration tests are expected to skip; the deterministic link and reparse-point tests still run.
 
+Release inventory validation does not use or copy `backend/.venv`. On Windows, pass an absolute base-interpreter path to the repository-owned workflow:
+
+```powershell
+node scripts/release/validate-python-runtime-inventory.mjs --python C:\Path\To\Python\python.exe
+```
+
+The selected executable must be 64-bit CPython 3.12.13 or 3.13.13, the two committed clean-room verified versions. The workflow rejects virtual-environment interpreters, creates a fresh `.desktop-build/runtime-inventory-venv`, installs the 14 exact runtime pins from `backend/requirements.lock.txt` with pip isolated mode, `--no-cache-dir`, and `--no-deps`, verifies the complete installed graph and `pip check`, passes the resulting site-packages path explicitly to the third-party inventory checker, and removes the disposable environment on success or ordinary failure. Pip is treated only as virtual-environment bootstrap tooling. PyInstaller and setuptools remain governed by the separate desktop build lock and are not installed into this runtime metadata environment.
+
 ### Frontend
 
 ```bash

@@ -1,16 +1,17 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { packageVersionKeys } from "./pnpm-lock.mjs";
 
-const repository = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const scriptPath = fileURLToPath(import.meta.url);
+const repository = resolve(dirname(scriptPath), "..", "..");
 const frontend = join(repository, "frontend");
 const outputPath = join(repository, "docs", "release", "third-party-runtime-inventory.json");
 const cargoManifest = join(repository, "frontend", "src-tauri", "Cargo.toml");
 const pnpmLockPath = join(frontend, "pnpm-lock.yaml");
 const requirementsPath = join(repository, "backend", "requirements.lock.txt");
-const pythonSitePackages = join(repository, "backend", ".venv", "Lib", "site-packages");
+const defaultPythonSitePackages = join(repository, "backend", ".venv", "Lib", "site-packages");
 const cargoRegistry = join(process.env.USERPROFILE ?? "", ".cargo", "registry", "src");
 
 function fail(message) {
@@ -21,10 +22,47 @@ function normalizeName(value) {
   return value.toLowerCase().replaceAll("-", "_").replaceAll(".", "_");
 }
 
-function readText(path) {
-  const bytes = readFileSync(path);
-  if (bytes[0] === 0xff && bytes[1] === 0xfe) return bytes.subarray(2).toString("utf16le");
-  return bytes.toString("utf8").replace(/^\uFEFF/, "");
+function repositoryChild(path, label) {
+  const resolved = resolve(path);
+  const child = relative(repository, resolved);
+  if (!child || child === ".." || child.startsWith(`..${sep}`) || isAbsolute(child)) {
+    fail(`${label} must remain inside the repository.`);
+  }
+  return resolved;
+}
+
+export function resolvePythonSitePackages(value = defaultPythonSitePackages) {
+  const resolved = repositoryChild(value, "Python site-packages");
+  if (!existsSync(resolved)) fail(`Python site-packages is unavailable: ${resolved}`);
+  if (!lstatSync(resolved).isDirectory() || lstatSync(resolved).isSymbolicLink()) {
+    fail(`Python site-packages must be a real directory: ${resolved}`);
+  }
+  const canonicalRepository = realpathSync.native(repository);
+  const canonical = realpathSync.native(resolved);
+  const child = relative(canonicalRepository, canonical);
+  if (!child || child === ".." || child.startsWith(`..${sep}`) || isAbsolute(child)) {
+    fail(`Python site-packages escapes the repository: ${resolved}`);
+  }
+  return resolved;
+}
+
+export function parseInventoryArguments(argv) {
+  let check = false;
+  let pythonSitePackages;
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (argument === "--check") {
+      check = true;
+    } else if (argument === "--python-site-packages") {
+      if (pythonSitePackages !== undefined) fail("--python-site-packages may be provided only once.");
+      pythonSitePackages = argv[index + 1];
+      if (!pythonSitePackages || pythonSitePackages.startsWith("--")) fail("--python-site-packages requires a path.");
+      index += 1;
+    } else {
+      fail(`Unknown inventory argument: ${argument}`);
+    }
+  }
+  return { check, pythonSitePackages: resolvePythonSitePackages(pythonSitePackages) };
 }
 
 function packageSection(text) {
@@ -116,8 +154,7 @@ function metadataValue(text, key) {
   return text.match(new RegExp(`^${key}:\\s*(.+)$`, "mi"))?.[1]?.trim() ?? "";
 }
 
-function pythonMetadataIndex() {
-  if (!existsSync(pythonSitePackages)) fail(`Python site-packages is unavailable: ${pythonSitePackages}`);
+function pythonMetadataIndex(pythonSitePackages) {
   const index = new Map();
   for (const entry of readdirSync(pythonSitePackages, { withFileTypes: true })) {
     if (!entry.isDirectory() || !entry.name.endsWith(".dist-info")) continue;
@@ -125,43 +162,62 @@ function pythonMetadataIndex() {
     if (!existsSync(metadataPath)) continue;
     const text = readFileSync(metadataPath, "utf8");
     const name = metadataValue(text, "Name");
-    if (name) index.set(normalizeName(name), { text, metadataPath });
+    if (!name) continue;
+    const normalized = normalizeName(name);
+    if (index.has(normalized)) fail(`Duplicate Python metadata found for ${name}`);
+    index.set(normalized, { text, metadataPath });
   }
   return index;
 }
 
-function pythonRuntime() {
+export function parseLockedPythonRequirements(text) {
+  const seen = new Set();
+  return readTextBuffer(text)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"))
+    .map((line, index) => {
+      const match = line.match(/^([A-Za-z0-9][A-Za-z0-9._-]*)==([^\s;]+)$/);
+      if (!match) fail(`Unsupported requirements entry ${index + 1}: ${line}`);
+      const normalized = normalizeName(match[1]);
+      if (seen.has(normalized)) fail(`Duplicate requirements entry: ${match[1]}`);
+      seen.add(normalized);
+      return { name: match[1], normalized, version: match[2] };
+    });
+}
+
+function readTextBuffer(value) {
+  if (Buffer.isBuffer(value)) {
+    if (value[0] === 0xff && value[1] === 0xfe) return value.subarray(2).toString("utf16le");
+    return value.toString("utf8").replace(/^\uFEFF/, "");
+  }
+  return String(value).replace(/^\uFEFF/, "");
+}
+
+export function pythonRuntime(pythonSitePackages, requirementsText = readFileSync(requirementsPath)) {
   const fallbackLicenses = new Map([
     ["annotated_types", "MIT"],
     ["colorama", "BSD-3-Clause"],
     ["h11", "MIT"],
-    ["setuptools", "MIT"],
   ]);
-  const requirements = readText(requirementsPath)
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const match = line.match(/^([^=]+)==(.+)$/);
-      if (!match) fail(`Unsupported requirements entry: ${line}`);
-      return { name: match[1], version: match[2] };
-    });
-  const metadata = pythonMetadataIndex();
+  const requirements = parseLockedPythonRequirements(requirementsText);
+  const metadata = pythonMetadataIndex(resolvePythonSitePackages(pythonSitePackages));
+  const expected = new Set(requirements.map((entry) => entry.normalized));
+  const unexpected = [...metadata.keys()].filter((name) => name !== "pip" && !expected.has(name)).sort();
+  if (unexpected.length) fail(`Unexpected Python metadata found: ${unexpected.join(", ")}`);
   const runtime = requirements.map((entry) => {
-    const normalized = normalizeName(entry.name);
-    const record = metadata.get(normalized);
+    const record = metadata.get(entry.normalized);
     if (!record) fail(`No Python metadata found for ${entry.name}`);
     const observedVersion = metadataValue(record.text, "Version");
     if (observedVersion !== entry.version) fail(`${entry.name} metadata is ${observedVersion}; expected ${entry.version}`);
-    const license = metadataValue(record.text, "License-Expression") || fallbackLicenses.get(normalized);
+    const license = metadataValue(record.text, "License-Expression") || fallbackLicenses.get(entry.normalized);
     if (!license) fail(`No concise license expression found for ${entry.name}`);
-    return { ...entry, license };
+    return { name: entry.name, version: entry.version, license };
   });
-  runtime.push({ name: "setuptools", version: "83.0.0", license: "MIT" });
   return runtime.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function inventory() {
+export function inventory({ pythonSitePackages = defaultPythonSitePackages } = {}) {
   return {
     schemaVersion: "1.0.0",
     productVersion: "0.9.11",
@@ -171,13 +227,13 @@ function inventory() {
       "frontend/pnpm-lock.yaml",
       "frontend/node_modules installed pnpm metadata",
       "backend/requirements.lock.txt",
-      "backend/.venv installed metadata",
+      "explicit installed Python metadata from backend/requirements.lock.txt",
       "cargo tree --target x86_64-pc-windows-msvc --edges normal --locked --offline",
       "frontend/src-tauri/tauri.conf.json",
       "G050 PyInstaller and installed payload readback",
     ],
     frontendRuntime: nodeRuntime(),
-    pythonRuntime: pythonRuntime(),
+    pythonRuntime: pythonRuntime(pythonSitePackages),
     rustRuntime: rustRuntime(),
     bundledNativeRuntime: [
       { name: "CPython", version: "3.13.13", license: "PSF-2.0" },
@@ -203,12 +259,20 @@ function inventory() {
   };
 }
 
-const rendered = `${JSON.stringify(inventory(), null, 2)}\n`;
-if (process.argv.includes("--check")) {
-  if (!existsSync(outputPath)) fail(`Inventory is missing: ${outputPath}`);
-  if (readFileSync(outputPath, "utf8") !== rendered) fail("Third-party runtime inventory is stale.");
-  console.log("Third-party runtime inventory matches locked Windows runtime inputs.");
-} else {
-  writeFileSync(outputPath, rendered, { flag: "w" });
-  console.log(`Wrote ${outputPath}`);
+export function runInventory(argv = process.argv.slice(2)) {
+  const options = parseInventoryArguments(argv);
+  const rendered = `${JSON.stringify(inventory(options), null, 2)}\n`;
+  if (options.check) {
+    if (!existsSync(outputPath)) fail(`Inventory is missing: ${outputPath}`);
+    if (readFileSync(outputPath, "utf8") !== rendered) fail("Third-party runtime inventory is stale.");
+    console.log("Third-party runtime inventory matches locked Windows runtime inputs.");
+  } else {
+    writeFileSync(outputPath, rendered, { flag: "w" });
+    console.log(`Wrote ${outputPath}`);
+  }
+  return rendered;
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === resolve(scriptPath)) {
+  runInventory();
 }
