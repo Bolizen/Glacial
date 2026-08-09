@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -7,7 +7,6 @@ import {
   ensureSafeDirectory,
   minimalEnvironment,
   privacySafePath,
-  removeSafeTree,
   resolvePnpmInvocation,
   resolveToolExecutable,
   runCommand,
@@ -121,6 +120,15 @@ function assertRepositoryChild(root, target, label) {
   return resolve(target);
 }
 
+export function removeDisposableTree(root, target) {
+  const safeTarget = assertSafePath(root, target);
+  if (!existsSync(safeTarget)) return false;
+  if (lstatSync(safeTarget).isSymbolicLink()) fail("Disposable cleanup root must not be a symbolic link or junction.");
+  rmSync(safeTarget, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  if (existsSync(safeTarget)) fail("Disposable cleanup target still exists after removal.");
+  return true;
+}
+
 function expectedPnpmVersion(root) {
   const packageManager = JSON.parse(readFileSync(join(root, "frontend", "package.json"), "utf8")).packageManager;
   const match = String(packageManager ?? "").match(/^pnpm@(\d+\.\d+\.\d+)$/);
@@ -205,7 +213,6 @@ function runCleanCheckout({ checkout, python, git, pnpm, cargo, environment, com
     ...pnpm.prefixArgs, "install", "--frozen-lockfile", "--verify-store-integrity",
     "--store-dir", join(checkout, ".desktop-build", "s"),
     "--cache-dir", join(checkout, ".desktop-build", "k"),
-    "--virtual-store-dir", join(checkout, ".desktop-build", "v"),
   ], { cwd: frontend, env: environment });
   if (sha256(pnpmLock) !== pnpmLockBefore) fail("Frozen pnpm provisioning modified pnpm-lock.yaml.");
 
@@ -301,16 +308,21 @@ export function validateCleanEnvironment(argv = process.argv.slice(2)) {
     });
     summary = runCleanCheckout({ checkout, python: pythonIdentity.executable, git, pnpm, cargo, environment, commit });
   } finally {
-    if (worktreeRegistered) {
-      try { run(git, ["worktree", "remove", "--force", checkout], { cwd: repository, env: hostEnvironment, redactions: [checkout], visible: false }); } catch (error) {
-        cleanupError = new Error(`Disposable worktree cleanup failed: ${sanitizeDiagnosticText(error.message, [checkout])}`);
+    if (worktreeRegistered && existsSync(checkout)) {
+      for (const target of [join(checkout, "frontend", "node_modules"), join(checkout, "frontend", "dist"), join(checkout, ".desktop-build")]) {
+        try { removeDisposableTree(checkout, target); } catch (error) { cleanupError ??= error; }
       }
     }
-    if (!cleanupError && existsSync(checkout)) {
-      try { removeSafeTree(repository, checkout); } catch (error) { cleanupError = error; }
+    if (worktreeRegistered) {
+      try { run(git, ["worktree", "remove", "--force", checkout], { cwd: repository, env: hostEnvironment, redactions: [checkout], visible: false }); } catch (error) {
+        cleanupError ??= new Error(`Disposable worktree cleanup failed: ${sanitizeDiagnosticText(error.message, [checkout])}`);
+      }
     }
+    if (existsSync(checkout)) {
+      try { removeDisposableTree(repository, checkout); } catch (error) { cleanupError ??= error; }
+    }
+    if (cleanupError) throw cleanupError;
   }
-  if (cleanupError) throw cleanupError;
   const primaryAfter = gitState(git, repository, hostEnvironment);
   assertSameState(primaryBefore, primaryAfter, "Primary repository");
   const result = {
