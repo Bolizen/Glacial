@@ -149,10 +149,10 @@ export function compareInstalledGraph(scope, installedItems) {
 
 function provisionBuildEnvironment({ basePython, checkout, environment, manifest }) {
   const scope = manifest.scopes["desktop-build"];
-  const stateRoot = assertRepositoryChild(checkout, join(checkout, ".desktop-build", "clean-gate-python"), "Python state root");
-  const wheelhouse = join(stateRoot, "desktop-build-wheelhouse");
-  const hashedRequirements = join(stateRoot, "desktop-build-requirements.txt");
-  const virtualEnvironment = join(stateRoot, "desktop-build-venv");
+  const stateRoot = assertRepositoryChild(checkout, join(checkout, ".desktop-build", "p"), "Python state root");
+  const wheelhouse = join(stateRoot, "w");
+  const hashedRequirements = join(stateRoot, "requirements.txt");
+  const virtualEnvironment = join(stateRoot, "v");
   ensureSafeDirectory(checkout, stateRoot);
   ensureSafeDirectory(checkout, wheelhouse);
   writeFileSync(hashedRequirements, renderHashedRequirements(scope), { encoding: "utf8", flag: "wx" });
@@ -191,7 +191,7 @@ function runCleanCheckout({ checkout, python, git, pnpm, cargo, environment, com
   const frontend = join(checkout, frontendRelative);
   const isolatedRoot = join(checkout, ".desktop-build");
   ensureSafeDirectory(checkout, isolatedRoot);
-  writeFileSync(join(isolatedRoot, "empty-npmrc"), "", { encoding: "utf8", flag: "wx" });
+  writeFileSync(join(isolatedRoot, "u"), "", { encoding: "utf8", flag: "wx" });
   const manifest = loadPythonArtifactManifest(checkout);
   const before = gitState(git, checkout, environment);
   assertCleanState(before, "Disposable committed checkout", commit);
@@ -203,8 +203,9 @@ function runCleanCheckout({ checkout, python, git, pnpm, cargo, environment, com
   if (pnpmVersion !== requiredPnpm) fail(`Resolved pnpm ${pnpmVersion} differs from packageManager pnpm@${requiredPnpm}.`);
   run(pnpm.command, [
     ...pnpm.prefixArgs, "install", "--frozen-lockfile", "--verify-store-integrity",
-    "--store-dir", join(checkout, ".desktop-build", "pnpm-store"),
-    "--cache-dir", join(checkout, ".desktop-build", "pnpm-cache"),
+    "--store-dir", join(checkout, ".desktop-build", "s"),
+    "--cache-dir", join(checkout, ".desktop-build", "k"),
+    "--virtual-store-dir", join(checkout, ".desktop-build", "v"),
   ], { cwd: frontend, env: environment });
   if (sha256(pnpmLock) !== pnpmLockBefore) fail("Frozen pnpm provisioning modified pnpm-lock.yaml.");
 
@@ -213,7 +214,7 @@ function runCleanCheckout({ checkout, python, git, pnpm, cargo, environment, com
   });
 
   const build = provisionBuildEnvironment({ basePython: python, checkout, environment, manifest });
-  run(process.execPath, [join(checkout, "scripts", "release", "validate-python-runtime-inventory.mjs"), "--python", python, "--environment", join(checkout, ".desktop-build", "runtime-inventory-venv")], {
+  run(process.execPath, [join(checkout, "scripts", "release", "validate-python-runtime-inventory.mjs"), "--python", python, "--environment", join(checkout, ".desktop-build", "r")], {
     cwd: checkout, env: environment, redactions: [python],
   });
   run(pnpm.command, [...pnpm.prefixArgs, "run", "validate:production-dependencies"], { cwd: frontend, env: environment });
@@ -277,23 +278,21 @@ export function validateCleanEnvironment(argv = process.argv.slice(2)) {
   const primaryBefore = gitState(git, repository, hostEnvironment);
   assertCleanState(primaryBefore, "Primary repository");
   const commit = primaryBefore.head;
-  const runRoot = assertSafePath(repository, join(repository, ".desktop-build", `clean-environment-gate-${process.pid}`));
-  const checkout = join(runRoot, "checkout");
-  if (existsSync(runRoot)) fail(`Disposable gate root already exists: ${privacySafePath(runRoot)}`);
+  const checkout = assertSafePath(repository, join(repository, "dist"));
+  if (existsSync(checkout)) fail(`Disposable gate checkout already exists: ${privacySafePath(checkout)}`);
   let worktreeRegistered = false;
   let cleanupError;
   let summary;
   try {
-    ensureSafeDirectory(repository, runRoot);
     run(git, ["worktree", "add", "--detach", checkout, commit], { cwd: repository, env: hostEnvironment, redactions: [checkout] });
     worktreeRegistered = true;
     const environment = minimalEnvironment(process.env, {
-      CARGO_HOME: join(checkout, ".desktop-build", "cargo-home"),
-      CARGO_TARGET_DIR: join(checkout, ".desktop-build", "cargo-target"),
-      NPM_CONFIG_CACHE: join(checkout, ".desktop-build", "npm-cache"),
+      CARGO_HOME: join(checkout, ".desktop-build", "c"),
+      CARGO_TARGET_DIR: join(checkout, ".desktop-build", "t"),
+      NPM_CONFIG_CACHE: join(checkout, ".desktop-build", "n"),
       NPM_CONFIG_GLOBALCONFIG: "NUL",
       NPM_CONFIG_REGISTRY: "https://registry.npmjs.org/",
-      NPM_CONFIG_USERCONFIG: join(checkout, ".desktop-build", "empty-npmrc"),
+      NPM_CONFIG_USERCONFIG: join(checkout, ".desktop-build", "u"),
       PIP_DISABLE_PIP_VERSION_CHECK: "1",
       PIP_CONFIG_FILE: "NUL",
       PIP_NO_INPUT: "1",
@@ -307,8 +306,8 @@ export function validateCleanEnvironment(argv = process.argv.slice(2)) {
         cleanupError = new Error(`Disposable worktree cleanup failed: ${sanitizeDiagnosticText(error.message, [checkout])}`);
       }
     }
-    if (!cleanupError && existsSync(runRoot)) {
-      try { removeSafeTree(repository, runRoot); } catch (error) { cleanupError = error; }
+    if (!cleanupError && existsSync(checkout)) {
+      try { removeSafeTree(repository, checkout); } catch (error) { cleanupError = error; }
     }
   }
   if (cleanupError) throw cleanupError;
