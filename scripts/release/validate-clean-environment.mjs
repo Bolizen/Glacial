@@ -205,7 +205,6 @@ function runCleanCheckout({ checkout, python, git, pnpm, cargo, environment, com
     ...pnpm.prefixArgs, "install", "--frozen-lockfile", "--verify-store-integrity",
     "--store-dir", join(checkout, ".desktop-build", "pnpm-store"),
     "--cache-dir", join(checkout, ".desktop-build", "pnpm-cache"),
-    "--state-dir", join(checkout, ".desktop-build", "pnpm-state"),
   ], { cwd: frontend, env: environment });
   if (sha256(pnpmLock) !== pnpmLockBefore) fail("Frozen pnpm provisioning modified pnpm-lock.yaml.");
 
