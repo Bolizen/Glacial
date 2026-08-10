@@ -5,6 +5,7 @@ import sqlite3
 import tempfile
 import unittest
 from contextlib import contextmanager
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -395,6 +396,8 @@ class ReviewCheckpointTests(unittest.TestCase):
         *,
         findings: list[dict[str, object]],
     ) -> int:
+        source_date = datetime.fromisoformat(str(source["scan_date"]).replace("Z", "+00:00"))
+        later_date = (source_date + timedelta(seconds=1)).isoformat()
         with database.get_connection() as connection:
             row = connection.execute(
                 "SELECT * FROM scans WHERE id = ?",
@@ -407,7 +410,7 @@ class ReviewCheckpointTests(unittest.TestCase):
                 ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     str(self.project),
-                    "2026-08-02T12:00:00+00:00",
+                    later_date,
                     "high" if findings else "low",
                     json.dumps(findings),
                     len(findings),
