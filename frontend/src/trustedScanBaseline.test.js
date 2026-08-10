@@ -26,7 +26,12 @@ test("trusted scan baseline eligibility accepts only complete, reliable persiste
   malformed.reviewedFileCount = 2;
   assert.equal(trustedScanEligibility(malformed).eligible, false);
 
-  const unsupported = completeScan(4);
+  const reduced = completeScan(4, { reviewedFilesTruncated: true });
+  const reducedEligibility = trustedScanEligibility(reduced);
+  assert.equal(reducedEligibility.eligible, false);
+  assert.match(reducedEligibility.reason, /metadata was reduced/);
+
+  const unsupported = completeScan(5);
   unsupported.dependencyTrust.status = "incomplete";
   assert.equal(trustedScanEligibility(unsupported).eligible, false);
 });

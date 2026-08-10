@@ -429,6 +429,24 @@ test("legacy summary sections preserve input order and omit malformed empty rows
   assert.doesNotMatch(markdown, /^\s+-\s*:\s*$/m);
 });
 
+test("reviewed-file reduction is explicit and preserves the represented prefix", () => {
+  const report = reportFixture({
+    reviewedFiles: ["a.js", "b.js"],
+    reviewedFileCount: 10,
+    reviewedFilesTruncated: true,
+  });
+
+  const markdown = buildScanReportMarkdown(
+    scanResult([]),
+    report,
+    null,
+    { configured: false },
+  );
+
+  assert.match(markdown, /2 of 10 paths are represented by the retained sorted prefix/);
+  assert.match(markdown, /- `a\.js`\n- `b\.js`/);
+});
+
 test("exports complete, incomplete, and unknown scan coverage conservatively", () => {
   const emptyReport = reportFixture({
     manifests: [],

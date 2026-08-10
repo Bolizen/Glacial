@@ -62,6 +62,7 @@ class TrustedScanBaselineTests(unittest.TestCase):
         complete: bool = True,
         metadata_reliable: bool = True,
         dependency_status: str = "complete",
+        reviewed_files_truncated: bool = False,
     ) -> None:
         issue_count = 0 if complete else 1
         metadata = {
@@ -70,6 +71,7 @@ class TrustedScanBaselineTests(unittest.TestCase):
             "lifecycleScripts": [{"path": "package.json", "script": "test"}],
             "ignoredFiles": [],
             "reviewedFiles": ["src/index.js"],
+            "reviewedFilesTruncated": reviewed_files_truncated,
             "scanCompleteness": {
                 "complete": complete,
                 "traversalFailureCount": 0,
@@ -141,12 +143,17 @@ class TrustedScanBaselineTests(unittest.TestCase):
         self.add_scan(1, complete=False)
         self.add_scan(2, metadata_reliable=False)
         self.add_scan(3, dependency_status="incomplete")
+        self.add_scan(4, reviewed_files_truncated=True)
 
-        for scan_id in (1, 2, 3):
+        for scan_id in (1, 2, 3, 4):
             with self.subTest(scan_id=scan_id), self.assertRaises(HTTPException) as error:
                 self.set_baseline(scan_id)
             self.assertEqual(error.exception.status_code, 409)
         self.assertEqual(self.activity_types(), [])
+
+        reduced = main.scan_history(str(self.project))["scans"][0]
+        self.assertTrue(reduced["reviewedFilesTruncated"])
+        self.assertFalse(reduced["scanMetadataReliable"])
 
     def test_cross_project_scan_cannot_be_pinned(self) -> None:
         self.add_scan(1, project=self.other)

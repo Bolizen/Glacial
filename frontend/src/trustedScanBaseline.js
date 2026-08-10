@@ -43,6 +43,9 @@ export function trustedScanEligibility(scan) {
   if (completeness.complete !== true) {
     return { eligible: false, status: "incomplete", reason: "Scan coverage is incomplete." };
   }
+  if (scan.reviewedFilesTruncated === true) {
+    return { eligible: false, status: "indeterminate", reason: "Reviewed-path metadata was reduced to stay within the native response limit." };
+  }
   if (
     !Array.isArray(scan.reviewedFiles)
     || scan.reviewedFiles.some((item) => typeof item !== "string")

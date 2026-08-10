@@ -620,6 +620,7 @@ def _comparison_scan(row: Any) -> dict[str, Any]:
         "ignoredFiles": metadata.get("ignoredFiles"),
         "builtInExcludedDirectories": metadata.get("builtInExcludedDirectories", []),
         "reviewedFiles": metadata.get("reviewedFiles"),
+        "reviewedFilesTruncated": metadata.get("reviewedFilesTruncated") is True,
         "scanCompleteness": metadata.get("scanCompleteness"),
         "scanMetadataReliable": _raw_scan_metadata_reliable(metadata),
         "dependencyTrust": metadata.get("dependencyTrust"),
@@ -627,6 +628,8 @@ def _comparison_scan(row: Any) -> dict[str, Any]:
 
 
 def _raw_scan_metadata_reliable(metadata: dict[str, Any]) -> bool:
+    if metadata.get("reviewedFilesTruncated") is True:
+        return False
     for field in ("manifests", "lockfiles", "ignoredFiles", "reviewedFiles"):
         value = metadata.get(field)
         if not isinstance(value, list) or any(not isinstance(item, str) for item in value):

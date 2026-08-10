@@ -25,6 +25,11 @@ from .activity import (
 )
 from .agents import generate_agents_md
 from .agents_write import filesystem_error_status, safe_write_project_file
+from .bridge_limits import (
+    BridgeResponseTooLarge,
+    fit_history_response,
+    fit_scan_reviewed_files,
+)
 from .changelog import CHANGELOG_ENTRIES
 from .config import allowed_cors_origins, desktop_auth_token
 from . import database
@@ -422,6 +427,26 @@ def run_scan(payload: ProjectPathRequest) -> dict[str, object]:
     )
     now = _now()
     finding_summary = _finding_summary(result["findings"])
+    reviews = _finding_reviews(str(project))
+    baseline = _trusted_baseline_row(str(project))
+    try:
+        response = fit_scan_reviewed_files(
+            result,
+            lambda: _scan_response(
+                result,
+                scan_id=9_223_372_036_854_775_807,
+                project=str(project),
+                scan_date=now,
+                finding_summary=finding_summary,
+                reviews=reviews,
+                baseline=baseline,
+            ),
+        )
+    except BridgeResponseTooLarge as exc:
+        raise HTTPException(
+            status_code=413,
+            detail=f"{exc} The scan was not persisted; reduce the hostile metadata and rescan.",
+        ) from exc
     scan_metadata = _scan_metadata(result)
     with get_connection() as connection:
         cursor = connection.execute(
@@ -451,43 +476,32 @@ def run_scan(payload: ProjectPathRequest) -> dict[str, object]:
                 json.dumps(scan_metadata),
             ),
         )
-    response = {
-        "id": cursor.lastrowid,
-        "project_path": str(project),
-        "scan_date": now,
-        "overall_risk": result["overall_risk"],
-        "findings": result["findings"],
-        "findingCount": len(result["findings"]),
-        "findingSummary": finding_summary,
-        "manifests": result["manifests"],
-        "lockfiles": result["lockfiles"],
-        "lifecycleScripts": result["lifecycleScripts"],
-        "secretFiles": result["secretFiles"],
-        "ignoredFiles": result["ignoredFiles"],
-        "ignoredFileCount": len(result["ignoredFiles"]),
-        "builtInExcludedDirectories": result.get("builtInExcludedDirectories", []),
-        "reviewedFiles": result["reviewedFiles"],
-        "reviewedFileCount": result["reviewedFileCount"],
-        "zone": result["zone"],
-        "scanCompleteness": result["scanCompleteness"],
-        "scanMetadataReliable": True,
-        "dependencyTrust": result.get("dependencyTrust"),
-    }
-    response = enrich_scan(response, _finding_reviews(str(project)))
-    return enrich_trusted_baseline(response, _trusted_baseline_row(str(project)))
+    response["id"] = cursor.lastrowid
+    return response
 
 
 @app.get("/api/scans/history")
 def scan_history(project_path: str = Query(min_length=1, max_length=1000)) -> dict[str, object]:
     project = _ensure_project(project_path)
     with get_connection() as connection:
+        available_scan_count = connection.execute(
+            "SELECT COUNT(*) FROM scans WHERE project_path = ?",
+            (str(project),),
+        ).fetchone()[0]
         rows = connection.execute(
             "SELECT * FROM scans WHERE project_path = ? ORDER BY scan_date DESC LIMIT 20",
             (str(project),),
         ).fetchall()
     reviews = _finding_reviews(str(project))
     baseline = _trusted_baseline_row(str(project))
-    return {"scans": [enrich_trusted_baseline(enrich_scan(row_to_scan(row), reviews), baseline) for row in rows]}
+    scans = [
+        enrich_trusted_baseline(enrich_scan(row_to_scan(row), reviews), baseline)
+        for row in rows
+    ]
+    try:
+        return fit_history_response(scans, available_scan_count=available_scan_count)
+    except BridgeResponseTooLarge as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
 
 
 @app.post("/api/remediation-brief")
@@ -1437,7 +1451,44 @@ def _scan_metadata(result: dict[str, object]) -> dict[str, object]:
         "ignoredFiles": result.get("ignoredFiles", []),
         "builtInExcludedDirectories": result.get("builtInExcludedDirectories", []),
         "reviewedFiles": result.get("reviewedFiles", []),
+        "reviewedFilesTruncated": result.get("reviewedFilesTruncated") is True,
         "zone": result.get("zone", "Unknown"),
         "scanCompleteness": result.get("scanCompleteness"),
         "dependencyTrust": result.get("dependencyTrust"),
     }
+
+
+def _scan_response(
+    result: dict[str, object],
+    *,
+    scan_id: int,
+    project: str,
+    scan_date: str,
+    finding_summary: dict[str, int],
+    reviews: list[dict[str, object]],
+    baseline: dict[str, object] | None,
+) -> dict[str, object]:
+    response = {
+        "id": scan_id,
+        "project_path": project,
+        "scan_date": scan_date,
+        "overall_risk": result["overall_risk"],
+        "findings": result["findings"],
+        "findingCount": len(result["findings"]),
+        "findingSummary": finding_summary,
+        "manifests": result["manifests"],
+        "lockfiles": result["lockfiles"],
+        "lifecycleScripts": result["lifecycleScripts"],
+        "secretFiles": result["secretFiles"],
+        "ignoredFiles": result["ignoredFiles"],
+        "ignoredFileCount": len(result["ignoredFiles"]),
+        "builtInExcludedDirectories": result.get("builtInExcludedDirectories", []),
+        "reviewedFiles": result["reviewedFiles"],
+        "reviewedFileCount": result["reviewedFileCount"],
+        "reviewedFilesTruncated": result.get("reviewedFilesTruncated") is True,
+        "zone": result["zone"],
+        "scanCompleteness": result["scanCompleteness"],
+        "scanMetadataReliable": result.get("reviewedFilesTruncated") is not True,
+        "dependencyTrust": result.get("dependencyTrust"),
+    }
+    return enrich_trusted_baseline(enrich_scan(response, reviews), baseline)

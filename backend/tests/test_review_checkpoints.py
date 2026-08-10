@@ -290,6 +290,44 @@ class ReviewCheckpointTests(unittest.TestCase):
         self.assertEqual(malformed_history["state"]["id"], "indeterminate")
         self.assertRegex(malformed_history["state"]["reasons"][0], r"unsupported")
 
+    def test_reduced_reviewed_paths_cannot_supply_checkpoint_baseline_evidence(self) -> None:
+        baseline = self._ready_scan()
+        with database.get_connection() as connection:
+            row = connection.execute(
+                "SELECT scan_metadata_json FROM scans WHERE id = ?",
+                (baseline["id"],),
+            ).fetchone()
+            metadata = json.loads(row["scan_metadata_json"])
+            metadata["reviewedFilesTruncated"] = True
+            connection.execute(
+                "UPDATE scans SET scan_metadata_json = ? WHERE id = ?",
+                (json.dumps(metadata), baseline["id"]),
+            )
+
+        current = main.run_scan(ProjectPathRequest(project_path=str(self.project)))
+        page = self._page()
+        evidence = page["currentEvidence"]
+        self.assertTrue(evidence["reliable"], evidence)
+        self.assertTrue(evidence["readyForCheckpoint"], evidence)
+        self.assertIsNone(evidence["baselineScanId"])
+        self.assertEqual(evidence["baselineProvenance"], "none")
+
+        with database.get_connection() as connection:
+            row = connection.execute(
+                "SELECT scan_metadata_json FROM scans WHERE id = ?",
+                (current["id"],),
+            ).fetchone()
+            metadata = json.loads(row["scan_metadata_json"])
+            metadata["reviewedFilesTruncated"] = True
+            connection.execute(
+                "UPDATE scans SET scan_metadata_json = ? WHERE id = ?",
+                (json.dumps(metadata), current["id"]),
+            )
+
+        reduced_current = self._page()["currentEvidence"]
+        self.assertFalse(reduced_current["reliable"])
+        self.assertRegex(" ".join(reduced_current["reasons"]), r"metadata is unreliable")
+
     def _register(self, project: Path) -> None:
         with database.get_connection() as connection:
             connection.execute(

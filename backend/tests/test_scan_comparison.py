@@ -221,6 +221,20 @@ class ScanComparisonTests(unittest.TestCase):
         self.assertFalse(result["targetScan"]["metadataSource"]["reliable"])
         self.assertNotEqual(result["overallStatus"], "comparable")
 
+    def test_reduced_reviewed_paths_are_not_reliable_comparison_metadata(self) -> None:
+        self.add_scan(1, date="2026-05-01T12:00:00+00:00")
+        self.add_scan(
+            2,
+            date="2026-05-02T12:00:00+00:00",
+            metadata_overrides={"reviewedFilesTruncated": True},
+        )
+
+        result = self.compare(1, 2)
+
+        self.assertFalse(result["targetScan"]["metadataSource"]["reliable"])
+        self.assertEqual(result["sections"]["projectMetadataStatus"], "indeterminate")
+        self.assertNotEqual(result["overallStatus"], "comparable")
+
 
 def finding(path: str, reason: str, severity: str = "low") -> dict[str, object]:
     return {

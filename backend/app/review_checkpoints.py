@@ -809,6 +809,8 @@ def _baseline_metadata_snapshot(row: Any) -> dict[str, Any] | None:
         return None
     if not isinstance(metadata, Mapping):
         return None
+    if metadata.get("reviewedFilesTruncated") is True:
+        return None
     string_fields = ("manifests", "lockfiles", "ignoredFiles", "reviewedFiles")
     if any(
         not isinstance(metadata.get(field), list)

@@ -131,6 +131,7 @@ def row_to_scan(row: sqlite3.Row) -> dict[str, Any]:
         "ignoredFiles": _metadata_list(metadata, "ignoredFiles"),
         "builtInExcludedDirectories": _metadata_list(metadata, "builtInExcludedDirectories"),
         "reviewedFiles": _metadata_list(metadata, "reviewedFiles"),
+        "reviewedFilesTruncated": metadata.get("reviewedFilesTruncated") is True,
         "zone": str(metadata.get("zone") or "Unknown"),
         "scanCompleteness": _scan_completeness(metadata),
         "scanMetadataReliable": _scan_metadata_reliable(metadata),
@@ -249,6 +250,8 @@ def _dependency_trust(metadata: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def _scan_metadata_reliable(metadata: dict[str, Any]) -> bool:
+    if metadata.get("reviewedFilesTruncated") is True:
+        return False
     string_list_fields = ("manifests", "lockfiles", "ignoredFiles", "reviewedFiles")
     if any(
         not isinstance(metadata.get(field), list)

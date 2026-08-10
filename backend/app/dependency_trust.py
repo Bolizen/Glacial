@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Iterator
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,11 @@ MAX_CHANGES = 300
 MAX_FINDINGS = 500
 MAX_DEPENDENCY_FILES = 500
 MAX_REQUIREMENTS_DEPTH = 100
+# A realistic requirements file is normally measured in hundreds or low
+# thousands of lines. This ceiling remains well above those projects while
+# preventing a <= 5 MiB newline-dense file from creating millions of Python
+# line and tuple objects before blank/comment filtering can run.
+MAX_REQUIREMENTS_PHYSICAL_LINES = 50_000
 SUPPORTED_INTEGRITY_ALGORITHMS = {"sha256", "sha384", "sha512"}
 NODE_MANIFESTS = {"package.json"}
 NODE_LOCKFILES = {"package-lock.json", "npm-shrinkwrap.json"}
@@ -625,6 +631,17 @@ class _AnalysisState:
             self._requirements_error(relative, 0, "Requirements metadata is not valid UTF-8.")
             self._requirements_stack.pop()
             return
+        for physical_line_count, _ in enumerate(_physical_requirement_lines(text), start=1):
+            if physical_line_count > MAX_REQUIREMENTS_PHYSICAL_LINES:
+                self._analysis_gap(
+                    relative,
+                    "requirements-line-limit",
+                    "Requirements metadata exceeded the safe physical-line limit.",
+                    "Requirements metadata contained too many physical lines to analyze safely.",
+                    "Review or consolidate the requirements file and rescan.",
+                )
+                self._requirements_stack.pop()
+                return
         for line_number, raw_line, dangling_continuation in _logical_requirement_lines(text):
             line = raw_line.strip()
             if not line or line.startswith("#"):
@@ -1400,6 +1417,15 @@ def _toml_object(content: bytes, state: _AnalysisState, relative: str, finding_t
         return None
     try:
         data = tomllib.loads(content.decode("utf-8"))
+    except RecursionError:
+        state._analysis_gap(
+            relative,
+            "toml-nesting-limit",
+            "Dependency TOML metadata exceeded the parser's safe nesting capacity.",
+            "Dependency TOML metadata was nested too deeply to analyze safely.",
+            "Reduce the TOML nesting depth or inspect this dependency metadata manually.",
+        )
+        return None
     except (UnicodeDecodeError, tomllib.TOMLDecodeError):
         state.malformed = True
         state.failed_files.add(relative)
@@ -1411,22 +1437,36 @@ def _toml_object(content: bytes, state: _AnalysisState, relative: str, finding_t
     return data
 
 
-def _logical_requirement_lines(text: str) -> list[tuple[int, str, bool]]:
-    logical: list[tuple[int, str, bool]] = []
+def _physical_requirement_lines(text: str) -> Iterator[str]:
+    start = 0
+    index = 0
+    single_character_breaks = {"\n", "\v", "\f", "\x1c", "\x1d", "\x1e", "\x85", "\u2028", "\u2029"}
+    while index < len(text):
+        character = text[index]
+        if character == "\r" or character in single_character_breaks:
+            yield text[start:index]
+            if character == "\r" and index + 1 < len(text) and text[index + 1] == "\n":
+                index += 1
+            start = index + 1
+        index += 1
+    if start < len(text):
+        yield text[start:]
+
+
+def _logical_requirement_lines(text: str) -> Iterator[tuple[int, str, bool]]:
     buffer = ""
     start_line = 0
-    for line_number, raw_line in enumerate(text.splitlines(), start=1):
+    for line_number, raw_line in enumerate(_physical_requirement_lines(text), start=1):
         if not buffer:
             start_line = line_number
         stripped = raw_line.rstrip()
         if stripped.endswith("\\"):
             buffer += stripped[:-1] + " "
             continue
-        logical.append((start_line, buffer + raw_line, False))
+        yield start_line, buffer + raw_line, False
         buffer = ""
     if buffer:
-        logical.append((start_line, buffer.rstrip(), True))
-    return logical
+        yield start_line, buffer.rstrip(), True
 
 
 def _unsupported_requirement_option(line: str) -> bool:

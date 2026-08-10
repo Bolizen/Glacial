@@ -142,6 +142,103 @@ class DependencyTrustAdversarialTests(unittest.TestCase):
         self.assertNotIn("user:secret", json.dumps(repeated))
         self.assertNotIn("token=hidden", json.dumps(repeated))
 
+    def test_requirements_physical_line_limit_rejects_before_logical_materialization(self) -> None:
+        requirements = self.project / "requirements.txt"
+        requirements.write_text("alpha==1.0.0\nbeta==2.0.0\n", encoding="utf-8")
+        normal = scan_project(self.project)
+        self.assertEqual(normal["dependencyTrust"]["status"], "complete")
+        self.assertEqual(normal["dependencyTrust"]["directDependencyCount"], 2)
+
+        requirements.write_text(
+            "".join(f"package-{index}==1.0.0\n" for index in range(1_000)),
+            encoding="utf-8",
+        )
+        many = scan_project(self.project)
+        self.assertEqual(many["dependencyTrust"]["status"], "complete")
+        self.assertEqual(many["dependencyTrust"]["directDependencyCount"], 1_000)
+
+        with patch.object(dependency_trust, "MAX_REQUIREMENTS_PHYSICAL_LINES", 10):
+            requirements.write_text("\n" * 10, encoding="utf-8")
+            below = scan_project(self.project)
+            self.assertEqual(below["dependencyTrust"]["status"], "complete")
+
+            requirements.write_text("\n" * 11, encoding="utf-8")
+            with patch.object(
+                dependency_trust,
+                "_logical_requirement_lines",
+                side_effect=AssertionError("logical parsing must not start"),
+            ):
+                above = scan_project(self.project)
+
+        self.assertEqual(above["dependencyTrust"]["status"], "incomplete")
+        self.assertEqual(above["dependencyTrust"]["entries"], [])
+        self.assertIn("requirements.txt", above["dependencyTrust"]["failedFiles"])
+        self.assertTrue(any(
+            item["reason"] == "requirements-line-limit"
+            for item in above["dependencyTrust"]["limitations"]
+        ))
+
+        requirements.write_text(
+            "\n" * (dependency_trust.MAX_REQUIREMENTS_PHYSICAL_LINES + 1),
+            encoding="utf-8",
+        )
+        started = time.monotonic()
+        newline_dense = scan_project(self.project)
+        self.assertLess(time.monotonic() - started, 5.0)
+        self.assertEqual(newline_dense["dependencyTrust"]["entries"], [])
+        self.assertTrue(any(
+            item["reason"] == "requirements-line-limit"
+            for item in newline_dense["dependencyTrust"]["limitations"]
+        ))
+
+    def test_deep_toml_is_bounded_for_every_supported_toml_format(self) -> None:
+        safe = self.project / "safe.txt"
+        safe.write_text("safe", encoding="utf-8")
+        realistic_nesting = "nested = " + ("[" * 20) + "0" + ("]" * 20) + "\n"
+        deep_nesting = ""
+        for depth in range(100, 2_001, 100):
+            candidate = "nested = " + ("[" * depth) + "0" + ("]" * depth) + "\n"
+            try:
+                dependency_trust.tomllib.loads(candidate)
+            except RecursionError:
+                deep_nesting = candidate
+                break
+            except dependency_trust.tomllib.TOMLDecodeError:
+                continue
+        self.assertTrue(deep_nesting, "The release-family TOML parser did not reproduce recursion exhaustion.")
+        valid_suffixes = {
+            "pyproject.toml": "[project]\ndependencies = [\"alpha==1.0.0\"]\n",
+            "Pipfile": "[packages]\nalpha = \"==1.0.0\"\n",
+            "poetry.lock": "package = []\n",
+        }
+
+        for name, valid_suffix in valid_suffixes.items():
+            with self.subTest(format=name):
+                target = self.project / name
+                target.write_text(realistic_nesting + valid_suffix, encoding="utf-8")
+                normal = scan_project(self.project)
+                self.assertIn(name, normal["dependencyTrust"]["analyzedFiles"])
+                self.assertFalse(any(
+                    item["reason"] == "toml-nesting-limit"
+                    for item in normal["dependencyTrust"]["limitations"]
+                ))
+
+                target.write_text(deep_nesting, encoding="utf-8")
+                bounded = scan_project(self.project)
+                self.assertEqual(bounded["dependencyTrust"]["status"], "incomplete")
+                self.assertIn(name, bounded["dependencyTrust"]["failedFiles"])
+                self.assertNotIn(name, bounded["reviewedFiles"])
+                self.assertIn("safe.txt", bounded["reviewedFiles"])
+                self.assertTrue(any(
+                    item["reason"] == "toml-nesting-limit" and item.get("path") == name
+                    for item in bounded["dependencyTrust"]["limitations"]
+                ))
+                self.assertTrue(any(
+                    finding["type"] == "dependency-analysis-incomplete" and finding.get("path") == name
+                    for finding in bounded["findings"]
+                ))
+                target.unlink()
+
     def test_source_changes_are_review_evidence_and_incomplete_snapshots_do_not_remove(self) -> None:
         self.write_json("package.json", {"dependencies": {"alpha": "1.0.0", "beta": "1.0.0"}})
         self.write_json("package-lock.json", {

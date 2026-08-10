@@ -3429,7 +3429,7 @@ function ScanReport({ result, report, completionState, comparison, trustContext,
           <ScanComparison comparison={comparison} />
           <TrustProfileContext context={trustContext} />
           <div className="scan-detail-toggles">
-            <PathDetails title="Reviewed files" items={report.reviewedFiles} recordedCount={report.reviewedFileCount} emptyText="No reviewed files recorded for this scan." guidance={SCAN_GUIDANCE.reviewedFiles} />
+            <PathDetails title="Reviewed files" items={report.reviewedFiles} recordedCount={report.reviewedFileCount} truncated={report.reviewedFilesTruncated} emptyText="No reviewed files recorded for this scan." guidance={SCAN_GUIDANCE.reviewedFiles} />
             <PathDetails title="Ignored files" items={report.ignoredFiles} recordedCount={report.ignoredFileCount} emptyText="No files ignored by .glacialignore." guidance={SCAN_GUIDANCE.ignoredFiles} />
             <PathDetails title="Built-in excluded directories" items={report.builtInExcludedDirectories} recordedCount={report.completeness.builtInExcludedDirectoryCount} emptyText="No built-in directory exclusions recorded." guidance="These directories were not traversed and make scan coverage incomplete." />
           </div>
@@ -3787,13 +3787,13 @@ function dependencyFileChanges(fileChanges) {
   return Object.entries(labels).flatMap(([key, type]) => (fileChanges?.[key] || []).map((path) => ({ type, path })));
 }
 
-function PathDetails({ title, items, recordedCount, emptyText, guidance }) {
+function PathDetails({ title, items, recordedCount, truncated = false, emptyText, guidance }) {
   if (items.length === 0) {
     return (
       <div className="scan-detail-empty">
         <strong>{title}</strong>
         <GuidanceBlock guidance={guidance} />
-        <span>{recordedCount > 0 ? `${recordedCount} paths recorded; path list unavailable for this older scan.` : emptyText}</span>
+        <span>{truncated && recordedCount > 0 ? `0 of ${recordedCount} paths represented; the sorted path list was reduced to stay within the native response limit.` : recordedCount > 0 ? `${recordedCount} paths recorded; path list unavailable for this older scan.` : emptyText}</span>
       </div>
     );
   }
@@ -3802,7 +3802,7 @@ function PathDetails({ title, items, recordedCount, emptyText, guidance }) {
     <details className="scan-detail">
       <summary>
         <strong>{title}</strong>
-        <span>{items.length} paths</span>
+        <span>{truncated ? `${items.length} of ${recordedCount} paths represented` : `${items.length} paths`}</span>
       </summary>
       <GuidanceBlock guidance={guidance} />
       <PathList items={items} />
@@ -4444,6 +4444,7 @@ function buildScanReport(result) {
   return {
     totalFindings: result?.findingCount ?? findings.length,
     reviewedFileCount,
+    reviewedFilesTruncated: result?.reviewedFilesTruncated === true,
     ignoredFileCount: result?.ignoredFileCount ?? ignoredFiles.length,
     builtInExcludedDirectories: scanArray(result, "builtInExcludedDirectories"),
     reviewedFiles,

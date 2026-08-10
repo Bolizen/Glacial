@@ -302,7 +302,7 @@ export function buildScanReportMarkdown(result, report, comparison, trustContext
     "## Reviewed files",
     formatMarkdownGuidance(SCAN_GUIDANCE.reviewedFiles),
     "",
-    formatPathMetadataList(report?.reviewedFiles, report?.reviewedFileCount, coverageAwareEmptyText(completeness, "No reviewed files recorded for this scan.", "No reviewed files recorded in this scan")),
+    formatPathMetadataList(report?.reviewedFiles, report?.reviewedFileCount, coverageAwareEmptyText(completeness, "No reviewed files recorded for this scan.", "No reviewed files recorded in this scan"), report?.reviewedFilesTruncated === true),
     "",
     "## Zone",
     formatMarkdownGuidance(SCAN_GUIDANCE.zone),
@@ -761,8 +761,16 @@ function formatZone(value, completeness) {
   return coverageAwareEmptyText(completeness, "Unknown", "No zone/context recorded in this scan");
 }
 
-function formatPathMetadataList(items, recordedCount, emptyText) {
-  if (Array.isArray(items) && items.length) return formatMarkdownList(items, emptyText);
+function formatPathMetadataList(items, recordedCount, emptyText, truncated = false) {
+  if (Array.isArray(items) && items.length) {
+    const represented = formatMarkdownList(items, emptyText);
+    return truncated
+      ? `${items.length} of ${numberOrZero(recordedCount)} paths are represented by the retained sorted prefix; the remainder was reduced to stay within the native response limit.\n\n${represented}`
+      : represented;
+  }
+  if (truncated && numberOrZero(recordedCount) > 0) {
+    return `0 of ${numberOrZero(recordedCount)} paths are represented; the sorted path list was reduced to stay within the native response limit.`;
+  }
   return numberOrZero(recordedCount) > 0
     ? `${numberOrZero(recordedCount)} paths recorded; path list unavailable for this older scan.`
     : emptyText;
