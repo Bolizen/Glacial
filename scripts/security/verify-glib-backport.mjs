@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
-import { lstatSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { lstatSync, readFileSync, readdirSync } from "node:fs";
+import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseTomlData } from "./toml-data.mjs";
 
 const defaultRepoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const repoRoot = parseRepoRoot(process.argv.slice(2));
@@ -14,6 +15,7 @@ const expected = {
   licenseSha256: "8cf56d10131ce201cf69ab74b111d3ebac1acca3833d7efb39ae357224b70edb",
   patchSha256: "982b07f58864aad3d0aa0421cdd8ddc7438bb862b93e7b6b34da96b4147f8add",
   patchedVariantIterSha256: "a0f5ee8acb8faa089bcdfbc9a57372609fce7654026ccef7d9a224d05a654ccc",
+  vendoredTreeSha256: "7ad973f2e697cdb8ce96c750ddcb634c1c53a3d83f1e915a7c25641d1d2607b2",
   patchPath: "../../third_party/rust/glib-0.18.5-patched",
   version: "0.18.5",
 };
@@ -80,31 +82,48 @@ function assert(condition, message) {
   if (!condition) fail(message);
 }
 
-function section(text, name) {
-  const lines = text.split("\n");
-  const start = lines.findIndex((line) => line.trim() === `[${name}]`);
-  if (start < 0) fail(`missing [${name}] section`);
-  const relativeEnd = lines
-    .slice(start + 1)
-    .findIndex((line) => line.trimStart().startsWith("["));
-  const end = relativeEnd < 0 ? lines.length : start + 1 + relativeEnd;
-  return lines.slice(start + 1, end).join("\n");
+function parseToml(text, label) {
+  try { return parseTomlData(text); }
+  catch (error) { fail(`${label} is not valid supported TOML: ${error.message}`); }
+}
+
+function vendoredTreeSha256(root) {
+  const files = [];
+  function walk(directory) {
+    for (const entry of readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name, "en"))) {
+      const path = resolve(directory, entry.name);
+      const metadata = lstatSync(path);
+      if (metadata.isSymbolicLink()) fail(`vendored tree contains a symbolic link: ${relative(root, path)}`);
+      if (entry.isDirectory()) walk(path);
+      else if (entry.isFile()) files.push(path);
+      else fail(`vendored tree contains an unsupported entry: ${relative(root, path)}`);
+    }
+  }
+  walk(root);
+  const hash = createHash("sha256");
+  for (const path of files) {
+    const name = relative(root, path).replaceAll("\\", "/");
+    const nameBytes = Buffer.from(name, "utf8");
+    const content = readFileSync(path);
+    const header = Buffer.alloc(12);
+    header.writeUInt32BE(nameBytes.length, 0);
+    header.writeBigUInt64BE(BigInt(content.length), 4);
+    hash.update(header).update(nameBytes).update(createHash("sha256").update(content).digest());
+  }
+  return hash.digest("hex");
 }
 
 const tauriManifest = requireText("frontend", "src-tauri", "Cargo.toml");
-const patchSection = section(tauriManifest, "patch.crates-io");
-const glibOverrides = [
-  ...patchSection.matchAll(
-    /^\s*glib\s*=\s*\{\s*path\s*=\s*"([^"]+)"\s*\}\s*$/gm,
-  ),
-];
-assert(glibOverrides.length === 1, "expected exactly one glib crates.io path override");
+const tauriData = parseToml(tauriManifest, "frontend/src-tauri/Cargo.toml");
+const glibOverride = tauriData.patch?.["crates-io"]?.glib;
+assert(glibOverride && typeof glibOverride === "object" && !Array.isArray(glibOverride), "expected one semantic glib crates.io override");
+assert(Object.keys(glibOverride).length === 1 && typeof glibOverride.path === "string", "glib override must contain only a path field");
 assert(
-  glibOverrides[0][1] === expected.patchPath,
+  glibOverride.path === expected.patchPath,
   `glib override must point to ${expected.patchPath}`,
 );
 assert(
-  resolve(tauriRoot, glibOverrides[0][1]) === vendoredRoot,
+  resolve(tauriRoot, glibOverride.path) === vendoredRoot,
   "glib override does not resolve to the documented vendored directory",
 );
 
@@ -114,29 +133,21 @@ const vendoredManifest = requireText(
   "glib-0.18.5-patched",
   "Cargo.toml",
 );
-const packageSection = section(vendoredManifest, "package");
-assert(/^name\s*=\s*"glib"\s*$/m.test(packageSection), "vendored package name changed");
-assert(
-  new RegExp(`^version\\s*=\\s*"${expected.version.replaceAll(".", "\\.")}"\\s*$`, "m").test(
-    packageSection,
-  ),
-  `vendored package version must remain ${expected.version}`,
-);
+const vendoredData = parseToml(vendoredManifest, "vendored Cargo.toml");
+assert(vendoredData.package?.name === "glib", "vendored package name changed");
+assert(vendoredData.package?.version === expected.version, `vendored package version must remain ${expected.version}`);
 
 const lockfile = requireText("frontend", "src-tauri", "Cargo.lock");
-const glibLockPackages = lockfile
-  .split("[[package]]")
-  .slice(1)
-  .filter((block) => /^name\s*=\s*"glib"\s*$/m.test(block));
+const lockData = parseToml(lockfile, "Cargo.lock");
+assert(Array.isArray(lockData.package), "Cargo.lock has no semantic package array");
+const glibLockPackages = lockData.package.filter((entry) => entry?.name === "glib");
 assert(glibLockPackages.length === 1, "expected exactly one glib package in Cargo.lock");
 assert(
-  new RegExp(`^version\\s*=\\s*"${expected.version.replaceAll(".", "\\.")}"\\s*$`, "m").test(
-    glibLockPackages[0],
-  ),
+  glibLockPackages[0].version === expected.version,
   `Cargo.lock glib version must remain ${expected.version}`,
 );
 assert(
-  !/^source\s*=/m.test(glibLockPackages[0]) && !/^checksum\s*=/m.test(glibLockPackages[0]),
+  !Object.hasOwn(glibLockPackages[0], "source") && !Object.hasOwn(glibLockPackages[0], "checksum"),
   "Cargo.lock glib entry unexpectedly resolves to a registry source",
 );
 
@@ -178,35 +189,34 @@ const copyright = requireText("third_party", "rust", "glib-0.18.5-patched", "COP
 assert(sha256(license) === expected.licenseSha256, "the preserved MIT LICENSE changed");
 assert(sha256(copyright) === expected.copyrightSha256, "the preserved COPYRIGHT changed");
 
-const provenance = requireText(
+const provenanceText = requireText(
   "third_party",
   "rust",
   "glib-0.18.5-patched",
-  "PROVENANCE.md",
+  "PROVENANCE.json",
 );
-for (const required of [
-  "glib",
-  expected.version,
-  expected.archiveSha256,
-  "GHSA-wrw7-89jp-8q8g",
-  "RUSTSEC-2024-0429",
-  "https://github.com/gtk-rs/gtk-rs-core",
-  "b5a4071e439bef2b5eea76c3aa25e5ae84839e34",
-  "57383649f2766e6752170811286d89d393b318c6",
-  expected.patchedVariantIterSha256,
-  "LICENSE",
-  "COPYRIGHT",
-  "Complete intentional deviation list",
-]) {
-  assert(provenance.includes(required), `PROVENANCE.md is missing required value: ${required}`);
-}
+let provenance;
+try { provenance = JSON.parse(provenanceText); } catch { fail("PROVENANCE.json is malformed"); }
+assert(provenance.schemaVersion === 1 && provenance.status === "accepted-backport", "provenance status is not affirmative");
+assert(provenance.package?.name === "glib" && provenance.package?.version === expected.version, "provenance package identity changed");
+assert(provenance.origin?.repository === "https://github.com/gtk-rs/gtk-rs-core", "provenance repository changed");
+assert(provenance.origin?.archiveSha256 === expected.archiveSha256, "provenance archive hash changed");
+assert(provenance.origin?.upstreamPatchCommit === "b5a4071e439bef2b5eea76c3aa25e5ae84839e34", "provenance patch commit changed");
+assert(provenance.origin?.glacialBackportCommit === "57383649f2766e6752170811286d89d393b318c6", "provenance backport commit changed");
+assert(JSON.stringify(provenance.advisories) === JSON.stringify(["GHSA-wrw7-89jp-8q8g", "RUSTSEC-2024-0429"]), "provenance advisories changed");
+assert(provenance.patchedVariantIterSha256 === expected.patchedVariantIterSha256, "provenance patched source hash changed");
+assert(provenance.preservedFiles?.LICENSE === expected.licenseSha256 && provenance.preservedFiles?.COPYRIGHT === expected.copyrightSha256, "provenance preserved-file hashes changed");
+assert(JSON.stringify(provenance.intentionalDeviations) === JSON.stringify(["src/variant_iter.rs", "GHSA-wrw7-89jp-8q8g.patch", "PROVENANCE.md", "PROVENANCE.json"]), "provenance deviation list changed");
+
+const actualVendoredTreeSha256 = vendoredTreeSha256(vendoredRoot);
+assert(actualVendoredTreeSha256 === expected.vendoredTreeSha256, "complete vendored crate tree differs from the attested baseline");
 
 console.log(
   [
     "glib 0.18.5 backport verification passed:",
     `- crates.io override: ${expected.patchPath}`,
     "- Cargo.lock: one path-resolved glib 0.18.5 package",
-    `- patched source baseline: ${expected.patchedVariantIterSha256}`,
-    "- upstream patch, provenance, MIT licence, and copyright records present",
+    `- complete vendored tree baseline: ${expected.vendoredTreeSha256}`,
+    "- semantic Cargo/TOML identity and structured provenance verified",
   ].join("\n"),
 );

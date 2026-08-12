@@ -557,7 +557,7 @@ class _AnalysisState:
                 "The lockfile records an install-script indicator for this dependency.",
                 "Review locally available package metadata before allowing installation scripts to run.",
                 path=relative, ecosystem="node", package=name, group=group,
-                metadata={"resolvedVersion": version} if version else {},
+                metadata={"resolvedVersion": entry["lockedVersion"]} if entry["lockedVersion"] else {},
             )
 
         if integrity:

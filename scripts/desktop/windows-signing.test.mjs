@@ -9,18 +9,20 @@ import {
   writeFileSync,
 } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   DESKTOP_BUILD_ROOT,
   assertCertificateIdentity,
   assertSafePath,
+  authorizeTauriSigningRequest,
   buildCommandSignArgs,
   buildStoreSignArgs,
   buildTimestampArgs,
   createPowerShellInvocation,
   createTauriSigningOverlay,
   createUnsignedProbeCopy,
+  exactSigningAuthorization,
   hasEmbeddedAuthenticode,
   isPortableExecutable,
   loadSigningConfig,
@@ -36,6 +38,7 @@ import {
   sha256,
   signOne,
   signingAuditRecord,
+  signingBrokerEnvironment,
   signingEnvironment,
   validateStructuredDigest,
 } from "./windows-signing.mjs";
@@ -252,6 +255,12 @@ test("command provider keeps the file as one direct argument and forwards only n
   const config = loadSigningConfig(releaseEnvironment, { dryRun: true });
   assert.deepEqual(buildCommandSignArgs(config, "C:\\a b;&()\\file.exe"), ["sign", "--file", "C:\\a b;&()\\file.exe"]);
   assert.equal(config.providerEnvironment.AZURE_CLIENT_ID, "allowed-value");
+  const buildEnvironment = signingBrokerEnvironment(releaseEnvironment, "Glacial-0.9.12-ffffffffffff-20260719T120000Z", 32123, "a".repeat(64), "identity");
+  assert.equal(buildEnvironment.GLACIAL_WINDOWS_SIGN_BROKER_PORT, "32123");
+  assert.equal(buildEnvironment.GLACIAL_WINDOWS_SIGN_BROKER_TOKEN, "a".repeat(64));
+  assert.equal("AZURE_CLIENT_ID" in buildEnvironment, false);
+  assert.equal("GLACIAL_WINDOWS_SIGN_COMMAND" in buildEnvironment, false);
+  assert.equal("GLACIAL_WINDOWS_SIGN_COMMAND_ENV" in buildEnvironment, false);
   for (const commandArgs of [
     '["sign","--token","literal-secret","{file}"]',
     '["sign","https://provider.example/sign?credential=value","{file}"]',
@@ -362,7 +371,7 @@ test("Tauri overlay uses object-form direct arguments and no embedded certificat
   const overlay = createTauriSigningOverlay("C:\\Program Files\\nodejs\\node.exe", "C:\\Repo With Space\\windows-signing.mjs");
   assert.deepEqual(overlay.bundle.windows.signCommand, {
     cmd: "C:\\Program Files\\nodejs\\node.exe",
-    args: ["C:\\Repo With Space\\windows-signing.mjs", "sign-one", "%1"],
+    args: ["C:\\Repo With Space\\windows-signing.mjs", "sign-request", "%1"],
   });
   assert.equal(JSON.stringify(overlay).includes(THUMBPRINT), false);
   const schema = JSON.parse(readFileSync(join(REPOSITORY, "frontend", "node_modules", "@tauri-apps", "cli", "config.schema.json"), "utf8"));
@@ -482,7 +491,7 @@ test("signed application capture survives Tauri restoration and remains installe
     throw new Error(`Unexpected signing command: ${command}`);
   };
 
-  signOne(workingApplication, config, { runner, pathInspector: false });
+  signOne(workingApplication, config, { runner, pathInspector: false, authorization: exactSigningAuthorization(workingApplication, "application") });
   const capturedBytes = readFileSync(capture);
   const [applicationEvent] = readFileSync(auditLog, "utf8").trim().split(/\r?\n/).map((line) => JSON.parse(line));
   assert.notDeepEqual(capturedBytes, original);
@@ -494,15 +503,31 @@ test("signed application capture survives Tauri restoration and remains installe
   writeFileSync(workingApplication, original);
   assert.equal(assertExpectedTauriRestoration(workingApplication, capture, { signature: { status: "NotSigned" } }).status, "NotSigned");
   assert.equal(assertNsisApplicationSource(nsisScript, workingApplication), workingApplication);
-  assert.throws(() => signOne(workingApplication, config, { runner, pathInspector: false }), /duplicate/);
+  assert.throws(() => signOne(workingApplication, config, { runner, pathInspector: false, authorization: exactSigningAuthorization(workingApplication, "application") }), /duplicate/);
   assert.equal(readFileSync(failedEvidence, "utf8"), "preserve failed build");
 
   const unrelated = join(TEST_ROOT, "unrelated.exe");
   writeFileSync(unrelated, minimalPe());
-  signOne(unrelated, config, { runner, pathInspector: false });
+  assert.throws(() => signOne(unrelated, config, { runner, pathInspector: false }), /authorization/);
+  assert.throws(() => signOne(unrelated, config, { runner, pathInspector: false, authorization: exactSigningAuthorization(workingApplication, "application") }), /authorized artifact path/);
   assert.deepEqual(readFileSync(capture), capturedBytes);
   const events = readFileSync(auditLog, "utf8").trim().split(/\r?\n/).map((line) => JSON.parse(line));
-  assert.equal(events[1].applicationCapturePath, null);
+  assert.equal(events.length, 1);
+});
+
+test("Tauri signer authorization binds application and installer roles to canonical paths and digests", () => {
+  const root = join(TEST_ROOT, "authorized-tauri");
+  const application = join(root, "target", "glacial.exe");
+  const installer = join(root, "bundle", "Glacial_0.9.12_x64-setup.exe");
+  const unrelated = join(root, "unrelated.exe");
+  for (const path of [application, installer, unrelated]) { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, minimalPe()); }
+  const config = { applicationTarget: application, installerTarget: installer, nsisPluginRoot: join(root, "plugins"), temporaryRoot: join(root, "temp") };
+  assert.equal(authorizeTauriSigningRequest(join(dirname(application), ".", basename(application)), config).role, "application");
+  assert.equal(authorizeTauriSigningRequest(installer, config).role, "installer");
+  assert.throws(() => authorizeTauriSigningRequest(unrelated, config), /authorized Tauri release artifact set/);
+  const authorization = exactSigningAuthorization(application, "application");
+  writeFileSync(application, Buffer.concat([readFileSync(application), Buffer.from("substituted")]));
+  assert.throws(() => signOne(application, { provider: "store" }, { authorization }), /pre-signing digest/);
 });
 
 test("application capture validation rejects missing, duplicate, unrelated, and hash-mismatched events", () => {
@@ -532,7 +557,8 @@ test("Tauri signing evidence requires one transient uninstaller between plugins 
   const uninstaller = { ...identity, path: "C:\\Users\\Test\\AppData\\Local\\Temp\\nst1234.tmp", sha256: "E".repeat(64) };
   const installerEvent = { ...identity, path: installer, sha256: "F".repeat(64) };
   assert.equal(requireSigningEvents([application, ...plugins, uninstaller, installerEvent], config, installer, "CN=ICEFIELDS DEVELOPMENT").uninstallerEvent, uninstaller);
-  assert.throws(() => requireSigningEvents([application, ...plugins, installerEvent], config, installer, "CN=ICEFIELDS DEVELOPMENT"), /transient NSIS uninstaller/);
+  assert.throws(() => requireSigningEvents([application, ...plugins, installerEvent], config, installer, "CN=ICEFIELDS DEVELOPMENT"), /cardinality|transient NSIS uninstaller/);
+  assert.throws(() => requireSigningEvents([application, ...plugins, uninstaller, installerEvent, { ...installerEvent, path: join(TEST_ROOT, "extra.exe") }], config, installer, "CN=ICEFIELDS DEVELOPMENT"), /cardinality/);
 });
 
 test("release source revalidation rejects every mutable provenance field", () => {

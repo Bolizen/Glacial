@@ -42,26 +42,10 @@ export function runTauriBuild(args = process.argv.slice(2), environment = proces
     throw new Error("The locked Tauri CLI is unavailable.");
   }
   const identity = resolveProductionBuildIdentity(environment);
-  let providerEnvironmentNames = [];
-  if (environment.GLACIAL_WINDOWS_SIGN_COMMAND_ENV) {
-    try {
-      providerEnvironmentNames = JSON.parse(environment.GLACIAL_WINDOWS_SIGN_COMMAND_ENV);
-    } catch {
-      throw new Error("GLACIAL_WINDOWS_SIGN_COMMAND_ENV is malformed.");
-    }
-    if (!Array.isArray(providerEnvironmentNames)
-        || providerEnvironmentNames.some((name) => typeof name !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name))) {
-      throw new Error("GLACIAL_WINDOWS_SIGN_COMMAND_ENV is malformed.");
-    }
-  }
   const buildEnvironment = minimalEnvironment(environment, {
     GLACIAL_BUILD_IDENTITY_JSON: serializeBuildIdentity(identity),
-  }, ["GLACIAL_BUILD_IDENTITY_JSON", "GLACIAL_WINDOWS_RELEASE_ID", "GLACIAL_WINDOWS_SIGNING_PROVIDER",
-    "GLACIAL_WINDOWS_CERTIFICATE_THUMBPRINT", "GLACIAL_WINDOWS_EXPECTED_SUBJECT",
-    "GLACIAL_WINDOWS_EXPECTED_THUMBPRINT", "GLACIAL_WINDOWS_REQUIRE_TIMESTAMP",
-    "GLACIAL_WINDOWS_SIGNTOOL_PATH", "GLACIAL_WINDOWS_SIGN_COMMAND",
-    "GLACIAL_WINDOWS_SIGN_COMMAND_ARGS", "GLACIAL_WINDOWS_SIGN_COMMAND_ENV",
-    "GLACIAL_WINDOWS_TIMESTAMP_URL", ...providerEnvironmentNames]);
+  }, ["GLACIAL_BUILD_IDENTITY_JSON", "GLACIAL_WINDOWS_RELEASE_ID",
+    "GLACIAL_WINDOWS_SIGN_BROKER_PORT", "GLACIAL_WINDOWS_SIGN_BROKER_TOKEN"]);
   return runCommand(process.execPath, [TAURI_CLI, "build", ...args], {
     cwd: FRONTEND,
     env: buildEnvironment,

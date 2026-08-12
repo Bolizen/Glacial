@@ -98,6 +98,40 @@ class DependencyTrustScannerTests(unittest.TestCase):
         self.assertEqual(second["status"], "complete")
         self.assertEqual(second["lockedDependencyCount"], 1)
 
+    def test_install_script_metadata_reuses_privacy_safe_locked_versions(self) -> None:
+        raw_vcs = "git+https://user:secret@github.com/org/private.git#short-private-branch"
+        self.write_json("package-lock.json", {
+            "lockfileVersion": 3,
+            "packages": {
+                "node_modules/private-vcs": {
+                    "version": raw_vcs,
+                    "resolved": raw_vcs,
+                    "hasInstallScript": True,
+                },
+                "node_modules/registry-package": {
+                    "version": "1.2.3",
+                    "resolved": "https://registry.npmjs.org/registry-package/-/registry-package-1.2.3.tgz",
+                    "integrity": "sha512-YWJj",
+                    "hasInstallScript": True,
+                },
+            },
+        })
+
+        result = scan_project(self.project)
+        findings = {
+            finding["package"]: finding
+            for finding in result["findings"]
+            if finding["type"] == "dependency-install-script-indicator"
+        }
+        self.assertEqual(
+            findings["private-vcs"]["metadata"]["resolvedVersion"],
+            "git+https://github.com/org/private.git",
+        )
+        self.assertEqual(findings["registry-package"]["metadata"]["resolvedVersion"], "1.2.3")
+        serialized = json.dumps(result, sort_keys=True)
+        self.assertNotIn("short-private-branch", serialized)
+        self.assertNotIn("user:secret", serialized)
+
     def test_node_alias_identity_privacy_and_malformed_packages_are_conservative(self) -> None:
         self.write_json("package.json", {
             "dependencies": {
@@ -658,6 +692,37 @@ class DependencyTrustPersistenceTests(unittest.TestCase):
             "user", "url-password", "url-query", "url-selector", "scp-selector",
         ):
             self.assertNotIn(secret, serialized)
+
+    def test_install_script_vcs_selector_is_sanitized_in_persistence_and_history_export(self) -> None:
+        raw_vcs = "git+https://user:password@github.com/org/private.git#short-private-branch"
+        (self.project / "package-lock.json").write_text(json.dumps({
+            "lockfileVersion": 3,
+            "packages": {
+                "node_modules/private-vcs": {"version": raw_vcs, "resolved": raw_vcs, "hasInstallScript": True},
+                "node_modules/registry-package": {
+                    "version": "1.2.3",
+                    "resolved": "https://registry.npmjs.org/registry-package/-/registry-package-1.2.3.tgz",
+                    "integrity": "sha512-YWJj",
+                    "hasInstallScript": True,
+                },
+            },
+        }), encoding="utf-8")
+
+        current = main.run_scan(ProjectPathRequest(project_path=str(self.project)))
+        history = main.scan_history(str(self.project))["scans"][0]
+        with database.get_connection() as connection:
+            persisted = connection.execute("SELECT findings_json FROM scans WHERE id = ?", (current["id"],)).fetchone()["findings_json"]
+        exported_findings = {
+            finding["package"]: finding["metadata"]["resolvedVersion"]
+            for finding in history["findings"]
+            if finding["type"] == "dependency-install-script-indicator"
+        }
+
+        self.assertEqual(exported_findings["private-vcs"], "git+https://github.com/org/private.git")
+        self.assertEqual(exported_findings["registry-package"], "1.2.3")
+        serialized = json.dumps({"current": current, "history": history, "persisted": persisted})
+        self.assertNotIn("short-private-branch", serialized)
+        self.assertNotIn("user:password", serialized)
 
 
 if __name__ == "__main__":

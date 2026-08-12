@@ -12,6 +12,8 @@ import {
 } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { fork } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import {
   DESKTOP_BUILD_ROOT,
   assertSafePath,
@@ -30,6 +32,7 @@ import {
   sanitizeDiagnosticText,
   sha256,
   signBackendTree,
+  signingBrokerEnvironment,
   signingEnvironment,
   validateStructuredDigest,
   verifySignature,
@@ -42,6 +45,7 @@ import { validateProductionDependencies } from "../release/validate-production-d
 import { assertWindowsReleasePythonIdentity } from "../release/release-contract.mjs";
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
+const SIGNING_BROKER = resolve(dirname(SCRIPT_PATH), "windows-signing-broker.mjs");
 const REPOSITORY = resolve(dirname(SCRIPT_PATH), "..", "..");
 const FRONTEND = join(REPOSITORY, "frontend");
 const PYINSTALLER_ROOT = join(DESKTOP_BUILD_ROOT, "pyinstaller");
@@ -78,6 +82,28 @@ function runVisible(command, args, options = {}) {
 
 function runText(command, args, options = {}) {
   return String(runCommand(command, args, options).stdout ?? "").trim();
+}
+
+export function startSigningBroker(environment) {
+  const token = randomBytes(32).toString("hex");
+  const child = fork(SIGNING_BROKER, [], { env: { ...environment, GLACIAL_WINDOWS_SIGN_BROKER_TOKEN: token }, stdio: ["ignore", "ignore", "pipe", "ipc"], windowsHide: true });
+  return new Promise((resolveStart, rejectStart) => {
+    const fail = (error) => rejectStart(new Error(`Signing broker failed to start: ${sanitizeDiagnosticText(error.message)}`));
+    child.once("error", fail);
+    child.once("exit", (code) => { if (code !== null) fail(new Error(`exit ${code}`)); });
+    child.on("message", (message) => {
+      if (message?.type !== "ready") return;
+      child.removeListener("error", fail);
+      resolveStart({
+        port: message.port,
+        token,
+        stop: () => new Promise((resolveStop, rejectStop) => {
+          child.once("exit", (code) => code === 0 ? resolveStop() : rejectStop(new Error("Signing broker closed before the authorized artifact set was complete.")));
+          child.send({ type: "close" });
+        }),
+      });
+    });
+  });
 }
 
 function readJson(path) {
@@ -372,6 +398,7 @@ export function assertNsisApplicationSource(nsisScript, expectedApplication) {
 }
 
 export function requireSigningEvents(events, config, installer, expectedCanonicalSubject) {
+  if (events.length !== EXPECTED_NSIS_COMPONENTS.length + 3) throw new Error(`Unexpected signing event cardinality: ${events.length}.`);
   const expectedNames = [...EXPECTED_NSIS_COMPONENTS, basename(installer)].map((name) => name.toLowerCase());
   for (const expected of expectedNames) {
     const matches = events.filter((event) => basename(event.path).toLowerCase() === expected);
@@ -516,10 +543,12 @@ async function buildSignedRelease(releaseProfile) {
   ensureSafeDirectory(DESKTOP_BUILD_ROOT, signingRoot);
 
   const releaseEnvironment = signingEnvironment(process.env, releaseId);
+  const tauriTemporaryRoot = join(signingRoot, "tauri-temp");
+  ensureSafeDirectory(DESKTOP_BUILD_ROOT, tauriTemporaryRoot);
+  releaseEnvironment.TEMP = tauriTemporaryRoot;
+  releaseEnvironment.TMP = tauriTemporaryRoot;
   const config = loadSigningConfig(releaseEnvironment);
   const overlayPath = join(signingRoot, "tauri.signing.conf.json");
-  const secretValues = config.provider === "command" ? config.providerEnvironmentNames.map((name) => config.providerEnvironment[name]).filter(Boolean) : [];
-
   const state = { source, releaseId, workRoot, finalRoot, releaseProfile };
   await runAfterSignerPreflight({
     profile: releaseProfile,
@@ -540,7 +569,15 @@ async function buildSignedRelease(releaseProfile) {
         { name: "sign-backend", run: () => { state.backendSigningRecords = signBackendTree(PYINSTALLER_PAYLOAD, config); } },
         { name: "stage-backend", run: () => stageSignedBackend(rustcPath) },
         { name: "clean-tauri-release-output", run: () => removeSafeTree(REPOSITORY, TAURI_TARGET) },
-        { name: "tauri-build", run: () => runVisible(pnpm.command, [...pnpm.prefixArgs, "run", "tauri:build", "--", "--config", overlayPath], { cwd: FRONTEND, env: releaseEnvironment, secretValues }) },
+        { name: "tauri-build", run: async () => {
+          const broker = await startSigningBroker(releaseEnvironment);
+          const buildEnvironment = signingBrokerEnvironment(releaseEnvironment, releaseId, broker.port, broker.token, releaseEnvironment.GLACIAL_BUILD_IDENTITY_JSON);
+          try {
+            runVisible(pnpm.command, [...pnpm.prefixArgs, "run", "tauri:build", "--", "--config", overlayPath], { cwd: FRONTEND, env: buildEnvironment });
+          } finally {
+            await broker.stop();
+          }
+        } },
         { name: "verify-tauri-output", run: () => {
           state.installer = findInstaller(source.version);
           state.workingApplication = join(TAURI_TARGET, "glacial.exe");

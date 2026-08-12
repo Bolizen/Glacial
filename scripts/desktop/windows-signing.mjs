@@ -17,6 +17,7 @@ import {
 import { createHash } from "node:crypto";
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { spawnSync } from "node:child_process";
+import { request as httpRequest } from "node:http";
 import { fileURLToPath } from "node:url";
 
 export const DEFAULT_SIGNER_SUBJECT = "CN=Icefields Development";
@@ -561,7 +562,7 @@ export function buildCommandSignArgs(config, file) {
 }
 
 export function createTauriSigningOverlay(nodePath = process.execPath, scriptPath = SIGNING_SCRIPT_PATH) {
-  return { bundle: { windows: { digestAlgorithm: "sha256", signCommand: { cmd: resolve(nodePath), args: [resolve(scriptPath), "sign-one", "%1"] } } } };
+  return { bundle: { windows: { digestAlgorithm: "sha256", signCommand: { cmd: resolve(nodePath), args: [resolve(scriptPath), "sign-request", "%1"] } } } };
 }
 
 export function isPortableExecutable(buffer) {
@@ -728,8 +729,39 @@ export function captureSignedApplication(file, config, options = {}) {
   }
 }
 
+export function exactSigningAuthorization(file, role) {
+  const target = realpathSync(resolve(file));
+  return { role, path: target, beforeSha256: sha256(target), consumed: false };
+}
+
+function consumeSigningAuthorization(file, authorization) {
+  if (!authorization || authorization.consumed === true) throw new Error("Signing requires one unused artifact authorization.");
+  const target = realpathSync(resolve(file));
+  if (target.toLowerCase() !== resolve(authorization.path).toLowerCase()) throw new Error("Signing target is not the authorized artifact path.");
+  if (sha256(target) !== authorization.beforeSha256) throw new Error("Signing target does not match its authorized pre-signing digest.");
+  authorization.consumed = true;
+  return target;
+}
+
+export function authorizeTauriSigningRequest(file, config, env = process.env) {
+  const target = realpathSync(resolve(file));
+  const lower = target.toLowerCase();
+  const application = resolve(config.applicationTarget).toLowerCase();
+  const installer = resolve(config.installerTarget ?? resolve(REPOSITORY_ROOT, "frontend", "src-tauri", "target", "release", "bundle", "nsis", "Glacial_0.9.12_x64-setup.exe")).toLowerCase();
+  const pluginRoot = resolve(config.nsisPluginRoot ?? resolve(getEnvironmentValue(env, "LOCALAPPDATA") ?? "", "tauri", "NSIS", "Plugins", "x86-unicode"));
+  const pluginNames = new Set(["nsisdl.dll", "startmenu.dll", "system.dll", "nsdialogs.dll", "nsis_tauri_utils.dll"]);
+  const temporaryRoot = resolve(config.temporaryRoot ?? getEnvironmentValue(env, "TEMP") ?? getEnvironmentValue(env, "TMP") ?? "");
+  let role = null;
+  if (lower === application) role = "application";
+  else if (lower === installer) role = "installer";
+  else if (resolve(dirname(target)).toLowerCase() === pluginRoot.toLowerCase() && pluginNames.has(basename(target).toLowerCase())) role = `nsis-plugin:${basename(target).toLowerCase()}`;
+  else if (resolve(dirname(target)).toLowerCase() === temporaryRoot.toLowerCase() && /^nst[0-9a-f]+\.tmp$/i.test(basename(target))) role = "nsis-uninstaller";
+  if (!role) throw new Error("Signing target is not a member of the authorized Tauri release artifact set.");
+  return exactSigningAuthorization(target, role);
+}
+
 export function signOne(file, config, options = {}) {
-  const target = resolve(file);
+  const target = consumeSigningAuthorization(file, options.authorization);
   if (!isPortableExecutable(readFileSync(target))) throw new Error(`Refusing to Authenticode-sign a non-PE file: ${basename(target)}`);
   if (samePath(target, config.applicationTarget) && config.applicationCapture && existsSync(config.applicationCapture)) throw new Error("Refusing a duplicate Glacial application capture.");
   const beforeSha256 = sha256(target);
@@ -767,7 +799,7 @@ export function preflightSigningProvider(config, options = {}) {
     createUnsignedProbeCopy(source, probe);
     const initialSignature = inspectAuthenticode(probe, runner, options.env);
     if (initialSignature.status !== "NotSigned") throw new Error("The disposable signing probe is not unsigned.");
-    const signature = signOne(probe, { ...config, auditLog: null }, { runner, env: options.env });
+    const signature = signOne(probe, { ...config, auditLog: null }, { runner, env: options.env, authorization: exactSigningAuthorization(probe, "preflight-probe") });
     if (signature.canonicalSubject.toUpperCase() !== expectedCanonical) throw new Error("The private-key probe used an unexpected signer subject.");
     return {
       expectedCanonicalSubject: expectedCanonical,
@@ -802,7 +834,7 @@ export function signBackendTree(root, config, options = {}) {
   const records = [];
   for (const entry of plan) {
     if (entry.action === "sign-first-party") {
-      const signature = signOne(entry.path, config, { runner, env: options.env });
+      const signature = signOne(entry.path, config, { runner, env: options.env, authorization: exactSigningAuthorization(entry.path, `backend:${entry.relativePath}`) });
       records.push({ ...entry, signature, afterSha256: sha256(entry.path), classification: "first-party" });
     } else {
       const signature = verifySignature(entry.path, config, { runner, env: options.env });
@@ -839,6 +871,31 @@ export function signingEnvironment(source, releaseId) {
   return minimalEnvironment(source, { GLACIAL_WINDOWS_RELEASE_ID: releaseId }, [...INTERNAL_ENVIRONMENT_NAMES, ...providerNames]);
 }
 
+export function signingBrokerEnvironment(source, releaseId, port, token, buildIdentity) {
+  return minimalEnvironment(source, {
+    GLACIAL_WINDOWS_RELEASE_ID: releaseId,
+    GLACIAL_WINDOWS_SIGN_BROKER_PORT: port,
+    GLACIAL_WINDOWS_SIGN_BROKER_TOKEN: token,
+    GLACIAL_BUILD_IDENTITY_JSON: buildIdentity,
+  }, ["GLACIAL_WINDOWS_RELEASE_ID"]);
+}
+
+export function requestBrokerSignature(file, env = process.env) {
+  const port = Number(getEnvironmentValue(env, "GLACIAL_WINDOWS_SIGN_BROKER_PORT"));
+  const token = String(getEnvironmentValue(env, "GLACIAL_WINDOWS_SIGN_BROKER_TOKEN") ?? "");
+  if (!Number.isInteger(port) || port < 1 || port > 65535 || !/^[0-9a-f]{64}$/.test(token)) throw new Error("The constrained signing broker is unavailable.");
+  return new Promise((resolveRequest, rejectRequest) => {
+    const request = httpRequest({ hostname: "127.0.0.1", port, method: "POST", path: "/sign", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" } }, (response) => {
+      let body = "";
+      response.setEncoding("utf8");
+      response.on("data", (chunk) => { body += chunk; if (body.length > 16_384) request.destroy(new Error("Signing broker response is too large.")); });
+      response.on("end", () => response.statusCode === 200 ? resolveRequest() : rejectRequest(new Error(sanitizeDiagnosticText(body) || "Signing broker rejected the artifact.")));
+    });
+    request.on("error", rejectRequest);
+    request.end(JSON.stringify({ path: resolve(file) }));
+  });
+}
+
 function printDryRun(config) {
   process.stdout.write(`${JSON.stringify({ provider: config.provider, expectedSubject: config.expectedSubject, expectedThumbprint: config.expectedThumbprint, signToolPath: privacySafePath(config.signToolPath), timestampOrigin: new URL(config.timestampUrl).origin, timestampRequired: true, providerCommand: config.provider === "command" ? `${privacySafePath(config.command)} <reviewed argument array>` : null }, null, 2)}\n`);
 }
@@ -846,8 +903,9 @@ function printDryRun(config) {
 async function main() {
   const [command, argument] = process.argv.slice(2);
   if (command === "dry-run") { printDryRun(loadSigningConfig(process.env, { dryRun: true })); return; }
+  if (command === "sign-request" && argument) { await requestBrokerSignature(argument); return; }
   const config = loadSigningConfig();
-  if (command === "sign-one" && argument) { signOne(argument, config); return; }
+  if (command === "sign-one" && argument) { signOne(argument, config, { authorization: authorizeTauriSigningRequest(argument, config) }); return; }
   if (command === "verify-one" && argument) { process.stdout.write(`${JSON.stringify(verifySignature(argument, config, { expectFirstParty: true }), null, 2)}\n`); return; }
   if (command === "verify-tree" && argument) { process.stdout.write(`${JSON.stringify(verifyPayloadTree(argument, config, { requiredFirstParty: process.argv.slice(4) }), null, 2)}\n`); return; }
   throw new Error("Usage: windows-signing.mjs dry-run | sign-one <PE> | verify-one <PE> | verify-tree <directory> [required first-party paths...]");

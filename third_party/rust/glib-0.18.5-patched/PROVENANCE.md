@@ -32,7 +32,7 @@ preserved byte for byte:
 ## Complete intentional deviation list
 
 The official archive contains 121 files. This vendored directory contains the
-same files plus two provenance records, for 123 files total. Every intentional
+same files plus three provenance records, for 124 files total. Every intentional
 deviation from pristine `glib 0.18.5` is:
 
 1. `src/variant_iter.rs`: in `VariantStrIter::impl_get`, `let p` is changed to
@@ -41,6 +41,8 @@ deviation from pristine `glib 0.18.5` is:
    source-diff record.
 3. `PROVENANCE.md`: added by Glacial as this provenance, integrity, licence,
    and retirement record.
+4. `PROVENANCE.json`: added as the machine-readable affirmative provenance
+   contract consumed by the trusted verifier.
 
 No licence file or Cargo package metadata was added or altered for the
 backport. `.cargo_vcs_info.json`, `Cargo.toml`, `Cargo.toml.orig`, `LICENSE`,

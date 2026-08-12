@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "status": "accepted-backport",
+  "package": { "name": "glib", "version": "0.18.5" },
+  "origin": {
+    "repository": "https://github.com/gtk-rs/gtk-rs-core",
+    "archiveSha256": "233daaf6e83ae6a12a52055f568f9d7cf4671dabb78ff9560ab6da230ce00ee5",
+    "crateVcsCommit": "42b9caf98e03ded086362d9653ca58fe94dc8658",
+    "upstreamPatchCommit": "b5a4071e439bef2b5eea76c3aa25e5ae84839e34",
+    "glacialBackportCommit": "57383649f2766e6752170811286d89d393b318c6"
+  },
+  "advisories": ["GHSA-wrw7-89jp-8q8g", "RUSTSEC-2024-0429"],
+  "patchedVariantIterSha256": "a0f5ee8acb8faa089bcdfbc9a57372609fce7654026ccef7d9a224d05a654ccc",
+  "preservedFiles": {
+    "LICENSE": "8cf56d10131ce201cf69ab74b111d3ebac1acca3833d7efb39ae357224b70edb",
+    "COPYRIGHT": "dae402989de65164815b7e2b6bc2b9576285434c3785934c8b6ece0fa055960d"
+  },
+  "intentionalDeviations": ["src/variant_iter.rs", "GHSA-wrw7-89jp-8q8g.patch", "PROVENANCE.md", "PROVENANCE.json"]
+}

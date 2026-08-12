@@ -18,10 +18,12 @@ Commit `57383649f2766e6752170811286d89d393b318c6`
 glib = { path = "../../third_party/rust/glib-0.18.5-patched" }
 ```
 
-The corresponding `Cargo.lock` package has version `0.18.5` and no registry
-`source` or `checksum`, which is Cargo's lockfile representation for the
-path-resolved package. Run `node scripts/security/verify-glib-backport.mjs` to
-check these invariants.
+The corresponding semantic `Cargo.lock` package has version `0.18.5` and no
+registry `source` or `checksum`, which is Cargo's lockfile representation for
+the path-resolved package. The verifier parses effective TOML fields, validates
+the affirmative `PROVENANCE.json` contract, and authenticates every file and
+path in the vendored crate with one deterministic tree digest. Run
+`node scripts/security/verify-glib-backport.mjs` to check these invariants.
 
 The verifier runs automatically in `.github/workflows/glib-backport.yml` when
 relevant files change in a pull request targeting `main` or a push to `main`.

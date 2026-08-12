@@ -9,6 +9,8 @@ on:
       - "frontend/src-tauri/Cargo.lock"
       - "third_party/rust/glib-0.18.5-patched/**"
       - "scripts/security/verify-glib-backport.mjs"
+      - "scripts/security/verify-glib-backport.test.mjs"
+      - "scripts/security/toml-data.mjs"
       - "docs/security/glib-0.18.5-backport.md"
       - ".github/workflows/glib-backport.yml"
   push:
@@ -19,6 +21,8 @@ on:
       - "frontend/src-tauri/Cargo.lock"
       - "third_party/rust/glib-0.18.5-patched/**"
       - "scripts/security/verify-glib-backport.mjs"
+      - "scripts/security/verify-glib-backport.test.mjs"
+      - "scripts/security/toml-data.mjs"
       - "docs/security/glib-0.18.5-backport.md"
       - ".github/workflows/glib-backport.yml"
 
