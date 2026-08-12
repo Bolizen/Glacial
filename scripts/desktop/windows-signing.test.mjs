@@ -22,6 +22,7 @@ import {
   createPowerShellInvocation,
   createTauriSigningOverlay,
   createUnsignedProbeCopy,
+  defaultTauriNsisPluginRoot,
   exactSigningAuthorization,
   hasEmbeddedAuthenticode,
   isPortableExecutable,
@@ -62,6 +63,7 @@ import {
   runAfterSignerPreflight,
   runBrokeredTauriBuild,
   runReleaseSteps,
+  tauriSigningEventsAfterBackend,
   tauriBuildArguments,
   verifyPublishedHashes,
 } from "./Build-SignedWindowsRelease.mjs";
@@ -521,11 +523,16 @@ test("Tauri signer authorization binds application and installer roles to canoni
   const root = join(TEST_ROOT, "authorized-tauri");
   const application = join(root, "target", "glacial.exe");
   const installer = join(root, "bundle", "Glacial_0.9.12_x64-setup.exe");
+  const generatedPlugin = join(root, "target", "release", "nsis", "x64", "Plugins", "x86-unicode", "NSISdl.dll");
+  const cacheSourcePlugin = join(root, "cache", "tauri", "NSIS", "Plugins", "x86-unicode", "NSISdl.dll");
   const unrelated = join(root, "unrelated.exe");
-  for (const path of [application, installer, unrelated]) { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, minimalPe()); }
-  const config = { applicationTarget: application, installerTarget: installer, nsisPluginRoot: join(root, "plugins"), temporaryRoot: join(root, "temp") };
+  for (const path of [application, installer, generatedPlugin, cacheSourcePlugin, unrelated]) { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, minimalPe()); }
+  const config = { applicationTarget: application, installerTarget: installer, nsisPluginRoot: dirname(generatedPlugin), temporaryRoot: join(root, "temp") };
+  assert.equal(defaultTauriNsisPluginRoot(), join(REPOSITORY, "frontend", "src-tauri", "target", "release", "nsis", "x64", "Plugins", "x86-unicode"));
   assert.equal(authorizeTauriSigningRequest(join(dirname(application), ".", basename(application)), config).role, "application");
   assert.equal(authorizeTauriSigningRequest(installer, config).role, "installer");
+  assert.equal(authorizeTauriSigningRequest(generatedPlugin, config).role, "nsis-plugin:nsisdl.dll");
+  assert.throws(() => authorizeTauriSigningRequest(cacheSourcePlugin, config), /authorized Tauri release artifact set/);
   assert.throws(() => authorizeTauriSigningRequest(unrelated, config), /authorized Tauri release artifact set/);
   const authorization = exactSigningAuthorization(application, "application");
   writeFileSync(application, Buffer.concat([readFileSync(application), Buffer.from("substituted")]));
@@ -561,6 +568,14 @@ test("Tauri signing evidence requires one transient uninstaller between plugins 
   assert.equal(requireSigningEvents([application, ...plugins, uninstaller, installerEvent], config, installer, "CN=ICEFIELDS DEVELOPMENT").uninstallerEvent, uninstaller);
   assert.throws(() => requireSigningEvents([application, ...plugins, installerEvent], config, installer, "CN=ICEFIELDS DEVELOPMENT"), /cardinality|transient NSIS uninstaller/);
   assert.throws(() => requireSigningEvents([application, ...plugins, uninstaller, installerEvent, { ...installerEvent, path: join(TEST_ROOT, "extra.exe") }], config, installer, "CN=ICEFIELDS DEVELOPMENT"), /cardinality/);
+});
+
+test("Tauri signing evidence starts after the immutable backend audit boundary", () => {
+  const backend = [{ path: "backend-a" }, { path: "backend-b" }];
+  const tauri = [{ path: "application" }, { path: "installer" }];
+  assert.deepEqual(tauriSigningEventsAfterBackend([...backend, ...tauri], backend.length), tauri);
+  assert.throws(() => tauriSigningEventsAfterBackend([...backend, ...tauri], -1), /audit boundary/);
+  assert.throws(() => tauriSigningEventsAfterBackend([...backend, ...tauri], 5), /audit boundary/);
 });
 
 test("release source revalidation rejects every mutable provenance field", () => {

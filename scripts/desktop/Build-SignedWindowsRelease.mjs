@@ -386,6 +386,13 @@ function parseAuditLog(path) {
   return readFileSync(path, "utf8").split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
 }
 
+export function tauriSigningEventsAfterBackend(events, backendSigningEventCount) {
+  if (!Number.isSafeInteger(backendSigningEventCount) || backendSigningEventCount < 0 || backendSigningEventCount > events.length) {
+    throw new Error("The backend-to-Tauri signing audit boundary is invalid.");
+  }
+  return events.slice(backendSigningEventCount);
+}
+
 function requireSigningEventIdentity(event, config, expectedCanonicalSubject, label) {
   validateStructuredDigest(event.beforeSha256, "sha256");
   validateStructuredDigest(event.sha256, "sha256");
@@ -596,7 +603,10 @@ async function buildSignedRelease(releaseProfile) {
       writeFileSync(overlayPath, `${JSON.stringify(createTauriSigningOverlay(pnpm.command), null, 2)}\n`, { flag: "wx" });
       await runReleaseSteps([
         { name: "build-backend", run: () => { state.buildPython = validateDesktopBuildEnvironment(); buildBackend(state.buildPython); } },
-        { name: "sign-backend", run: () => { state.backendSigningRecords = signBackendTree(PYINSTALLER_PAYLOAD, config); } },
+        { name: "sign-backend", run: () => {
+          state.backendSigningRecords = signBackendTree(PYINSTALLER_PAYLOAD, config);
+          state.backendSigningEventCount = parseAuditLog(config.auditLog).length;
+        } },
         { name: "stage-backend", run: () => stageSignedBackend(rustcPath) },
         { name: "clean-tauri-release-output", run: () => removeSafeTree(REPOSITORY, TAURI_TARGET) },
         { name: "tauri-build", run: async () => {
@@ -620,7 +630,8 @@ async function buildSignedRelease(releaseProfile) {
           verifySignature(state.application, config, { expectFirstParty: true, expectedCanonicalSubject: signerIdentity.expectedCanonicalSubject });
           const restored = assertExpectedTauriRestoration(state.workingApplication, state.application);
           state.applicationSha256 = sha256(state.application);
-          state.signingEvents = parseAuditLog(config.auditLog);
+          const allSigningEvents = parseAuditLog(config.auditLog);
+          state.signingEvents = tauriSigningEventsAfterBackend(allSigningEvents, state.backendSigningEventCount);
           const signingEvidence = requireSigningEvents(state.signingEvents, config, state.installer, signerIdentity.expectedCanonicalSubject);
           const nsisScript = join(TAURI_TARGET, "nsis", "x64", "installer.nsi");
           const nsisSource = assertNsisApplicationSource(nsisScript, state.workingApplication);

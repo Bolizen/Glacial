@@ -734,6 +734,10 @@ export function exactSigningAuthorization(file, role) {
   return { role, path: target, beforeSha256: sha256(target), consumed: false };
 }
 
+export function defaultTauriNsisPluginRoot() {
+  return resolve(REPOSITORY_ROOT, "frontend", "src-tauri", "target", "release", "nsis", "x64", "Plugins", "x86-unicode");
+}
+
 function consumeSigningAuthorization(file, authorization) {
   if (!authorization || authorization.consumed === true) throw new Error("Signing requires one unused artifact authorization.");
   const target = realpathSync(resolve(file));
@@ -748,7 +752,7 @@ export function authorizeTauriSigningRequest(file, config, env = process.env) {
   const lower = target.toLowerCase();
   const application = resolve(config.applicationTarget).toLowerCase();
   const installer = resolve(config.installerTarget ?? resolve(REPOSITORY_ROOT, "frontend", "src-tauri", "target", "release", "bundle", "nsis", "Glacial_0.9.12_x64-setup.exe")).toLowerCase();
-  const pluginRoot = resolve(config.nsisPluginRoot ?? resolve(getEnvironmentValue(env, "LOCALAPPDATA") ?? "", "tauri", "NSIS", "Plugins", "x86-unicode"));
+  const pluginRoot = resolve(config.nsisPluginRoot ?? defaultTauriNsisPluginRoot());
   const pluginNames = new Set(["nsisdl.dll", "startmenu.dll", "system.dll", "nsdialogs.dll", "nsis_tauri_utils.dll"]);
   const temporaryRoot = resolve(config.temporaryRoot ?? getEnvironmentValue(env, "TEMP") ?? getEnvironmentValue(env, "TMP") ?? "");
   let role = null;
