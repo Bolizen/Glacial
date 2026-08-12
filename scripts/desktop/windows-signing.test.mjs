@@ -60,7 +60,9 @@ import {
   requireApplicationCapture,
   requireSigningEvents,
   runAfterSignerPreflight,
+  runBrokeredTauriBuild,
   runReleaseSteps,
+  tauriBuildArguments,
   verifyPublishedHashes,
 } from "./Build-SignedWindowsRelease.mjs";
 import { developmentPlan, runDevelopmentCommand } from "./desktop-development.mjs";
@@ -831,6 +833,20 @@ test("pnpm is launched through the absolute Node executable without a command sh
   const result = runCommand(pnpm.command, [...pnpm.prefixArgs, "--version"], { env: minimalEnvironment(process.env) });
   assert.equal(result.status, 0);
   assert.match(result.stdout, /^\d+\.\d+\.\d+/);
+});
+
+test("brokered Tauri build passes config without a literal delimiter and preserves both failures", async () => {
+  assert.deepEqual(
+    tauriBuildArguments({ prefixArgs: ["C:\\Tools\\pnpm.cjs"] }, "C:\\release\\overlay.json"),
+    ["C:\\Tools\\pnpm.cjs", "run", "tauri:build", "--config", "C:\\release\\overlay.json"],
+  );
+  await assert.rejects(
+    runBrokeredTauriBuild(
+      () => { throw new Error("underlying Tauri failure"); },
+      async () => { throw new Error("incomplete broker sequence"); },
+    ),
+    /underlying Tauri failure[\s\S]*incomplete broker sequence/,
+  );
 });
 
 test("unsigned development dry-run commands execute without signing configuration", () => {

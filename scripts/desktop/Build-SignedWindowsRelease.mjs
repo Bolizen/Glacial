@@ -106,6 +106,31 @@ export function startSigningBroker(environment) {
   });
 }
 
+export function tauriBuildArguments(pnpm, overlayPath) {
+  return [...pnpm.prefixArgs, "run", "tauri:build", "--config", overlayPath];
+}
+
+export async function runBrokeredTauriBuild(runBuild, stopBroker) {
+  let buildError = null;
+  try {
+    return await runBuild();
+  } catch (error) {
+    buildError = error;
+  } finally {
+    try {
+      await stopBroker();
+    } catch (stopError) {
+      if (buildError) {
+        throw new Error(
+          `Tauri build failed: ${sanitizeDiagnosticText(buildError.message)}\nSigning broker shutdown failed: ${sanitizeDiagnosticText(stopError.message)}`,
+        );
+      }
+      throw stopError;
+    }
+  }
+  throw buildError;
+}
+
 function readJson(path) {
   return JSON.parse(readFileSync(path, "utf8"));
 }
@@ -572,11 +597,10 @@ async function buildSignedRelease(releaseProfile) {
         { name: "tauri-build", run: async () => {
           const broker = await startSigningBroker(releaseEnvironment);
           const buildEnvironment = signingBrokerEnvironment(releaseEnvironment, releaseId, broker.port, broker.token, releaseEnvironment.GLACIAL_BUILD_IDENTITY_JSON);
-          try {
-            runVisible(pnpm.command, [...pnpm.prefixArgs, "run", "tauri:build", "--", "--config", overlayPath], { cwd: FRONTEND, env: buildEnvironment });
-          } finally {
-            await broker.stop();
-          }
+          await runBrokeredTauriBuild(
+            () => runVisible(pnpm.command, tauriBuildArguments(pnpm, overlayPath), { cwd: FRONTEND, env: buildEnvironment }),
+            broker.stop,
+          );
         } },
         { name: "verify-tauri-output", run: () => {
           state.installer = findInstaller(source.version);
