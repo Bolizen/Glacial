@@ -524,14 +524,20 @@ test("Tauri signer authorization binds application and installer roles to canoni
   const application = join(root, "target", "glacial.exe");
   const installer = join(root, "bundle", "Glacial_0.9.12_x64-setup.exe");
   const generatedPlugin = join(root, "target", "release", "nsis", "x64", "Plugins", "x86-unicode", "NSISdl.dll");
+  const generatedAdditionalPlugin = join(dirname(generatedPlugin), "additional", "nsis_tauri_utils.dll");
+  const misplacedAdditionalPlugin = join(dirname(generatedPlugin), "nsis_tauri_utils.dll");
+  const misplacedDirectPlugin = join(dirname(generatedPlugin), "additional", "NSISdl.dll");
   const cacheSourcePlugin = join(root, "cache", "tauri", "NSIS", "Plugins", "x86-unicode", "NSISdl.dll");
   const unrelated = join(root, "unrelated.exe");
-  for (const path of [application, installer, generatedPlugin, cacheSourcePlugin, unrelated]) { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, minimalPe()); }
+  for (const path of [application, installer, generatedPlugin, generatedAdditionalPlugin, misplacedAdditionalPlugin, misplacedDirectPlugin, cacheSourcePlugin, unrelated]) { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, minimalPe()); }
   const config = { applicationTarget: application, installerTarget: installer, nsisPluginRoot: dirname(generatedPlugin), temporaryRoot: join(root, "temp") };
   assert.equal(defaultTauriNsisPluginRoot(), join(REPOSITORY, "frontend", "src-tauri", "target", "release", "nsis", "x64", "Plugins", "x86-unicode"));
   assert.equal(authorizeTauriSigningRequest(join(dirname(application), ".", basename(application)), config).role, "application");
   assert.equal(authorizeTauriSigningRequest(installer, config).role, "installer");
   assert.equal(authorizeTauriSigningRequest(generatedPlugin, config).role, "nsis-plugin:nsisdl.dll");
+  assert.equal(authorizeTauriSigningRequest(generatedAdditionalPlugin, config).role, "nsis-plugin:nsis_tauri_utils.dll");
+  assert.throws(() => authorizeTauriSigningRequest(misplacedAdditionalPlugin, config), /authorized Tauri release artifact set/);
+  assert.throws(() => authorizeTauriSigningRequest(misplacedDirectPlugin, config), /authorized Tauri release artifact set/);
   assert.throws(() => authorizeTauriSigningRequest(cacheSourcePlugin, config), /authorized Tauri release artifact set/);
   assert.throws(() => authorizeTauriSigningRequest(unrelated, config), /authorized Tauri release artifact set/);
   const authorization = exactSigningAuthorization(application, "application");
