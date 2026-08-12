@@ -836,6 +836,9 @@ test("pnpm is launched through the absolute Node executable without a command sh
 });
 
 test("brokered Tauri build passes config without a literal delimiter and preserves both failures", async () => {
+  const releaseTool = readFileSync(join(REPOSITORY, "scripts", "desktop", "Build-SignedWindowsRelease.mjs"), "utf8");
+  assert.match(releaseTool, /includeFailureOutput: options\.includeFailureOutput === true/);
+  assert.match(releaseTool, /includeFailureOutput: true/);
   assert.deepEqual(
     tauriBuildArguments({ prefixArgs: ["C:\\Tools\\pnpm.cjs"] }, "C:\\release\\overlay.json"),
     ["C:\\Tools\\pnpm.cjs", "run", "tauri:build", "--config", "C:\\release\\overlay.json"],

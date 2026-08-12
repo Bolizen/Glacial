@@ -73,7 +73,12 @@ const ACTUAL_RELEASE_STEPS = [
 ];
 
 function runVisible(command, args, options = {}) {
-  const result = runCommand(command, args, { cwd: options.cwd, env: options.env, timeoutMs: options.timeoutMs ?? 900_000 });
+  const result = runCommand(command, args, {
+    cwd: options.cwd,
+    env: options.env,
+    timeoutMs: options.timeoutMs ?? 900_000,
+    includeFailureOutput: options.includeFailureOutput === true,
+  });
   const secrets = options.secretValues ?? [];
   if (result.stdout) process.stdout.write(sanitizeDiagnosticText(result.stdout, secrets));
   if (result.stderr) process.stderr.write(sanitizeDiagnosticText(result.stderr, secrets));
@@ -598,7 +603,11 @@ async function buildSignedRelease(releaseProfile) {
           const broker = await startSigningBroker(releaseEnvironment);
           const buildEnvironment = signingBrokerEnvironment(releaseEnvironment, releaseId, broker.port, broker.token, releaseEnvironment.GLACIAL_BUILD_IDENTITY_JSON);
           await runBrokeredTauriBuild(
-            () => runVisible(pnpm.command, tauriBuildArguments(pnpm, overlayPath), { cwd: FRONTEND, env: buildEnvironment }),
+            () => runVisible(pnpm.command, tauriBuildArguments(pnpm, overlayPath), {
+              cwd: FRONTEND,
+              env: buildEnvironment,
+              includeFailureOutput: true,
+            }),
             broker.stop,
           );
         } },
