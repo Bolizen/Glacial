@@ -9,6 +9,7 @@ import unittest
 import zipfile
 from contextlib import contextmanager
 from pathlib import Path
+from urllib.parse import quote
 from unittest.mock import patch
 
 from app import database, main
@@ -52,7 +53,55 @@ FAKE_HEX_CANARIES = (
     "C3d4" * 24,
     "e5F6" * 32,
 )
+
+
+def percent_encode(value: str, rounds: int) -> str:
+    for _ in range(rounds):
+        value = quote(value, safe="")
+    return value
+
+
 LOCATOR_CASES = {
+    "single-encoded-url": (
+        percent_encode(
+            "https://g099-single-user:g099-single-password@github.com/org/single.git?token=g099-single-query#g099-single-fragment",
+            1,
+        ),
+        "https://github.com/org/single.git",
+        ("g099-single-user", "g099-single-password", "g099-single-query", "g099-single-fragment"),
+    ),
+    "double-encoded-url": (
+        percent_encode(
+            "https://g099-double-user:g099-double-password@github.com/org/double.git?token=g099-double-query#g099-double-fragment",
+            2,
+        ),
+        "https://github.com/org/double.git",
+        ("g099-double-user", "g099-double-password", "g099-double-query", "g099-double-fragment"),
+    ),
+    "triple-encoded-url": (
+        percent_encode(
+            "https://g099-triple-user:g099-triple-password@github.com/org/triple.git?token=g099-triple-query#g099-triple-fragment",
+            3,
+        ),
+        "https://github.com/org/triple.git",
+        ("g099-triple-user", "g099-triple-password", "g099-triple-query", "g099-triple-fragment"),
+    ),
+    "eight-round-url": (
+        percent_encode(
+            "https://g099-eight-user:g099-eight-password@github.com/org/eight.git?token=g099-eight-query#g099-eight-fragment",
+            8,
+        ),
+        "https://github.com/org/eight.git",
+        ("g099-eight-user", "g099-eight-password", "g099-eight-query", "g099-eight-fragment"),
+    ),
+    "beyond-bound-url": (
+        percent_encode(
+            "https://g099-bound-user:g099-bound-password@github.com/org/bound.git?token=g099-bound-query#g099-bound-fragment",
+            9,
+        ),
+        "redacted dependency locator",
+        ("g099-bound-user", "g099-bound-password", "g099-bound-query", "g099-bound-fragment"),
+    ),
     "encoded-delimiters-userinfo": (
         "https://g097-user%3Ag097-password%40github.com/org/encoded.git%3Ftoken%3Dg097-query%23g097-encoded-selector",
         "https://github.com/org/encoded.git",
@@ -77,6 +126,21 @@ LOCATOR_CASES = {
         "git@github.com:org/scp.git%23g097-scp-selector",
         "vcs:github.com/org/scp.git",
         ("g097-scp-selector",),
+    ),
+    "scp-no-dot-alias": (
+        "git@internal:org/private.git%23g099-internal-selector",
+        "vcs:internal/org/private.git",
+        ("g099-internal-selector",),
+    ),
+    "scp-hostname-safe-alias": (
+        "user@build-node-07:org/private.git%3Ftoken%3Dg099-alias-query%23g099-alias-fragment",
+        "vcs:build-node-07/org/private.git",
+        ("g099-alias-query", "g099-alias-fragment"),
+    ),
+    "scp-encoded-at-selector": (
+        "deploy@host:org/private.git%40g099-scp-at-selector",
+        "vcs:host/org/private.git",
+        ("g099-scp-at-selector",),
     ),
     "malformed-scheme": (
         "https:/g097-malformed-user:g097-malformed-password@github.com/org/malformed.git#g097-malformed-selector",
@@ -304,6 +368,48 @@ class PrivacyHelperTests(unittest.TestCase):
                 self.assertNotIn(canary, json.dumps(sanitized, sort_keys=True), label)
         self.assertEqual(sanitized["ordinary"], nested["ordinary"])
 
+    def test_dependency_locator_malformed_inputs_fail_closed_without_false_positives(self) -> None:
+        malformed = sanitize_scan_value(
+            {
+                "requestedSpecification": (
+                    "https%ZZg099-malformed-user:g099-malformed-password@"
+                    "github.com/org/repository.git#g099-malformed-fragment"
+                )
+            },
+            project_root=r"C:\workspace\project",
+        )
+        self.assertEqual(
+            malformed["requestedSpecification"],
+            "redacted dependency locator",
+        )
+
+        negative_controls = (
+            "label:value",
+            "release:1.2.3",
+            "@scope/package",
+            "owner/repository",
+            r"C:relative\package.json",
+            "registry:org/package",
+            "git@@internal:org/repository",
+            "git@-internal:org/repository",
+            "git@internal:single-segment",
+            "review owner/repository with the maintainer",
+        )
+        for value in negative_controls:
+            sanitized = sanitize_scan_value(
+                {"metadata": {"source": value}},
+                project_root=r"C:\workspace\project",
+            )
+            self.assertEqual(sanitized["metadata"]["source"], value)
+
+        ordinary_versions = ("1.2.3", "^2.4.0", "workspace:*", "npm:@scope/package@1.0.0")
+        for value in ordinary_versions:
+            sanitized = sanitize_scan_value(
+                {"requestedSpecification": value},
+                project_root=r"C:\workspace\project",
+            )
+            self.assertEqual(sanitized["requestedSpecification"], value)
+
 
 class PrivacyPersistenceAndExportTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -427,8 +533,8 @@ class PrivacyPersistenceAndExportTests(unittest.TestCase):
                         "lockfilePath": "package-lock.json",
                         "sourceType": "vcs",
                         "sourceIdentifier": "vcs:github.com/org/locator-boundary.git",
-                        "requested": LOCATOR_CASES["encoded-delimiters-userinfo"][0],
-                        "lockedVersion": LOCATOR_CASES["https-selector"][0],
+                        "requested": LOCATOR_CASES["triple-encoded-url"][0],
+                        "lockedVersion": LOCATOR_CASES["scp-no-dot-alias"][0],
                         "metadata": {
                             label: {"source": locator}
                             for label, (locator, _, _) in LOCATOR_CASES.items()
@@ -453,6 +559,25 @@ class PrivacyPersistenceAndExportTests(unittest.TestCase):
             "react",
         )
         self.assert_private_canaries_absent(scan)
+        locator_entry = scan["dependencyTrust"]["entries"][1]
+        self.assertEqual(
+            locator_entry["requested"],
+            LOCATOR_CASES["triple-encoded-url"][1],
+        )
+        self.assertEqual(
+            locator_entry["lockedVersion"],
+            LOCATOR_CASES["scp-no-dot-alias"][1],
+        )
+        for label, (_, expected, _) in LOCATOR_CASES.items():
+            self.assertEqual(locator_entry["metadata"][label]["source"], expected)
+
+        history = main.scan_history(str(self.project))["scans"]
+        self.assertEqual(len(history), 1)
+        self.assert_private_canaries_absent(history)
+        self.assertEqual(
+            history[0]["dependencyTrust"]["entries"][1]["requested"],
+            LOCATOR_CASES["triple-encoded-url"][1],
+        )
 
         main.update_project_metadata(ProjectMetadataUpdate(
             project_path=str(self.project),

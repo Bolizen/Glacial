@@ -15,6 +15,7 @@ REDACTED_PROJECT_PATH = "[REDACTED PATH]"
 MAX_DISCLOSURE_TEXT_CHARS = 4_000
 MAX_EXCERPT_LINES = 3
 MAX_EXCERPT_LINE_CHARS = 160
+MAX_DEPENDENCY_LOCATOR_DECODE_ROUNDS = 8
 
 _PRIVATE_KEY_RE = re.compile(
     r"-----BEGIN(?: [A-Z0-9]+)* PRIVATE KEY-----.*?"
@@ -80,6 +81,17 @@ _DEPENDENCY_LOCATOR_KEYS = {
     "requestedspecification",
     "resolvedversion",
 }
+_ENCODED_DEPENDENCY_SCHEME_RE = re.compile(
+    r"^(?:(?:git|hg|svn|bzr)(?:\+|%(?:25)*2b))?"
+    r"(?:https?|ssh|git|svn|hg|bzr)%(?:25)*3a"
+    r"%(?:25)*2f%(?:25)*2f",
+    re.IGNORECASE,
+)
+_SCP_DEPENDENCY_LOCATOR_RE = re.compile(
+    r"^(?:(?P<user>[A-Za-z0-9][A-Za-z0-9._+-]{0,63})@)?"
+    r"(?P<host>[A-Za-z0-9][A-Za-z0-9.-]{0,252})"
+    r":(?P<path>[^\s\\/:]+/[^\s\\:]+)$"
+)
 
 _EXTENDED_WINDOWS_PATH_RE = re.compile(
     r"(?<![A-Za-z0-9])\\\\\?\\(?:UNC\\[^\\/\s\"'<>|]+\\[^\\/\s\"'<>|]+|"
@@ -204,14 +216,20 @@ def sanitize_private_text(
     return normalized[: max(0, limit)]
 
 
-def _decoded_dependency_locator(value: Any) -> str:
+def _normalized_dependency_locator(value: Any) -> tuple[str, bool]:
     text = normalize_control_characters(value, preserve_lines=False).strip()
-    for _ in range(2):
+    # Percent-decoding cannot expand the input. Each pass must converge within this
+    # fixed work bound; otherwise callers treat the still-ambiguous value as private.
+    for _ in range(MAX_DEPENDENCY_LOCATOR_DECODE_ROUNDS):
+        if re.search(r"%(?![0-9A-Fa-f]{2})", text):
+            return text, False
         decoded = unquote(text)
         if decoded == text:
-            break
+            return text, True
         text = decoded
-    return text
+    if re.search(r"%(?![0-9A-Fa-f]{2})", text):
+        return text, False
+    return text, unquote(text) == text
 
 
 def _without_dependency_selector(value: str) -> str:
@@ -219,26 +237,51 @@ def _without_dependency_selector(value: str) -> str:
     return locator.rsplit("@", 1)[0] if "@" in locator else locator
 
 
+def _scp_dependency_locator(value: str) -> tuple[str, str] | None:
+    match = _SCP_DEPENDENCY_LOCATOR_RE.fullmatch(value)
+    if not match:
+        return None
+    user = match.group("user")
+    host = match.group("host")
+    labels = host.split(".")
+    if (
+        ("." not in host and user is None)
+        or any(
+            not label
+            or len(label) > 63
+            or label.startswith("-")
+            or label.endswith("-")
+            for label in labels
+        )
+    ):
+        return None
+    return host, match.group("path")
+
+
 def _looks_like_dependency_locator(value: Any) -> bool:
-    text = _decoded_dependency_locator(value)
+    text, normalized = _normalized_dependency_locator(value)
     if not text or any(character.isspace() for character in text):
         return False
+    if not normalized:
+        return bool(_ENCODED_DEPENDENCY_SCHEME_RE.match(text))
     if "://" in text:
         return True
     if re.match(r"^(?:git\+|hg\+|svn\+|bzr\+)?(?:https?|ssh|git|svn|hg|bzr)(?::|/)", text, re.IGNORECASE):
         return True
     if re.match(r"^(?:github|gitlab|bitbucket):", text, re.IGNORECASE):
         return True
-    if re.match(r"^(?:[^@\s/:]+@)?[^:\s/]+\.[^:\s/]+:.+", text):
+    if _scp_dependency_locator(text):
         return True
     return bool(re.match(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+[?@#].*$", text))
 
 
 def sanitize_dependency_locator(value: Any, *, limit: int = 500) -> str:
     """Return only persistence-safe locator structure, never selectors or credentials."""
-    text = _decoded_dependency_locator(value)
+    text, normalized = _normalized_dependency_locator(value)
     if not text:
         return ""
+    if not normalized:
+        return "redacted dependency locator"
     if "://" in text:
         candidate = text
         transport = ""
@@ -263,10 +306,11 @@ def sanitize_dependency_locator(value: Any, *, limit: int = 500) -> str:
         return f"{provider.group(1).lower()}:{locator}"[:limit]
     if re.match(r"^(?:git\+|hg\+|svn\+|bzr\+)?(?:https?|ssh|git|svn|hg|bzr)(?::|/)", text, re.IGNORECASE):
         return "malformed remote source"
-    scp = re.match(r"^(?:[^@\s/:]+@)?([^:\s/]+\.[^:\s/]+):(.+)$", text)
+    scp = _scp_dependency_locator(text)
     if scp:
-        path = _without_dependency_selector(scp.group(2)).lstrip("/")
-        return f"vcs:{scp.group(1).lower()}/{path}"[:limit]
+        host, raw_path = scp
+        path = _without_dependency_selector(raw_path).lstrip("/")
+        return f"vcs:{host.lower()}/{path}"[:limit]
     bare = re.match(r"^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)(?:[?@#].*)?$", text)
     if bare:
         return bare.group(1)[:limit]
