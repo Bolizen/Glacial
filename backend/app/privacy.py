@@ -82,12 +82,25 @@ _DEPENDENCY_LOCATOR_KEYS = {
     "resolvedversion",
 }
 _DEPENDENCY_PATH_STRUCTURE_MARKERS = ("/", "\\", "@", ":")
+_DEPENDENCY_STRUCTURE_BY_CODE = {
+    "2b": "+",
+    "2f": "/",
+    "3a": ":",
+    "3f": "?",
+    "23": "#",
+    "40": "@",
+    "5c": "\\",
+}
 _URL_DEPENDENCY_LOCATOR_RE = re.compile(
     r"^(?:(?:git|hg|svn|bzr)\+)?(?:https?|ssh|git|svn|hg|bzr)://",
     re.IGNORECASE,
 )
 _ENCODED_DEPENDENCY_DELIMITER_RE = re.compile(
-    r"%(?:25)*(?P<code>2b|2f|3a|3f|23|40)",
+    r"%(?:25)*(?P<code>2b|2f|3a|3f|23|40|5c)",
+    re.IGNORECASE,
+)
+_DIRECT_ENCODED_DEPENDENCY_STRUCTURE_RE = re.compile(
+    r"%(?P<code>2b|2f|3a|3f|23|40|5c)",
     re.IGNORECASE,
 )
 _SCP_DEPENDENCY_LOCATOR_RE = re.compile(
@@ -235,32 +248,86 @@ def _normalized_dependency_locator(value: Any) -> tuple[str, bool]:
     return text, unquote(text) == text
 
 
-def _dependency_url_parse_candidate(value: Any) -> tuple[str, bool]:
-    """Decode only until URL structure is visible, never through that boundary."""
-    text = normalize_control_characters(value, preserve_lines=False).strip()
+def _dependency_structure_sentinels(value: str) -> dict[str, str] | None:
+    observed = set(value)
+    probe = value
     for _ in range(MAX_DEPENDENCY_LOCATOR_DECODE_ROUNDS):
-        if _URL_DEPENDENCY_LOCATOR_RE.match(text):
-            return text, True
-        if re.search(r"%(?![0-9A-Fa-f]{2})", text):
-            return text, False
-        decoded = unquote(text)
-        if decoded == text:
-            return text, False
-        text = decoded
-    return text, bool(_URL_DEPENDENCY_LOCATOR_RE.match(text))
+        decoded = unquote(probe)
+        observed.update(decoded)
+        if decoded == probe:
+            break
+        probe = decoded
+
+    available = (
+        chr(codepoint)
+        for codepoint in range(0xE000, 0xF900)
+        if chr(codepoint) not in observed
+    )
+    try:
+        return {
+            code: next(available)
+            for code in _DEPENDENCY_STRUCTURE_BY_CODE
+        }
+    except StopIteration:
+        return None
+
+
+def _restore_dependency_structure(
+    value: str,
+    marker_by_sentinel: dict[str, str],
+) -> tuple[str, frozenset[int]]:
+    restored: list[str] = []
+    introduced: set[int] = set()
+    for character in value:
+        marker = marker_by_sentinel.get(character)
+        if marker is not None:
+            introduced.add(len(restored))
+            restored.append(marker)
+        else:
+            restored.append(character)
+    return "".join(restored), frozenset(introduced)
+
+
+def _dependency_url_parse_candidate(
+    value: Any,
+) -> tuple[str, bool, frozenset[int]]:
+    """Decode to URL syntax while retaining all manufactured structure provenance."""
+    text = normalize_control_characters(value, preserve_lines=False).strip()
+    sentinel_by_code = _dependency_structure_sentinels(text)
+    if sentinel_by_code is None:
+        return text, False, frozenset()
+    marker_by_sentinel = {
+        sentinel: _DEPENDENCY_STRUCTURE_BY_CODE[code]
+        for code, sentinel in sentinel_by_code.items()
+    }
+    annotated = text
+    for _ in range(MAX_DEPENDENCY_LOCATOR_DECODE_ROUNDS):
+        candidate, introduced = _restore_dependency_structure(
+            annotated,
+            marker_by_sentinel,
+        )
+        if _URL_DEPENDENCY_LOCATOR_RE.match(candidate):
+            return candidate, True, introduced
+        if re.search(r"%(?![0-9A-Fa-f]{2})", candidate):
+            return candidate, False, introduced
+        tagged = _DIRECT_ENCODED_DEPENDENCY_STRUCTURE_RE.sub(
+            lambda match: sentinel_by_code[match.group("code").lower()],
+            annotated,
+        )
+        decoded = unquote(tagged)
+        if decoded == annotated:
+            return candidate, False, introduced
+        annotated = decoded
+    candidate, introduced = _restore_dependency_structure(
+        annotated,
+        marker_by_sentinel,
+    )
+    return candidate, bool(_URL_DEPENDENCY_LOCATOR_RE.match(candidate)), introduced
 
 
 def _dependency_locator_shape(value: str) -> str:
-    delimiter_by_code = {
-        "2b": "+",
-        "2f": "/",
-        "3a": ":",
-        "3f": "?",
-        "23": "#",
-        "40": "@",
-    }
     return _ENCODED_DEPENDENCY_DELIMITER_RE.sub(
-        lambda match: delimiter_by_code[match.group("code").lower()],
+        lambda match: _DEPENDENCY_STRUCTURE_BY_CODE[match.group("code").lower()],
         value,
     )
 
@@ -315,7 +382,7 @@ def _looks_like_normalized_dependency_locator(text: str) -> bool:
 
 
 def _looks_like_dependency_locator(value: Any) -> bool:
-    url_candidate, is_url = _dependency_url_parse_candidate(value)
+    url_candidate, is_url, _ = _dependency_url_parse_candidate(value)
     if is_url and not any(character.isspace() for character in url_candidate):
         return True
     text, normalized = _normalized_dependency_locator(value)
@@ -324,7 +391,12 @@ def _looks_like_dependency_locator(value: Any) -> bool:
     return _looks_like_normalized_dependency_locator(text)
 
 
-def _sanitize_dependency_url_candidate(value: str, *, limit: int) -> str:
+def _sanitize_dependency_url_candidate(
+    value: str,
+    *,
+    introduced_structure: frozenset[int],
+    limit: int,
+) -> str:
     candidate = value
     transport = ""
     for prefix in ("git+", "hg+", "svn+", "bzr+"):
@@ -338,6 +410,22 @@ def _sanitize_dependency_url_candidate(value: str, *, limit: int) -> str:
             return "malformed remote source"
 
         raw_path = parsed.path or ""
+        scheme_separator = candidate.find("://")
+        path_start = len(transport) + scheme_separator + 3 + len(parsed.netloc)
+        path_end = path_start + len(raw_path)
+        introduced_path_markers = {
+            value[index]
+            for index in introduced_structure
+            if path_start <= index < path_end
+            and value[index] in _DEPENDENCY_PATH_STRUCTURE_MARKERS
+        }
+        # Whole-locator encoding necessarily manufactures the URL and hierarchical
+        # path slashes together. Those slashes only delimit retained path segments.
+        # Other manufactured path structure can reinterpret private bytes as a
+        # selector or platform-specific locator, so it cannot become the baseline.
+        if introduced_path_markers - {"/"}:
+            return "redacted dependency locator"
+
         authority, authority_normalized = _normalized_dependency_locator(parsed.netloc)
         path, path_normalized = _normalized_dependency_locator(raw_path)
         if not authority_normalized or not path_normalized:
@@ -384,9 +472,13 @@ def _sanitize_dependency_url_candidate(value: str, *, limit: int) -> str:
 
 def sanitize_dependency_locator(value: Any, *, limit: int = 500) -> str:
     """Return only persistence-safe locator structure, never selectors or credentials."""
-    url_candidate, is_url = _dependency_url_parse_candidate(value)
+    url_candidate, is_url, introduced_structure = _dependency_url_parse_candidate(value)
     if is_url:
-        return _sanitize_dependency_url_candidate(url_candidate, limit=limit)
+        return _sanitize_dependency_url_candidate(
+            url_candidate,
+            introduced_structure=introduced_structure,
+            limit=limit,
+        )
     text, normalized = _normalized_dependency_locator(value)
     if not text:
         return ""

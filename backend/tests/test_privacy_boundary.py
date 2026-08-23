@@ -244,6 +244,155 @@ LOCATOR_CASES = {
         ("g097-malformed-user", "g097-malformed-password", "g097-malformed-selector"),
     ),
 }
+G104_SAME_ROUND_LOCATOR = (
+    "https%3A%2F%2Fhush104aa.example%2Fhush104bb%40x%2Fy"
+)
+G105_SYNTHETIC_TOKEN = "ghp_G105syntheticOnly0123456789abcdefAB"
+G105_LOCATOR_CASES = {
+    "g105-exact-g104": (
+        G104_SAME_ROUND_LOCATOR,
+        "redacted dependency locator",
+        ("hush104aa", "hush104bb"),
+    ),
+    "g105-credential-shaped": (
+        percent_encode(
+            f"https://safe.example/{G105_SYNTHETIC_TOKEN}@x/y",
+            1,
+        ),
+        "redacted dependency locator",
+        (G105_SYNTHETIC_TOKEN,),
+    ),
+    "g105-same-round-colon": (
+        percent_encode(
+            "https://g105colonhost.example/g105colonpath:pivot/repository.git",
+            1,
+        ),
+        "redacted dependency locator",
+        ("g105colonhost", "g105colonpath"),
+    ),
+    "g105-same-round-backslash": (
+        percent_encode(
+            "https://g105backhost.example/g105backpath\\pivot/repository.git",
+            1,
+        ),
+        "redacted dependency locator",
+        ("g105backhost", "g105backpath"),
+    ),
+    "g105-stripped-components": (
+        percent_encode(
+            "https://g105user:g105password@github.com/org/repository.git"
+            "?token=g105query#g105fragment",
+            1,
+        ),
+        "https://github.com/org/repository.git",
+        ("g105user", "g105password", "g105query", "g105fragment"),
+    ),
+    "g105-depth-two": (
+        percent_encode(
+            "https://g105d2host.example/g105d2path@x/y",
+            2,
+        ),
+        "redacted dependency locator",
+        ("g105d2host", "g105d2path"),
+    ),
+    "g105-depth-eight": (
+        percent_encode(
+            "https://g105d8host.example/g105d8path@x/y",
+            8,
+        ),
+        "redacted dependency locator",
+        ("g105d8host", "g105d8path"),
+    ),
+    "g105-beyond-bound": (
+        percent_encode(
+            "https://g105d9host.example/g105d9path@x/y",
+            9,
+        ),
+        "redacted dependency locator",
+        ("g105d9host", "g105d9path"),
+    ),
+    "g105-url-before-selector": (
+        percent_encode(
+            "https://g105earlyhost.example/g105earlypath",
+            1,
+        )
+        + percent_encode("@x/y", 2),
+        "redacted dependency locator",
+        ("g105earlyhost", "g105earlypath"),
+    ),
+    "g105-selector-before-url": (
+        percent_encode(
+            "https://g105latehost.example/g105latepath",
+            2,
+        )
+        + percent_encode("@x/y", 1),
+        "redacted dependency locator",
+        ("g105latehost", "g105latepath"),
+    ),
+    "g105-authority-before-path": (
+        percent_encode("https://g105aphost.example", 1)
+        + percent_encode("/g105appath@x/y", 2),
+        "redacted dependency locator",
+        ("g105aphost", "g105appath"),
+    ),
+    "g105-partial-components": (
+        percent_encode("https://g105pcuser:g105pcpassword@", 1)
+        + percent_encode(
+            "g105pchost.example/g105pcpath@x/y",
+            2,
+        )
+        + percent_encode("?token=g105pcquery#g105pcfragment", 3),
+        "redacted dependency locator",
+        (
+            "g105pcuser",
+            "g105pcpassword",
+            "g105pchost",
+            "g105pcpath",
+            "g105pcquery",
+            "g105pcfragment",
+        ),
+    ),
+}
+LOCATOR_CASES.update(G105_LOCATOR_CASES)
+G105_COMPATIBILITY_CASES = {
+    "ordinary-https": (
+        "https://github.com/org/repository.git",
+        "https://github.com/org/repository.git",
+    ),
+    "ordinary-port": (
+        "https://github.com:8443/org/repository.git",
+        "https://github.com:8443/org/repository.git",
+    ),
+    "encoded-non-structural": (
+        "https://github.com/org/repository%2Egit",
+        "https://github.com/org/repository.git",
+    ),
+    "encoded-userinfo": (
+        "https://g105controluser%3Ag105controlpassword%40"
+        "github.com/org/repository.git",
+        "https://github.com/org/repository.git",
+    ),
+    "literal-selector": (
+        "https://github.com/org/repository.git@g105controlselector",
+        "https://github.com/org/repository.git",
+    ),
+    "provider": (
+        "github:org/repository.git@g105controlselector",
+        "github:org/repository.git",
+    ),
+    "scp": (
+        "git@github.com:org/repository.git%23g105controlselector",
+        "vcs:github.com/org/repository.git",
+    ),
+    "bare": (
+        "org/repository.git@g105controlselector",
+        "org/repository.git",
+    ),
+    "scoped-npm": (
+        "npm:@scope/package@1.0.0",
+        "npm:@scope/package@1.0.0",
+    ),
+}
 LOCATOR_CANARIES = tuple(
     canary
     for _, _, canaries in LOCATOR_CASES.values()
@@ -464,6 +613,31 @@ class PrivacyHelperTests(unittest.TestCase):
             for canary in canaries:
                 self.assertNotIn(canary.casefold(), serialized, label)
         self.assertEqual(sanitized["ordinary"], nested["ordinary"])
+
+    def test_g105_url_transition_provenance_fails_closed_without_canaries(self) -> None:
+        for label, (locator, expected, canaries) in G105_LOCATOR_CASES.items():
+            direct = sanitize_dependency_locator(locator)
+            nested_value = sanitize_scan_value(
+                {"requestedSpecification": locator},
+                project_root=r"C:\workspace\project",
+            )["requestedSpecification"]
+            self.assertEqual(direct, expected, label)
+            self.assertEqual(nested_value, expected, label)
+            direct_folded = direct.casefold()
+            nested_folded = json.dumps(nested_value, ensure_ascii=False).casefold()
+            for canary in canaries:
+                self.assertNotIn(canary.casefold(), direct_folded, label)
+                self.assertNotIn(canary.casefold(), nested_folded, label)
+
+    def test_g105_legitimate_dependency_locator_controls_remain_useful(self) -> None:
+        for label, (locator, expected) in G105_COMPATIBILITY_CASES.items():
+            direct = sanitize_dependency_locator(locator)
+            nested = sanitize_scan_value(
+                {"requestedSpecification": locator},
+                project_root=r"C:\workspace\project",
+            )["requestedSpecification"]
+            self.assertEqual(direct, expected, label)
+            self.assertEqual(nested, expected, label)
 
     def test_dependency_locator_malformed_inputs_fail_closed_without_false_positives(self) -> None:
         malformed = sanitize_scan_value(
