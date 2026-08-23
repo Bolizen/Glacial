@@ -81,10 +81,12 @@ _DEPENDENCY_LOCATOR_KEYS = {
     "requestedspecification",
     "resolvedversion",
 }
-_ENCODED_DEPENDENCY_SCHEME_RE = re.compile(
-    r"^(?:(?:git|hg|svn|bzr)(?:\+|%(?:25)*2b))?"
-    r"(?:https?|ssh|git|svn|hg|bzr)%(?:25)*3a"
-    r"%(?:25)*2f%(?:25)*2f",
+_URL_DEPENDENCY_LOCATOR_RE = re.compile(
+    r"^(?:(?:git|hg|svn|bzr)\+)?(?:https?|ssh|git|svn|hg|bzr)://",
+    re.IGNORECASE,
+)
+_ENCODED_DEPENDENCY_DELIMITER_RE = re.compile(
+    r"%(?:25)*(?P<code>2b|2f|3a|3f|23|40)",
     re.IGNORECASE,
 )
 _SCP_DEPENDENCY_LOCATOR_RE = re.compile(
@@ -232,6 +234,36 @@ def _normalized_dependency_locator(value: Any) -> tuple[str, bool]:
     return text, unquote(text) == text
 
 
+def _dependency_url_parse_candidate(value: Any) -> tuple[str, bool]:
+    """Decode only until URL structure is visible, never through that boundary."""
+    text = normalize_control_characters(value, preserve_lines=False).strip()
+    for _ in range(MAX_DEPENDENCY_LOCATOR_DECODE_ROUNDS):
+        if _URL_DEPENDENCY_LOCATOR_RE.match(text):
+            return text, True
+        if re.search(r"%(?![0-9A-Fa-f]{2})", text):
+            return text, False
+        decoded = unquote(text)
+        if decoded == text:
+            return text, False
+        text = decoded
+    return text, bool(_URL_DEPENDENCY_LOCATOR_RE.match(text))
+
+
+def _dependency_locator_shape(value: str) -> str:
+    delimiter_by_code = {
+        "2b": "+",
+        "2f": "/",
+        "3a": ":",
+        "3f": "?",
+        "23": "#",
+        "40": "@",
+    }
+    return _ENCODED_DEPENDENCY_DELIMITER_RE.sub(
+        lambda match: delimiter_by_code[match.group("code").lower()],
+        value,
+    )
+
+
 def _without_dependency_selector(value: str) -> str:
     locator = re.split(r"[?#]", value, maxsplit=1)[0]
     return locator.rsplit("@", 1)[0] if "@" in locator else locator
@@ -258,12 +290,9 @@ def _scp_dependency_locator(value: str) -> tuple[str, str] | None:
     return host, match.group("path")
 
 
-def _looks_like_dependency_locator(value: Any) -> bool:
-    text, normalized = _normalized_dependency_locator(value)
+def _looks_like_normalized_dependency_locator(text: str) -> bool:
     if not text or any(character.isspace() for character in text):
         return False
-    if not normalized:
-        return bool(_ENCODED_DEPENDENCY_SCHEME_RE.match(text))
     if "://" in text:
         return True
     if re.match(r"^(?:git\+|hg\+|svn\+|bzr\+)?(?:https?|ssh|git|svn|hg|bzr)(?::|/)", text, re.IGNORECASE):
@@ -275,31 +304,76 @@ def _looks_like_dependency_locator(value: Any) -> bool:
     return bool(re.match(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+[?@#].*$", text))
 
 
+def _looks_like_dependency_locator(value: Any) -> bool:
+    url_candidate, is_url = _dependency_url_parse_candidate(value)
+    if is_url and not any(character.isspace() for character in url_candidate):
+        return True
+    text, normalized = _normalized_dependency_locator(value)
+    if not normalized:
+        text = _dependency_locator_shape(text)
+    return _looks_like_normalized_dependency_locator(text)
+
+
+def _sanitize_dependency_url_candidate(value: str, *, limit: int) -> str:
+    candidate = value
+    transport = ""
+    for prefix in ("git+", "hg+", "svn+", "bzr+"):
+        if candidate.lower().startswith(prefix):
+            transport = prefix
+            candidate = candidate[len(prefix):]
+            break
+    try:
+        parsed = urlsplit(candidate)
+        if not parsed.scheme or not parsed.netloc:
+            return "malformed remote source"
+
+        authority, authority_normalized = _normalized_dependency_locator(parsed.netloc)
+        path, path_normalized = _normalized_dependency_locator(parsed.path or "")
+        if not authority_normalized or not path_normalized:
+            return "redacted dependency locator"
+
+        authority = authority.rsplit("@", 1)[-1]
+        if not authority or any(marker in authority for marker in ("/", "\\", "?", "#")):
+            return "redacted dependency locator"
+        authority_url = urlsplit(f"{parsed.scheme}://{authority}")
+        if (
+            not authority_url.hostname
+            or authority_url.path
+            or authority_url.query
+            or authority_url.fragment
+            or authority_url.username is not None
+            or authority_url.password is not None
+        ):
+            return "redacted dependency locator"
+
+        port = f":{authority_url.port}" if authority_url.port is not None else ""
+        path = re.sub(r"/{2,}", "/", path)
+        path = _without_dependency_selector(path)
+        return urlunsplit(
+            (
+                f"{transport}{parsed.scheme.lower()}",
+                f"{authority_url.hostname.lower()}{port}",
+                path,
+                "",
+                "",
+            )
+        )[:limit]
+    except (TypeError, ValueError):
+        return "malformed remote source"
+
+
 def sanitize_dependency_locator(value: Any, *, limit: int = 500) -> str:
     """Return only persistence-safe locator structure, never selectors or credentials."""
+    url_candidate, is_url = _dependency_url_parse_candidate(value)
+    if is_url:
+        return _sanitize_dependency_url_candidate(url_candidate, limit=limit)
     text, normalized = _normalized_dependency_locator(value)
     if not text:
         return ""
     if not normalized:
         return "redacted dependency locator"
     if "://" in text:
-        candidate = text
-        transport = ""
-        for prefix in ("git+", "hg+", "svn+", "bzr+"):
-            if candidate.lower().startswith(prefix):
-                transport = prefix
-                candidate = candidate[len(prefix):]
-                break
-        try:
-            parsed = urlsplit(candidate)
-            if not parsed.scheme or not parsed.hostname:
-                return "malformed remote source"
-            port = f":{parsed.port}" if parsed.port else ""
-            path = re.sub(r"/{2,}", "/", parsed.path or "")
-            path = _without_dependency_selector(path)
-            return urlunsplit((f"{transport}{parsed.scheme.lower()}", f"{parsed.hostname.lower()}{port}", path, "", ""))[:limit]
-        except (TypeError, ValueError):
-            return "malformed remote source"
+        return "redacted dependency locator"
     provider = re.match(r"^(github|gitlab|bitbucket):(.+)$", text, re.IGNORECASE)
     if provider:
         locator = _without_dependency_selector(provider.group(2)).lstrip("/")

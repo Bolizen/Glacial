@@ -102,6 +102,40 @@ LOCATOR_CASES = {
         "redacted dependency locator",
         ("g099-bound-user", "g099-bound-password", "g099-bound-query", "g099-bound-fragment"),
     ),
+    "g100-over-bound-scp": (
+        percent_encode("git@internal:org/repo#pvtS7", 9),
+        "redacted dependency locator",
+        ("pvtS7",),
+    ),
+    "g100-malformed-scp": (
+        "git@internal:org/repo%ZZ#pvtM7",
+        "redacted dependency locator",
+        ("pvtM7",),
+    ),
+    "g100-over-bound-url-suffix": (
+        "https://github.com/org/repo.git"
+        + percent_encode("?token=pvtQ7#pvtF7", 9),
+        "redacted dependency locator",
+        ("pvtQ7", "pvtF7"),
+    ),
+    "g100-encoded-slash-userinfo": (
+        "https://pvtU7:443%2FpvtP7%40github.com/org/repo.git"
+        "?token=pvtQ8#pvtF8",
+        "https://github.com/org/repo.git",
+        ("pvtU7", "pvtP7", "pvtQ8", "pvtF8"),
+    ),
+    "g100-double-userinfo": (
+        "https://pvtD1:443%252FpvtD2%2540github.com/org/double.git"
+        "?token=pvtD3#pvtD4",
+        "https://github.com/org/double.git",
+        ("pvtD1", "pvtD2", "pvtD3", "pvtD4"),
+    ),
+    "g100-backslash-userinfo": (
+        "https://pvtB1%3ApvtB2%5CpvtB3%40github.com/org/backslash.git"
+        "?token=pvtB4#pvtB5",
+        "https://github.com/org/backslash.git",
+        ("pvtB1", "pvtB2", "pvtB3", "pvtB4", "pvtB5"),
+    ),
     "encoded-delimiters-userinfo": (
         "https://g097-user%3Ag097-password%40github.com/org/encoded.git%3Ftoken%3Dg097-query%23g097-encoded-selector",
         "https://github.com/org/encoded.git",
@@ -360,12 +394,13 @@ class PrivacyHelperTests(unittest.TestCase):
             },
         }
         sanitized = sanitize_scan_value(nested, project_root=r"C:\workspace\project")
+        serialized = json.dumps(sanitized, sort_keys=True).casefold()
 
         for label, (locator, expected, canaries) in LOCATOR_CASES.items():
             self.assertEqual(sanitize_dependency_locator(locator), expected, label)
             self.assertEqual(sanitized["metadata"][label]["source"], expected, label)
             for canary in canaries:
-                self.assertNotIn(canary, json.dumps(sanitized, sort_keys=True), label)
+                self.assertNotIn(canary.casefold(), serialized, label)
         self.assertEqual(sanitized["ordinary"], nested["ordinary"])
 
     def test_dependency_locator_malformed_inputs_fail_closed_without_false_positives(self) -> None:
