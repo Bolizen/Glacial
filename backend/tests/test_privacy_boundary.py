@@ -18,6 +18,7 @@ from app.privacy import (
     REDACTED_PROJECT_PATH,
     bounded_text_excerpt,
     safe_project_relative_path,
+    sanitize_dependency_locator,
     sanitize_private_text,
     sanitize_scan_value,
     validate_structured_digest,
@@ -51,6 +52,43 @@ FAKE_HEX_CANARIES = (
     "C3d4" * 24,
     "e5F6" * 32,
 )
+LOCATOR_CASES = {
+    "encoded-delimiters-userinfo": (
+        "https://g097-user%3Ag097-password%40github.com/org/encoded.git%3Ftoken%3Dg097-query%23g097-encoded-selector",
+        "https://github.com/org/encoded.git",
+        ("g097-user", "g097-password", "g097-query", "g097-encoded-selector"),
+    ),
+    "provider-selector": (
+        "github:org/provider.git@g097-provider-selector",
+        "github:org/provider.git",
+        ("g097-provider-selector",),
+    ),
+    "bare-selector": (
+        "org/bare.git@g097-bare-selector",
+        "org/bare.git",
+        ("g097-bare-selector",),
+    ),
+    "https-selector": (
+        "https://github.com/org/https.git@g097-https-selector",
+        "https://github.com/org/https.git",
+        ("g097-https-selector",),
+    ),
+    "scp-selector": (
+        "git@github.com:org/scp.git%23g097-scp-selector",
+        "vcs:github.com/org/scp.git",
+        ("g097-scp-selector",),
+    ),
+    "malformed-scheme": (
+        "https:/g097-malformed-user:g097-malformed-password@github.com/org/malformed.git#g097-malformed-selector",
+        "malformed remote source",
+        ("g097-malformed-user", "g097-malformed-password", "g097-malformed-selector"),
+    ),
+}
+LOCATOR_CANARIES = tuple(
+    canary
+    for _, _, canaries in LOCATOR_CASES.values()
+    for canary in canaries
+)
 FORBIDDEN = (
     FAKE_AWS_KEY,
     FAKE_GITHUB_TOKEN,
@@ -63,6 +101,7 @@ FORBIDDEN = (
     "privacy-db-password",
     "privacy-env-value-0123456789",
     *FAKE_HEX_CANARIES,
+    *LOCATOR_CANARIES,
 )
 
 
@@ -228,6 +267,43 @@ class PrivacyHelperTests(unittest.TestCase):
         self.assertEqual(sanitized["structured"]["integrity"], "sha512-QUJDRA==")
         self.assertNotIn(FAKE_HEX_CANARIES[1], serialized)
 
+    def test_persistence_sanitizer_fails_closed_for_locator_fields(self) -> None:
+        value = {
+            "requestedSpecification": "owner/repository#private-selector",
+            "resolvedVersion": "https://user:password@github.com/org/repository.git?token=query-secret#fragment-secret",
+            "metadata": {
+                "resolvedVersion": "github:owner/repository?token=metadata-query#metadata-fragment",
+            },
+        }
+        sanitized = sanitize_scan_value(value, project_root=r"C:\workspace\project")
+        serialized = json.dumps(sanitized, sort_keys=True)
+        self.assertEqual(sanitized["requestedSpecification"], "owner/repository")
+        self.assertEqual(sanitized["resolvedVersion"], "https://github.com/org/repository.git")
+        self.assertEqual(sanitized["metadata"]["resolvedVersion"], "github:owner/repository")
+        for secret in ("private-selector", "user", "password", "query-secret", "fragment-secret", "metadata-query", "metadata-fragment"):
+            self.assertNotIn(secret, serialized)
+
+    def test_dependency_locator_representations_remove_private_selectors(self) -> None:
+        nested = {
+            "metadata": {
+                label: {"source": locator}
+                for label, (locator, _, _) in LOCATOR_CASES.items()
+            },
+            "ordinary": {
+                "version": "1.2.3",
+                "package": "@scope/package",
+                "sentence": "review owner/repository with the maintainer",
+            },
+        }
+        sanitized = sanitize_scan_value(nested, project_root=r"C:\workspace\project")
+
+        for label, (locator, expected, canaries) in LOCATOR_CASES.items():
+            self.assertEqual(sanitize_dependency_locator(locator), expected, label)
+            self.assertEqual(sanitized["metadata"][label]["source"], expected, label)
+            for canary in canaries:
+                self.assertNotIn(canary, json.dumps(sanitized, sort_keys=True), label)
+        self.assertEqual(sanitized["ordinary"], nested["ordinary"])
+
 
 class PrivacyPersistenceAndExportTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -340,7 +416,25 @@ class PrivacyPersistenceAndExportTests(unittest.TestCase):
                         "sourceIdentifier": "registry:npmjs",
                         "requested": "19.0.0",
                         "integrityStatus": "present",
-                    }
+                    },
+                    {
+                        "ecosystem": "node",
+                        "name": "locator-boundary",
+                        "version": "0.0.0",
+                        "group": "runtime",
+                        "direct": True,
+                        "manifestPath": "package.json",
+                        "lockfilePath": "package-lock.json",
+                        "sourceType": "vcs",
+                        "sourceIdentifier": "vcs:github.com/org/locator-boundary.git",
+                        "requested": LOCATOR_CASES["encoded-delimiters-userinfo"][0],
+                        "lockedVersion": LOCATOR_CASES["https-selector"][0],
+                        "metadata": {
+                            label: {"source": locator}
+                            for label, (locator, _, _) in LOCATOR_CASES.items()
+                        },
+                        "integrityStatus": "not-applicable",
+                    },
                 ],
                 "findings": [],
                 "limitations": [hostile_text()],

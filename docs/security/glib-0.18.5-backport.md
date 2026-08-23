@@ -22,11 +22,19 @@ The corresponding semantic `Cargo.lock` package has version `0.18.5` and no
 registry `source` or `checksum`, which is Cargo's lockfile representation for
 the path-resolved package. The verifier parses effective TOML fields, validates
 the affirmative `PROVENANCE.json` contract, and authenticates every file and
-path in the vendored crate with one deterministic tree digest. Run
+path in the vendored crate with one deterministic tree digest. TOML mappings
+are prototype-free and trusted fields require own-property semantics. The
+verifier rejects Cargo configuration on every relevant project/ancestor path,
+removes Cargo/Rust configuration variables, invokes the real non-link Cargo
+executable under the trusted Cargo home rather than resolving through `PATH`,
+runs locked Cargo metadata from an isolated working boundary, and proves that
+the effective `glib 0.18.5` `manifest_path` is the platform-correct canonical
+path and filesystem object of the attested vendored manifest. Run
 `node scripts/security/verify-glib-backport.mjs` to check these invariants.
 
 The verifier runs automatically in `.github/workflows/glib-backport.yml` when
 relevant files change in a pull request targeting `main` or a push to `main`.
+Its path filters include every nested `.cargo/config` and `.cargo/config.toml`.
 Pushes run the verifier from the trusted pushed commit. Pull requests use
 `pull_request_target` so the workflow checks out the trusted base commit and
 the exact proposed head commit into separate directories, then runs:

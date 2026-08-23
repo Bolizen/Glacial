@@ -14,7 +14,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { createHash } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { spawnSync } from "node:child_process";
 import { request as httpRequest } from "node:http";
@@ -50,6 +50,7 @@ const INTERNAL_ENVIRONMENT_NAMES = [
   "GLACIAL_WINDOWS_EXPECTED_SUBJECT",
   "GLACIAL_WINDOWS_EXPECTED_THUMBPRINT",
   "GLACIAL_WINDOWS_RELEASE_ID",
+  "GLACIAL_WINDOWS_SIGN_AUDIT_KEY",
   "GLACIAL_WINDOWS_REQUIRE_TIMESTAMP",
   "GLACIAL_WINDOWS_SIGNING_PROVIDER",
   "GLACIAL_WINDOWS_SIGNTOOL_PATH",
@@ -69,6 +70,28 @@ export const WINDOWS_SIGNING_POWERSHELL_HELPER_COMMAND = [
   "  return $Name.Decode($flags).Trim().ToUpperInvariant()",
   "}",
   "function Thumb([string] $Value) { return ($Value -replace '\\s', '').ToUpperInvariant() }",
+  "Add-Type -TypeDefinition @'",
+  "using System;",
+  "using System.ComponentModel;",
+  "using System.Runtime.InteropServices;",
+  "using Microsoft.Win32.SafeHandles;",
+  "public static class GlacialFileIdentity {",
+  "  [StructLayout(LayoutKind.Sequential)] public struct Info { public uint Attributes; public System.Runtime.InteropServices.ComTypes.FILETIME CreationTime; public System.Runtime.InteropServices.ComTypes.FILETIME LastAccessTime; public System.Runtime.InteropServices.ComTypes.FILETIME LastWriteTime; public uint VolumeSerialNumber; public uint FileSizeHigh; public uint FileSizeLow; public uint NumberOfLinks; public uint FileIndexHigh; public uint FileIndexLow; }",
+  "  public sealed class Result { public string FinalPath { get; set; } public uint Attributes { get; set; } public uint VolumeSerialNumber { get; set; } public uint NumberOfLinks { get; set; } public uint FileIndexHigh { get; set; } public uint FileIndexLow { get; set; } public long FileSize { get; set; } }",
+  "  [DllImport(\"kernel32.dll\", CharSet=CharSet.Unicode, SetLastError=true)] static extern SafeFileHandle CreateFileW(string name, uint access, uint share, IntPtr security, uint creation, uint flags, IntPtr template);",
+  "  [DllImport(\"kernel32.dll\", SetLastError=true)] static extern bool GetFileInformationByHandle(SafeFileHandle handle, out Info info);",
+  "  [DllImport(\"kernel32.dll\", CharSet=CharSet.Unicode, SetLastError=true)] static extern uint GetFinalPathNameByHandleW(SafeFileHandle handle, System.Text.StringBuilder path, uint length, uint flags);",
+  "  public static Result Inspect(string path) {",
+  "    using (var handle = CreateFileW(path, 0x80, 7, IntPtr.Zero, 3, 0x00200000, IntPtr.Zero)) {",
+  "      if (handle.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error());",
+  "      Info info; if (!GetFileInformationByHandle(handle, out info)) throw new Win32Exception(Marshal.GetLastWin32Error());",
+  "      var finalPath = new System.Text.StringBuilder(32768); uint length = GetFinalPathNameByHandleW(handle, finalPath, (uint)finalPath.Capacity, 0);",
+  "      if (length == 0 || length >= finalPath.Capacity) throw new Win32Exception(Marshal.GetLastWin32Error());",
+  "      return new Result { FinalPath=finalPath.ToString(), Attributes=info.Attributes, VolumeSerialNumber=info.VolumeSerialNumber, NumberOfLinks=info.NumberOfLinks, FileIndexHigh=info.FileIndexHigh, FileIndexLow=info.FileIndexLow, FileSize=((long)info.FileSizeHigh << 32) | info.FileSizeLow };",
+  "    }",
+  "  }",
+  "}",
+  "'@",
   "function Has-CodeSigningEku([System.Security.Cryptography.X509Certificates.X509Certificate2] $Certificate) {",
   "  foreach ($extension in $Certificate.Extensions) {",
   "    if ($extension.Oid.Value -eq '2.5.29.37') {",
@@ -124,6 +147,10 @@ export const WINDOWS_SIGNING_POWERSHELL_HELPER_COMMAND = [
   "      else { [pscustomobject]@{ Path = $path; Exists = $false; ReparsePoint = $false; Attributes = '' } }",
   "    })",
   "    [pscustomobject]@{ Items = $items } | ConvertTo-Json -Compress -Depth 4",
+  "  }",
+  "  'file-identity' {",
+  "    $path = [System.IO.Path]::GetFullPath([string]$payload.path)",
+  "    [GlacialFileIdentity]::Inspect($path) | ConvertTo-Json -Compress",
   "  }",
   "  'tree-reparse-check' {",
   "    $root = [System.IO.DirectoryInfo]::new([System.IO.Path]::GetFullPath([string]$payload.root))",
@@ -330,6 +357,12 @@ function validateReleaseId(value) {
   return value;
 }
 
+function validateSigningAuditKey(value) {
+  const key = String(value ?? "");
+  if (!/^[0-9a-f]{64}$/i.test(key)) throw new Error("GLACIAL_WINDOWS_SIGN_AUDIT_KEY must be a 64-character release-scoped key.");
+  return key.toLowerCase();
+}
+
 export function loadSigningConfig(env = process.env, options = {}) {
   const dryRun = options.dryRun === true;
   const provider = String(env.GLACIAL_WINDOWS_SIGNING_PROVIDER ?? "").toLowerCase();
@@ -343,9 +376,10 @@ export function loadSigningConfig(env = process.env, options = {}) {
   const timestampUrl = parseTimestampUrl(env.GLACIAL_WINDOWS_TIMESTAMP_URL);
   const releaseId = validateReleaseId(env.GLACIAL_WINDOWS_RELEASE_ID);
   const auditLog = releaseId ? resolve(DESKTOP_BUILD_ROOT, "signing", releaseId, "signing-events.jsonl") : null;
+  const auditKey = releaseId ? validateSigningAuditKey(env.GLACIAL_WINDOWS_SIGN_AUDIT_KEY) : null;
   const applicationTarget = releaseId ? resolve(REPOSITORY_ROOT, "frontend", "src-tauri", "target", "release", "glacial.exe") : null;
   const applicationCapture = releaseId ? resolve(DESKTOP_BUILD_ROOT, "signing", releaseId, "application", "Glacial.exe") : null;
-  const releaseState = { releaseId, auditLog, applicationTarget, applicationCapture };
+  const releaseState = { releaseId, auditLog, auditKey, applicationTarget, applicationCapture };
 
   if (provider === "store") {
     const thumbprint = normalizeThumbprint(env.GLACIAL_WINDOWS_CERTIFICATE_THUMBPRINT);
@@ -678,8 +712,21 @@ export function signingAuditRecord(record) {
   if (!signedUtc || Number.isNaN(Date.parse(signedUtc))) {
     throw new Error("Signing audit timestamp is invalid.");
   }
+  const artifactRole = String(record.artifactRole ?? "");
+  if (!/^(?:application|installer|nsis-uninstaller|nsis-plugin:[a-z0-9_.-]+|backend:[A-Za-z0-9_./-]+|preflight-probe)$/.test(artifactRole)) {
+    throw new Error("Signing audit artifact role is invalid.");
+  }
+  const objectIdentity = String(record.objectIdentity ?? "").toUpperCase();
+  if (!/^[0-9A-F]+:[0-9A-F]+$/.test(objectIdentity)) throw new Error("Signing audit object identity is invalid.");
+  const releaseId = record.releaseId == null ? null : validateReleaseId(record.releaseId);
+  const evidenceObjectIdentity = record.evidenceObjectIdentity == null ? null : String(record.evidenceObjectIdentity).toUpperCase();
+  if (evidenceObjectIdentity !== null && !/^[0-9A-F]+:[0-9A-F]+$/.test(evidenceObjectIdentity)) throw new Error("Signing audit evidence object identity is invalid.");
   return {
     path: privacySafePath(record.path),
+    artifactRole,
+    releaseId,
+    objectIdentity,
+    evidenceObjectIdentity,
     beforeSha256: validateStructuredDigest(record.beforeSha256, "sha256"),
     sha256: validateStructuredDigest(record.sha256, "sha256"),
     applicationCapturePath: record.applicationCapturePath
@@ -693,16 +740,82 @@ export function signingAuditRecord(record) {
   };
 }
 
+export function serializeSigningAuditRecord(record, auditKey) {
+  const persisted = signingAuditRecord(record);
+  const payload = JSON.stringify(persisted);
+  const auditMac = createHmac("sha256", validateSigningAuditKey(auditKey)).update(payload, "utf8").digest("hex").toUpperCase();
+  return JSON.stringify({ ...persisted, auditMac });
+}
+
+export function parseSigningAuditRecord(line, auditKey) {
+  let parsed;
+  try { parsed = JSON.parse(line); } catch { throw new Error("Signing audit JSONL is malformed."); }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Signing audit JSONL record is malformed.");
+  const { auditMac, ...unsigned } = parsed;
+  if (!/^[0-9A-F]{64}$/.test(String(auditMac ?? ""))) throw new Error("Signing audit record authentication is missing or malformed.");
+  const persisted = signingAuditRecord({
+    ...unsigned,
+    path: resolvePrivacySafePath(unsigned.path),
+    applicationCapturePath: unsigned.applicationCapturePath ? resolvePrivacySafePath(unsigned.applicationCapturePath) : null,
+  });
+  if (JSON.stringify(persisted) !== JSON.stringify(unsigned)) throw new Error("Signing audit record is not canonical.");
+  const expected = createHmac("sha256", validateSigningAuditKey(auditKey)).update(JSON.stringify(unsigned), "utf8").digest();
+  const actual = Buffer.from(auditMac, "hex");
+  if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) throw new Error("Signing audit record authentication failed.");
+  return parsed;
+}
+
 function appendAuditRecord(config, record) {
   if (!config.auditLog) return;
   const audit = assertSafePath(DESKTOP_BUILD_ROOT, config.auditLog);
   ensureSafeDirectory(DESKTOP_BUILD_ROOT, dirname(audit));
-  const persisted = signingAuditRecord(record);
-  appendFileSync(audit, `${JSON.stringify(persisted)}\n`, { encoding: "utf8" });
+  appendFileSync(audit, `${serializeSigningAuditRecord(record, config.auditKey)}\n`, { encoding: "utf8" });
 }
 
 function samePath(left, right) {
   return Boolean(left && right) && resolve(left).toLowerCase() === resolve(right).toLowerCase();
+}
+
+function normalizeObjectIdentity(value) {
+  if (!value || typeof value !== "object") throw new Error("Signing object identity inspection failed.");
+  const objectId = String(value.objectId ?? "").toUpperCase();
+  const linkCount = Number(value.linkCount);
+  const size = Number(value.size);
+  if (!/^[0-9A-F]+:[0-9A-F]+$/.test(objectId) || !Number.isSafeInteger(linkCount) || linkCount < 1 || !Number.isSafeInteger(size) || size < 0) {
+    throw new Error("Signing object identity inspection returned malformed data.");
+  }
+  if (value.reparsePoint === true) throw new Error("Refusing to sign a reparse-point artifact.");
+  if (linkCount !== 1) throw new Error("Refusing to sign an artifact with multiple hardlinks.");
+  return { objectId, linkCount, size, reparsePoint: false };
+}
+
+export function inspectSigningObject(file, options = {}) {
+  const target = realpathSync.native(resolve(file));
+  if (options.objectInspector) return normalizeObjectIdentity(options.objectInspector(target));
+  if (process.platform === "win32" && options.pathInspector !== false) {
+    const value = invokeWindowsHelper("file-identity", { path: target }, options.runner, options.env);
+    const objectId = `${Number(value.VolumeSerialNumber).toString(16)}:${Number(value.FileIndexHigh).toString(16).padStart(8, "0")}${Number(value.FileIndexLow).toString(16).padStart(8, "0")}`;
+    return normalizeObjectIdentity({
+      objectId,
+      linkCount: value.NumberOfLinks,
+      size: value.FileSize,
+      reparsePoint: (Number(value.Attributes) & 0x400) !== 0,
+    });
+  }
+  const metadata = statSync(target);
+  return normalizeObjectIdentity({
+    objectId: `${BigInt(metadata.dev).toString(16)}:${BigInt(metadata.ino).toString(16)}`,
+    linkCount: metadata.nlink,
+    size: metadata.size,
+    reparsePoint: false,
+  });
+}
+
+function assertSameSigningObject(file, authorization, options = {}, expectedSha256 = null) {
+  const identity = inspectSigningObject(file, options);
+  if (identity.objectId !== authorization.objectIdentity) throw new Error("The authorized filesystem object identity changed before signing completed.");
+  if (expectedSha256 && sha256(file) !== expectedSha256) throw new Error("The signed bytes changed before signing evidence was committed.");
+  return identity;
 }
 
 export function captureSignedApplication(file, config, options = {}) {
@@ -723,32 +836,44 @@ export function captureSignedApplication(file, config, options = {}) {
     renameSync(temporary, capture);
     if (sha256(capture) !== targetHash) throw new Error("The atomic Glacial application capture hash changed.");
     const capturedSignature = verifySignature(capture, config, { expectFirstParty: true, runner: options.runner, env: options.env });
-    return { path: capture, sha256: targetHash, signature: capturedSignature };
+    return { path: capture, sha256: targetHash, signature: capturedSignature, objectIdentity: inspectSigningObject(capture, options).objectId };
   } finally {
     if (existsSync(temporary)) unlinkSync(temporary);
   }
 }
 
-export function exactSigningAuthorization(file, role) {
-  const target = realpathSync(resolve(file));
-  return { role, path: target, beforeSha256: sha256(target), consumed: false };
+const consumedSigningPlans = new WeakSet();
+
+export function exactSigningAuthorization(file, role, options = {}) {
+  const target = realpathSync.native(resolve(file));
+  const identity = inspectSigningObject(target, options);
+  return Object.freeze({
+    schemaVersion: 1,
+    role: String(role),
+    path: target,
+    beforeSha256: sha256(target),
+    objectIdentity: identity.objectId,
+    releaseId: options.releaseId ?? null,
+  });
 }
 
 export function defaultTauriNsisPluginRoot() {
   return resolve(REPOSITORY_ROOT, "frontend", "src-tauri", "target", "release", "nsis", "x64", "Plugins", "x86-unicode");
 }
 
-function consumeSigningAuthorization(file, authorization) {
-  if (!authorization || authorization.consumed === true) throw new Error("Signing requires one unused artifact authorization.");
-  const target = realpathSync(resolve(file));
+function consumeSigningAuthorization(file, authorization, options = {}) {
+  if (!authorization || consumedSigningPlans.has(authorization)) throw new Error("Signing requires one unused artifact authorization.");
+  const target = realpathSync.native(resolve(file));
   if (target.toLowerCase() !== resolve(authorization.path).toLowerCase()) throw new Error("Signing target is not the authorized artifact path.");
   if (sha256(target) !== authorization.beforeSha256) throw new Error("Signing target does not match its authorized pre-signing digest.");
-  authorization.consumed = true;
+  if ((authorization.releaseId ?? null) !== (options.releaseId ?? authorization.releaseId ?? null)) throw new Error("Signing authorization release context changed.");
+  assertSameSigningObject(target, authorization, options);
+  consumedSigningPlans.add(authorization);
   return target;
 }
 
-export function authorizeTauriSigningRequest(file, config, env = process.env) {
-  const target = realpathSync(resolve(file));
+export function authorizeTauriSigningRequest(file, config, env = process.env, options = {}) {
+  const target = realpathSync.native(resolve(file));
   const lower = target.toLowerCase();
   const application = resolve(config.applicationTarget).toLowerCase();
   const installer = resolve(config.installerTarget ?? resolve(REPOSITORY_ROOT, "frontend", "src-tauri", "target", "release", "bundle", "nsis", "Glacial_0.9.12_x64-setup.exe")).toLowerCase();
@@ -763,11 +888,11 @@ export function authorizeTauriSigningRequest(file, config, env = process.env) {
   else if (resolve(dirname(target)).toLowerCase() === additionalPluginRoot.toLowerCase() && basename(target).toLowerCase() === "nsis_tauri_utils.dll") role = "nsis-plugin:nsis_tauri_utils.dll";
   else if (resolve(dirname(target)).toLowerCase() === temporaryRoot.toLowerCase() && /^nst[0-9a-f]+\.tmp$/i.test(basename(target))) role = "nsis-uninstaller";
   if (!role) throw new Error("Signing target is not a member of the authorized Tauri release artifact set.");
-  return exactSigningAuthorization(target, role);
+  return exactSigningAuthorization(target, role, { ...options, releaseId: config.releaseId ?? null });
 }
 
 export function signOne(file, config, options = {}) {
-  const target = consumeSigningAuthorization(file, options.authorization);
+  const target = consumeSigningAuthorization(file, options.authorization, { ...options, releaseId: config.releaseId ?? options.authorization?.releaseId ?? null });
   if (!isPortableExecutable(readFileSync(target))) throw new Error(`Refusing to Authenticode-sign a non-PE file: ${basename(target)}`);
   if (samePath(target, config.applicationTarget) && config.applicationCapture && existsSync(config.applicationCapture)) throw new Error("Refusing a duplicate Glacial application capture.");
   const beforeSha256 = sha256(target);
@@ -781,9 +906,11 @@ export function signOne(file, config, options = {}) {
   }
   const signature = verifySignature(target, config, { expectFirstParty: true, runner, env: options.env });
   const signedSha256 = sha256(target);
+  assertSameSigningObject(target, options.authorization, options, signedSha256);
   const applicationCapture = captureSignedApplication(target, config, { ...options, runner });
   if (applicationCapture && applicationCapture.sha256 !== signedSha256) throw new Error("The Glacial application capture does not match the signed bytes.");
-  appendAuditRecord(config, { path: target, beforeSha256, sha256: signedSha256, applicationCapturePath: applicationCapture?.path ?? null, signerThumbprint: signature.signerThumbprint, canonicalSubject: signature.canonicalSubject, timestampThumbprint: signature.timestampThumbprint, trustClassification: signature.trustClassification, signedUtc: new Date().toISOString() });
+  assertSameSigningObject(target, options.authorization, options, signedSha256);
+  appendAuditRecord(config, { path: target, artifactRole: options.authorization.role, releaseId: options.authorization.releaseId, objectIdentity: options.authorization.objectIdentity, evidenceObjectIdentity: applicationCapture?.objectIdentity ?? null, beforeSha256, sha256: signedSha256, applicationCapturePath: applicationCapture?.path ?? null, signerThumbprint: signature.signerThumbprint, canonicalSubject: signature.canonicalSubject, timestampThumbprint: signature.timestampThumbprint, trustClassification: signature.trustClassification, signedUtc: new Date().toISOString() });
   return signature;
 }
 
@@ -805,7 +932,7 @@ export function preflightSigningProvider(config, options = {}) {
     createUnsignedProbeCopy(source, probe);
     const initialSignature = inspectAuthenticode(probe, runner, options.env);
     if (initialSignature.status !== "NotSigned") throw new Error("The disposable signing probe is not unsigned.");
-    const signature = signOne(probe, { ...config, auditLog: null }, { runner, env: options.env, authorization: exactSigningAuthorization(probe, "preflight-probe") });
+    const signature = signOne(probe, { ...config, auditLog: null }, { ...options, runner, env: options.env, authorization: exactSigningAuthorization(probe, "preflight-probe", { ...options, releaseId: config.releaseId ?? null }) });
     if (signature.canonicalSubject.toUpperCase() !== expectedCanonical) throw new Error("The private-key probe used an unexpected signer subject.");
     return {
       expectedCanonicalSubject: expectedCanonical,
@@ -840,7 +967,7 @@ export function signBackendTree(root, config, options = {}) {
   const records = [];
   for (const entry of plan) {
     if (entry.action === "sign-first-party") {
-      const signature = signOne(entry.path, config, { runner, env: options.env, authorization: exactSigningAuthorization(entry.path, `backend:${entry.relativePath}`) });
+      const signature = signOne(entry.path, config, { ...options, runner, env: options.env, authorization: exactSigningAuthorization(entry.path, `backend:${entry.relativePath}`, { ...options, releaseId: config.releaseId ?? null }) });
       records.push({ ...entry, signature, afterSha256: sha256(entry.path), classification: "first-party" });
     } else {
       const signature = verifySignature(entry.path, config, { runner, env: options.env });
@@ -872,9 +999,9 @@ export function verifyPayloadTree(root, config, options = {}) {
   return records;
 }
 
-export function signingEnvironment(source, releaseId) {
+export function signingEnvironment(source, releaseId, auditKey) {
   const providerNames = parseEnvironmentNames(source.GLACIAL_WINDOWS_SIGN_COMMAND_ENV);
-  return minimalEnvironment(source, { GLACIAL_WINDOWS_RELEASE_ID: releaseId }, [...INTERNAL_ENVIRONMENT_NAMES, ...providerNames]);
+  return minimalEnvironment(source, { GLACIAL_WINDOWS_RELEASE_ID: releaseId, GLACIAL_WINDOWS_SIGN_AUDIT_KEY: validateSigningAuditKey(auditKey) }, [...INTERNAL_ENVIRONMENT_NAMES, ...providerNames]);
 }
 
 export function signingBrokerEnvironment(source, releaseId, port, token, buildIdentity) {

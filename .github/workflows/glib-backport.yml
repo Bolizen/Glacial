@@ -7,8 +7,11 @@ on:
     paths:
       - "frontend/src-tauri/Cargo.toml"
       - "frontend/src-tauri/Cargo.lock"
+      - "**/.cargo/config"
+      - "**/.cargo/config.toml"
       - "third_party/rust/glib-0.18.5-patched/**"
       - "scripts/security/verify-glib-backport.mjs"
+      - "scripts/security/path-identity.mjs"
       - "scripts/security/verify-glib-backport.test.mjs"
       - "scripts/security/toml-data.mjs"
       - "docs/security/glib-0.18.5-backport.md"
@@ -19,8 +22,11 @@ on:
     paths:
       - "frontend/src-tauri/Cargo.toml"
       - "frontend/src-tauri/Cargo.lock"
+      - "**/.cargo/config"
+      - "**/.cargo/config.toml"
       - "third_party/rust/glib-0.18.5-patched/**"
       - "scripts/security/verify-glib-backport.mjs"
+      - "scripts/security/path-identity.mjs"
       - "scripts/security/verify-glib-backport.test.mjs"
       - "scripts/security/toml-data.mjs"
       - "docs/security/glib-0.18.5-backport.md"

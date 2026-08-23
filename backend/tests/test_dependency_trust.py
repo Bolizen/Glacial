@@ -724,6 +724,44 @@ class DependencyTrustPersistenceTests(unittest.TestCase):
         self.assertNotIn("short-private-branch", serialized)
         self.assertNotIn("user:password", serialized)
 
+    def test_https_and_bare_vcs_locators_are_minimized_before_persistence(self) -> None:
+        locators = {
+            "https-git": "https://https-user:https-password@github.com/org/https.git?token=https-query#https-selector",
+            "https-provider": "https://gitlab.com/group/provider-repository#provider-selector",
+            "bare-shorthand": "owner/bare-repository#bare-selector",
+            "provider-shorthand": "github:owner/provider-repository?token=provider-query#provider-fragment",
+        }
+        (self.project / "package-lock.json").write_text(json.dumps({
+            "lockfileVersion": 3,
+            "packages": {
+                f"node_modules/{name}": {"version": locator, "resolved": locator, "hasInstallScript": True}
+                for name, locator in locators.items()
+            },
+        }), encoding="utf-8")
+
+        current = main.run_scan(ProjectPathRequest(project_path=str(self.project)))
+        history = main.scan_history(str(self.project))["scans"][0]
+        with database.get_connection() as connection:
+            row = connection.execute(
+                "SELECT findings_json, scan_metadata_json FROM scans WHERE id = ?",
+                (current["id"],),
+            ).fetchone()
+        persisted = json.dumps(dict(row), sort_keys=True)
+        serialized = json.dumps({"current": current, "history": history, "persisted": persisted}, sort_keys=True)
+
+        entries = {entry["name"]: entry for entry in history["dependencyTrust"]["entries"]}
+        for name in locators:
+            self.assertEqual(entries[name]["sourceType"], "vcs")
+        self.assertEqual(entries["https-git"]["lockedVersion"], "https://github.com/org/https.git")
+        self.assertEqual(entries["https-provider"]["lockedVersion"], "https://gitlab.com/group/provider-repository")
+        self.assertEqual(entries["bare-shorthand"]["lockedVersion"], "owner/bare-repository")
+        self.assertEqual(entries["provider-shorthand"]["lockedVersion"], "github:owner/provider-repository")
+        for secret in (
+            "https-user", "https-password", "https-query", "https-selector",
+            "provider-selector", "bare-selector", "provider-query", "provider-fragment",
+        ):
+            self.assertNotIn(secret, serialized)
+
 
 if __name__ == "__main__":
     unittest.main()

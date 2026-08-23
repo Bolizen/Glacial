@@ -61,7 +61,7 @@ The result is bounded to profile, provider type, expected and observed public si
 
 `command` mode invokes one absolute reviewed executable directly, without a shell. Its JSON argument array contains exactly one `{file}` placeholder. Only explicitly named provider environment variables are forwarded. Credentials must not appear in command arguments, paths, logs, manifests, or tracked files. Prefer managed identity or an HSM/provider session over long-lived environment secrets.
 
-Tauri receives an ignored generated overlay whose object-form `signCommand` calls the same wrapper. Tauri patches and signs Glacial.exe for the NSIS bundle, then restores its unsigned working executable after bundling. The wrapper atomically preserves the verified NSIS application signing result in confined release signing state so it can be checked against the signing audit and generated NSIS source evidence. Glacial.exe is never signed a second time after Tauri finishes. Existing valid vendor-signed files are hashed before and after verification and are never re-signed.
+Tauri receives an ignored generated overlay whose object-form `signCommand` calls the same wrapper. Before provider delegation, the broker freezes a release-scoped signing plan containing the artifact role, canonical path, pre-signing digest, and Windows handle-derived filesystem object identity. Reparse objects and artifacts with multiple hardlinks are rejected. Identity and signed bytes are revalidated after signing/capture and during final evidence verification when the object remains present. Signing audit JSONL records are authenticated with a release-scoped HMAC key that is shared only by the coordinator and broker, not the Tauri build client. Tauri patches and signs Glacial.exe for the NSIS bundle, then restores its unsigned working executable after bundling. The wrapper atomically preserves the verified NSIS application signing result in confined release signing state so it can be checked against the authenticated signing audit and generated NSIS source evidence. Glacial.exe is never signed a second time after Tauri finishes. Existing valid vendor-signed files are hashed before and after verification and are never re-signed.
 
 ## Repeat-safe self-signed provisioning
 
@@ -250,12 +250,12 @@ The coordinator performs this order:
 2. Select one exact CurrentUser certificate or external signer and sign/verify a disposable timestamped PE probe.
 3. Enforce the selected profile immediately from the verified `trustClassification`: signed preview accepts `self-signed` or `publicly-trusted`; public RC accepts exactly `publicly-trusted`.
 4. Verify build/runtime environments, build the backend once, preserve valid vendor bytes, and sign every unsigned PE.
-5. Stage the signed backend and let Tauri sign Glacial.exe, supported NSIS components, uninstaller, and final installer; the custom signer atomically captures the one verified NSIS-patched Glacial.exe before Tauri restores its working file.
-6. Verify the final installer, captured application, exact signing audit event, restored working-file state, and generated NSIS main-binary source.
+5. Stage the signed backend and let Tauri request Glacial.exe, supported NSIS components, uninstaller, and final installer signing; the broker rejects reparse/multi-link objects and binds each request to an immutable role/path/digest/object/release plan before provider delegation.
+6. Verify the final installer, captured application, authenticated object-and-byte-bound signing audit events, retained object identities, restored working-file state, and generated NSIS main-binary source.
 7. Copy only the verified NSIS installer into release-candidate state.
 8. Generate final manifest and hashes only after all binary mutation is complete, recording the selected profile, required signer trust, and verified signer trust classification.
 9. Recheck branch, HEAD, origin/main, clean status, and release metadata.
-10. Atomically publish a new unique candidate directory.
+10. Atomically publish a new unique candidate directory, reverify its hashes after the rename boundary, and roll it back to work state if that final check fails.
 
 The failed unsigned candidate `Glacial-0.4.0-fbf96d568350-20260719T065059Z` is historical evidence and must never be overwritten or removed.
 

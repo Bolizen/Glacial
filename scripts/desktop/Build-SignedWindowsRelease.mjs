@@ -20,9 +20,11 @@ import {
   createTauriSigningOverlay,
   ensureSafeDirectory,
   inspectAuthenticode,
+  inspectSigningObject,
   loadSigningConfig,
   minimalEnvironment,
   preflightSigningProvider,
+  parseSigningAuditRecord,
   privacySafePath,
   removeSafeTree,
   resolvePrivacySafePath,
@@ -381,9 +383,9 @@ function stageSignedBackend(rustcPath) {
   cpSync(join(PYINSTALLER_PAYLOAD, "_internal"), join(SIDECAR_STAGE, "_internal"), { recursive: true, errorOnExist: true });
 }
 
-function parseAuditLog(path) {
+export function parseAuditLog(path, auditKey) {
   if (!existsSync(path)) return [];
-  return readFileSync(path, "utf8").split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
+  return readFileSync(path, "utf8").split(/\r?\n/).filter(Boolean).map((line) => parseSigningAuditRecord(line, auditKey));
 }
 
 export function tauriSigningEventsAfterBackend(events, backendSigningEventCount) {
@@ -393,7 +395,7 @@ export function tauriSigningEventsAfterBackend(events, backendSigningEventCount)
   return events.slice(backendSigningEventCount);
 }
 
-function requireSigningEventIdentity(event, config, expectedCanonicalSubject, label) {
+function requireSigningEventIdentity(event, config, expectedCanonicalSubject, label, expectedRole = null, options = {}) {
   validateStructuredDigest(event.beforeSha256, "sha256");
   validateStructuredDigest(event.sha256, "sha256");
   if (
@@ -401,9 +403,24 @@ function requireSigningEventIdentity(event, config, expectedCanonicalSubject, la
     || !/^[0-9A-F]{40}$/.test(String(event.timestampThumbprint ?? ""))
   ) throw new Error(`Invalid signing event identity for ${label}.`);
   if (String(event.canonicalSubject ?? "").toUpperCase() !== expectedCanonicalSubject) throw new Error(`Invalid signing event subject for ${label}.`);
+  if (config.releaseId) {
+    if (event.releaseId !== config.releaseId || event.artifactRole !== expectedRole || !/^[0-9A-F]+:[0-9A-F]+$/.test(String(event.objectIdentity ?? ""))) {
+      throw new Error(`Invalid signing object authorization evidence for ${label}.`);
+    }
+    const eventPath = resolvePrivacySafePath(event.applicationCapturePath || event.path);
+    const expectedObjectIdentity = event.applicationCapturePath ? event.evidenceObjectIdentity : event.objectIdentity;
+    if (event.applicationCapturePath && !/^[0-9A-F]+:[0-9A-F]+$/.test(String(expectedObjectIdentity ?? ""))) {
+      throw new Error(`Invalid signing evidence object identity for ${label}.`);
+    }
+    if (existsSync(eventPath)) {
+      const identity = inspectSigningObject(eventPath, options);
+      if (identity.objectId !== expectedObjectIdentity) throw new Error(`The signed filesystem object identity changed before final evidence verification for ${label}.`);
+      if (sha256(eventPath) !== event.sha256) throw new Error(`The signed bytes do not match the signing event for ${label}.`);
+    }
+  }
 }
 
-export function requireApplicationCapture(events, config, expectedCanonicalSubject) {
+export function requireApplicationCapture(events, config, expectedCanonicalSubject, options = {}) {
   const captures = events.filter((event) => event.applicationCapturePath);
   if (captures.length !== 1) throw new Error(`Expected exactly one Glacial application capture; found ${captures.length}.`);
   const event = captures[0];
@@ -411,7 +428,7 @@ export function requireApplicationCapture(events, config, expectedCanonicalSubje
   if (resolvePrivacySafePath(event.applicationCapturePath).toLowerCase() !== resolve(config.applicationCapture).toLowerCase()) throw new Error("The Glacial application capture path is unexpected.");
   if (!existsSync(config.applicationCapture) || event.sha256 !== sha256(config.applicationCapture)) throw new Error("The Glacial application capture hash does not match its signing event.");
   if (!/^[0-9A-F]{64}$/.test(String(event.beforeSha256 ?? ""))) throw new Error("The Glacial application signing event is missing its pre-signing hash.");
-  requireSigningEventIdentity(event, config, expectedCanonicalSubject, "Glacial.exe");
+  requireSigningEventIdentity(event, config, expectedCanonicalSubject, "Glacial.exe", "application", options);
   return event;
 }
 
@@ -434,15 +451,16 @@ export function assertNsisApplicationSource(nsisScript, expectedApplication) {
   return source;
 }
 
-export function requireSigningEvents(events, config, installer, expectedCanonicalSubject) {
+export function requireSigningEvents(events, config, installer, expectedCanonicalSubject, options = {}) {
   if (events.length !== EXPECTED_NSIS_COMPONENTS.length + 3) throw new Error(`Unexpected signing event cardinality: ${events.length}.`);
   const expectedNames = [...EXPECTED_NSIS_COMPONENTS, basename(installer)].map((name) => name.toLowerCase());
   for (const expected of expectedNames) {
     const matches = events.filter((event) => basename(event.path).toLowerCase() === expected);
     if (matches.length !== 1) throw new Error(`Expected exactly one signing event for ${expected}; found ${matches.length}.`);
-    requireSigningEventIdentity(matches[0], config, expectedCanonicalSubject, expected);
+    const role = expected === basename(installer).toLowerCase() ? "installer" : `nsis-plugin:${expected}`;
+    requireSigningEventIdentity(matches[0], config, expectedCanonicalSubject, expected, role, options);
   }
-  const applicationEvent = requireApplicationCapture(events, config, expectedCanonicalSubject);
+  const applicationEvent = requireApplicationCapture(events, config, expectedCanonicalSubject, options);
   const applicationIndex = events.indexOf(applicationEvent);
   const installerEvent = events.find((event) => resolvePrivacySafePath(event.path).toLowerCase() === resolve(installer).toLowerCase());
   if (!installerEvent) throw new Error("The final installer signing event path is unexpected.");
@@ -451,7 +469,7 @@ export function requireSigningEvents(events, config, installer, expectedCanonica
   const pluginNames = new Set(EXPECTED_NSIS_COMPONENTS.map((name) => name.toLowerCase()));
   const transient = events.slice(applicationIndex + 1, installerIndex).filter((event) => !pluginNames.has(basename(event.path).toLowerCase()));
   if (transient.length !== 1 || !basename(transient[0].path).toLowerCase().endsWith(".tmp") || transient[0].applicationCapturePath) throw new Error("Expected exactly one transient NSIS uninstaller signing event.");
-  requireSigningEventIdentity(transient[0], config, expectedCanonicalSubject, "NSIS uninstaller");
+  requireSigningEventIdentity(transient[0], config, expectedCanonicalSubject, "NSIS uninstaller", "nsis-uninstaller", options);
   return { applicationEvent, uninstallerEvent: transient[0] };
 }
 
@@ -546,11 +564,17 @@ export function publishCandidate({ workRoot, finalRoot, sourceBefore, sourceVeri
   assertSafePath(DESKTOP_BUILD_ROOT, finalRoot, pathOptions);
   if (existsSync(finalRoot)) throw new Error(`Refusing to overwrite an existing release candidate: ${finalRoot}`);
   ensureSafeDirectory(DESKTOP_BUILD_ROOT, dirname(finalRoot), pathOptions);
-  integrityVerifier();
+  integrityVerifier(workRoot);
   const sourceAfter = sourceVerifier();
   assertSameReleaseSource(sourceBefore, sourceAfter);
   if (existsSync(finalRoot)) throw new Error(`Refusing to overwrite an existing release candidate: ${finalRoot}`);
   renamer(workRoot, finalRoot);
+  try {
+    integrityVerifier(finalRoot);
+  } catch (error) {
+    if (existsSync(finalRoot) && !existsSync(workRoot)) renamer(finalRoot, workRoot);
+    throw error;
+  }
   return sourceAfter;
 }
 
@@ -579,7 +603,7 @@ async function buildSignedRelease(releaseProfile) {
   if (existsSync(signingRoot) || existsSync(workRoot) || existsSync(finalRoot)) throw new Error(`Refusing to reuse release state: ${releaseId}`);
   ensureSafeDirectory(DESKTOP_BUILD_ROOT, signingRoot);
 
-  const releaseEnvironment = signingEnvironment(process.env, releaseId);
+  const releaseEnvironment = signingEnvironment(process.env, releaseId, randomBytes(32).toString("hex"));
   const tauriTemporaryRoot = join(signingRoot, "tauri-temp");
   ensureSafeDirectory(DESKTOP_BUILD_ROOT, tauriTemporaryRoot);
   releaseEnvironment.TEMP = tauriTemporaryRoot;
@@ -605,7 +629,7 @@ async function buildSignedRelease(releaseProfile) {
         { name: "build-backend", run: () => { state.buildPython = validateDesktopBuildEnvironment(); buildBackend(state.buildPython); } },
         { name: "sign-backend", run: () => {
           state.backendSigningRecords = signBackendTree(PYINSTALLER_PAYLOAD, config);
-          state.backendSigningEventCount = parseAuditLog(config.auditLog).length;
+          state.backendSigningEventCount = parseAuditLog(config.auditLog, config.auditKey).length;
         } },
         { name: "stage-backend", run: () => stageSignedBackend(rustcPath) },
         { name: "clean-tauri-release-output", run: () => removeSafeTree(REPOSITORY, TAURI_TARGET) },
@@ -630,7 +654,7 @@ async function buildSignedRelease(releaseProfile) {
           verifySignature(state.application, config, { expectFirstParty: true, expectedCanonicalSubject: signerIdentity.expectedCanonicalSubject });
           const restored = assertExpectedTauriRestoration(state.workingApplication, state.application);
           state.applicationSha256 = sha256(state.application);
-          const allSigningEvents = parseAuditLog(config.auditLog);
+          const allSigningEvents = parseAuditLog(config.auditLog, config.auditKey);
           state.signingEvents = tauriSigningEventsAfterBackend(allSigningEvents, state.backendSigningEventCount);
           const signingEvidence = requireSigningEvents(state.signingEvents, config, state.installer, signerIdentity.expectedCanonicalSubject);
           const nsisScript = join(TAURI_TARGET, "nsis", "x64", "installer.nsi");
@@ -643,7 +667,7 @@ async function buildSignedRelease(releaseProfile) {
           verifySignature(state.installerDestination, config, { expectFirstParty: true, expectedCanonicalSubject: signerIdentity.expectedCanonicalSubject });
         } },
         { name: "write-metadata", run: () => { state.metadata = writeReleaseMetadata({ workRoot, source, releaseProfile, buildIdentity: state.buildIdentity, signerIdentity, installer: state.installerDestination, backendSigningRecords: state.backendSigningRecords, signingEvents: state.signingEvents, buildStartedUtc, applicationSha256: state.applicationSha256, installerApplicationEvidence: state.installerApplicationEvidence }); } },
-        { name: "publish", run: () => publishCandidate({ workRoot, finalRoot, sourceBefore: source, integrityVerifier: () => verifyPublishedHashes(workRoot, state.metadata.manifestPath, state.metadata.sumsPath), sourceVerifier: () => verifyReleaseSource(gitPath) }) },
+        { name: "publish", run: () => publishCandidate({ workRoot, finalRoot, sourceBefore: source, integrityVerifier: (root) => verifyPublishedHashes(root, join(root, basename(state.metadata.manifestPath)), join(root, basename(state.metadata.sumsPath))), sourceVerifier: () => verifyReleaseSource(gitPath) }) },
       ], state);
     },
   });

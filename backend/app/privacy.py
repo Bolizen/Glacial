@@ -6,6 +6,7 @@ import hashlib
 import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlsplit, urlunsplit
 
 
 REDACTED = "[REDACTED]"
@@ -72,6 +73,12 @@ _STRUCTURED_VCS_SELECTORS = {
     "vcsrequestedrevision": {"branch", "ref", "rev", "tag"},
     "vcslockedrevision": {"reference"},
     "vcsresolvedrevision": {"resolved"},
+}
+_DEPENDENCY_LOCATOR_KEYS = {
+    "lockedversion",
+    "requested",
+    "requestedspecification",
+    "resolvedversion",
 }
 
 _EXTENDED_WINDOWS_PATH_RE = re.compile(
@@ -197,6 +204,77 @@ def sanitize_private_text(
     return normalized[: max(0, limit)]
 
 
+def _decoded_dependency_locator(value: Any) -> str:
+    text = normalize_control_characters(value, preserve_lines=False).strip()
+    for _ in range(2):
+        decoded = unquote(text)
+        if decoded == text:
+            break
+        text = decoded
+    return text
+
+
+def _without_dependency_selector(value: str) -> str:
+    locator = re.split(r"[?#]", value, maxsplit=1)[0]
+    return locator.rsplit("@", 1)[0] if "@" in locator else locator
+
+
+def _looks_like_dependency_locator(value: Any) -> bool:
+    text = _decoded_dependency_locator(value)
+    if not text or any(character.isspace() for character in text):
+        return False
+    if "://" in text:
+        return True
+    if re.match(r"^(?:git\+|hg\+|svn\+|bzr\+)?(?:https?|ssh|git|svn|hg|bzr)(?::|/)", text, re.IGNORECASE):
+        return True
+    if re.match(r"^(?:github|gitlab|bitbucket):", text, re.IGNORECASE):
+        return True
+    if re.match(r"^(?:[^@\s/:]+@)?[^:\s/]+\.[^:\s/]+:.+", text):
+        return True
+    return bool(re.match(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+[?@#].*$", text))
+
+
+def sanitize_dependency_locator(value: Any, *, limit: int = 500) -> str:
+    """Return only persistence-safe locator structure, never selectors or credentials."""
+    text = _decoded_dependency_locator(value)
+    if not text:
+        return ""
+    if "://" in text:
+        candidate = text
+        transport = ""
+        for prefix in ("git+", "hg+", "svn+", "bzr+"):
+            if candidate.lower().startswith(prefix):
+                transport = prefix
+                candidate = candidate[len(prefix):]
+                break
+        try:
+            parsed = urlsplit(candidate)
+            if not parsed.scheme or not parsed.hostname:
+                return "malformed remote source"
+            port = f":{parsed.port}" if parsed.port else ""
+            path = re.sub(r"/{2,}", "/", parsed.path or "")
+            path = _without_dependency_selector(path)
+            return urlunsplit((f"{transport}{parsed.scheme.lower()}", f"{parsed.hostname.lower()}{port}", path, "", ""))[:limit]
+        except (TypeError, ValueError):
+            return "malformed remote source"
+    provider = re.match(r"^(github|gitlab|bitbucket):(.+)$", text, re.IGNORECASE)
+    if provider:
+        locator = _without_dependency_selector(provider.group(2)).lstrip("/")
+        return f"{provider.group(1).lower()}:{locator}"[:limit]
+    if re.match(r"^(?:git\+|hg\+|svn\+|bzr\+)?(?:https?|ssh|git|svn|hg|bzr)(?::|/)", text, re.IGNORECASE):
+        return "malformed remote source"
+    scp = re.match(r"^(?:[^@\s/:]+@)?([^:\s/]+\.[^:\s/]+):(.+)$", text)
+    if scp:
+        path = _without_dependency_selector(scp.group(2)).lstrip("/")
+        return f"vcs:{scp.group(1).lower()}/{path}"[:limit]
+    bare = re.match(r"^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)(?:[?@#].*)?$", text)
+    if bare:
+        return bare.group(1)[:limit]
+    if any(marker in text for marker in ("?", "#")) and ("/" in text or "@" in text):
+        return "redacted dependency locator"
+    return sanitize_private_text(text, limit=limit)
+
+
 def safe_project_relative_path(
     value: Any,
     *,
@@ -284,6 +362,10 @@ def sanitize_scan_value(
         structured_value = _validated_scan_field(value, key)
         if structured_value is not None:
             return structured_value
+        if key.casefold() in _DEPENDENCY_LOCATOR_KEYS:
+            return sanitize_dependency_locator(value, limit=MAX_DISCLOSURE_TEXT_CHARS)
+        if _looks_like_dependency_locator(value):
+            return sanitize_dependency_locator(value, limit=MAX_DISCLOSURE_TEXT_CHARS)
         return sanitize_private_text(
             value,
             limit=MAX_DISCLOSURE_TEXT_CHARS,

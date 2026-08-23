@@ -15,6 +15,7 @@ except ImportError:  # pragma: no cover - supported runtimes provide tomllib
     tomllib = None
 
 from .safety import has_multiple_hardlinks, is_reparse_point_or_symlink
+from .privacy import sanitize_dependency_locator
 
 
 SCHEMA_VERSION = 1
@@ -1374,11 +1375,11 @@ class _AnalysisState:
             "ecosystem": ecosystem,
             "package": package,
             "dependencyGroup": group,
-            "requestedSpecification": _sanitize_spec(requested),
-            "resolvedVersion": _safe_text(resolved, 200),
+            "requestedSpecification": _sanitize_dependency_field(requested, 500),
+            "resolvedVersion": _sanitize_dependency_field(resolved, 200),
             "sourceType": source_type,
             "sourceIdentifier": _safe_text(source, 200),
-            "metadata": _compact(metadata or {}),
+            "metadata": _sanitize_finding_metadata(metadata or {}),
         }
         finding.update({key: value for key, value in optional.items() if value not in ("", {}, [])})
         identity = _finding_identity(finding)
@@ -1672,7 +1673,7 @@ def _change(change_type: str, entry: dict[str, Any], previous: str = "") -> dict
         if entry.get(key):
             result[key] = entry[key]
     if previous:
-        result["previousValue"] = _safe_text(previous, 300)
+        result["previousValue"] = _sanitize_dependency_field(previous, 300)
     return result
 
 
@@ -1710,11 +1711,72 @@ def _entry(ecosystem: str, name: str, group: str, *, direct: bool, **values: Any
         "installScriptIndicator": values.pop("installScriptIndicator", False) is True,
     }
     result.update({key: value for key, value in values.items() if value not in (None, "", [], {})})
-    if "requestedSpecification" in result:
-        sanitizer = _sanitize_vcs_locator if result["sourceType"] == "vcs" else _sanitize_spec
-        result["requestedSpecification"] = sanitizer(result["requestedSpecification"])
+    for key, limit in (("requestedSpecification", 500), ("lockedVersion", 200)):
+        if key in result:
+            result[key] = _sanitize_dependency_field(result[key], limit)
     if str(result.get("sourceIdentifier", "")).startswith("http:"):
         result["insecureHttp"] = True
+    return _compact(result)
+
+
+def _looks_like_node_vcs_locator(value: Any) -> bool:
+    text = str(value or "").strip()
+    lower = text.lower()
+    if lower.startswith(("git+", "git://", "ssh://", "github:", "gitlab:", "bitbucket:")):
+        return True
+    if re.match(r"^[^@\s]+@[^:\s]+:", text):
+        return True
+    if re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:[?#].*)?", text):
+        return True
+    if not lower.startswith(("http://", "https://")):
+        return False
+    try:
+        parsed = urlsplit(text)
+    except ValueError:
+        return True
+    path_parts = [part for part in parsed.path.split("/") if part]
+    provider = (parsed.hostname or "").lower() in {"github.com", "gitlab.com", "bitbucket.org"}
+    return parsed.path.lower().endswith(".git") or (provider and len(path_parts) == 2)
+
+
+def _node_vcs_source_identifier(value: str) -> str:
+    text = value.strip()
+    provider = re.match(r"^(github|gitlab|bitbucket):", text, re.IGNORECASE)
+    if provider:
+        return {"github": "github.com", "gitlab": "gitlab.com", "bitbucket": "bitbucket.org"}[provider.group(1).lower()]
+    if re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:[?#].*)?", text):
+        return "github.com"
+    return _safe_url_host(text)
+
+
+def _sanitize_dependency_field(value: Any, limit: int) -> str:
+    text = _safe_text(value, max(limit, 500))
+    if not text:
+        return ""
+    if _looks_like_node_vcs_locator(text) or "://" in text or any(marker in text for marker in ("?", "#")):
+        return sanitize_dependency_locator(text, limit=limit)
+    return _safe_text(_sanitize_spec(text), limit)
+
+
+def _sanitize_finding_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    integer_fields = {"line", "overrideCount", "sizeLimitBytes"}
+    text_fields = {
+        "declaredPackageManager", "inputKind", "integrityStatus",
+        "lockfilePackageManager", "lockfileVersion", "pinning", "reason",
+    }
+    locator_fields = {"lockRequestedSpecification", "resolvedVersion"}
+    for key, value in metadata.items():
+        if key in integer_fields and isinstance(value, int) and not isinstance(value, bool):
+            result[key] = value
+        elif key == "bundlesAllDirectDependencies" and isinstance(value, bool):
+            result[key] = value
+        elif key in text_fields and isinstance(value, (str, int, bool)):
+            result[key] = _safe_text(value, 200)
+        elif key in locator_fields and isinstance(value, str):
+            result[key] = _sanitize_dependency_field(value, 500 if key == "lockRequestedSpecification" else 200)
+        elif key == "groups" and isinstance(value, list):
+            result[key] = [_safe_text(item, 100) for item in value if isinstance(item, str)][:20]
     return _compact(result)
 
 
@@ -1726,8 +1788,8 @@ def _classify_node_spec(spec: str) -> tuple[str, str]:
         return "local", "workspace"
     if lower.startswith(("file:", "link:")) or lower.startswith(("./", "../", "/")):
         return "local", "local path"
-    if lower.startswith(("git+", "git://", "github:", "gitlab:", "bitbucket:")) or re.match(r"^[^@\s]+@[^:\s]+:", spec):
-        return "vcs", _safe_url_host(spec)
+    if _looks_like_node_vcs_locator(spec):
+        return "vcs", _node_vcs_source_identifier(spec)
     if lower.startswith(("http://", "https://")):
         return "url", _safe_url_host(spec, include_scheme=True)
     if not spec.strip():
@@ -1739,8 +1801,8 @@ def _classify_resolved_source(resolved: str, version: str, *, link: bool) -> tup
     if link:
         return "local", "linked package"
     remote = resolved or version
-    if remote.lower().startswith(("git+", "git://", "github:", "gitlab:", "bitbucket:")) or re.match(r"^[^@\s]+@[^:\s]+:", remote):
-        return "vcs", _safe_url_host(remote)
+    if _looks_like_node_vcs_locator(remote):
+        return "vcs", _node_vcs_source_identifier(remote)
     if resolved.startswith("http://"):
         return "url", _safe_url_host(resolved, include_scheme=True)
     if resolved.startswith("https://"):
@@ -1835,6 +1897,9 @@ def _sanitize_spec(value: Any) -> str:
         provider = shorthand_match.group(1).lower()
         locator = re.split(r"[?#]", shorthand_match.group(2), maxsplit=1)[0].lstrip("/")
         return _safe_text(f"{provider}:{locator}", 500)
+    bare_match = re.match(r"^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)(?:[?#].*)?$", text)
+    if bare_match:
+        return bare_match.group(1)
     if lower.startswith(("file:", "link:")):
         prefix, local = text.split(":", 1)
         return f"{prefix.lower()}:{_sanitize_local_spec(local)}"
@@ -1943,17 +2008,7 @@ def _vcs_resolved_identity(value: str) -> str:
 
 
 def _sanitize_vcs_locator(value: str) -> str:
-    sanitized = _sanitize_spec(value)
-    if "://" in sanitized:
-        try:
-            parsed = urlsplit(sanitized)
-            path = parsed.path.rsplit("@", 1)[0] if "@" in parsed.path else parsed.path
-            return urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
-        except ValueError:
-            return "malformed remote source"
-    if sanitized.startswith("vcs:") and "@" in sanitized:
-        return sanitized.rsplit("@", 1)[0]
-    return sanitized
+    return sanitize_dependency_locator(value, limit=500)
 
 
 def _integrity_status(value: str) -> str:

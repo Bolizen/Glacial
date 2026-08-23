@@ -1,27 +1,31 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, cpSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseTomlData } from "./toml-data.mjs";
+import { canonicalPathsEqual, sameFilesystemObject } from "./path-identity.mjs";
 
 const REPOSITORY = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const VERIFIER = join(REPOSITORY, "scripts", "security", "verify-glib-backport.mjs");
 const TEST_ROOT = join(REPOSITORY, ".desktop-build", "glib-verifier-tests");
 
-function fixture() {
-  mkdirSync(TEST_ROOT, { recursive: true });
-  const root = mkdtempSync(join(TEST_ROOT, "candidate-"));
+function fixture(parent = TEST_ROOT) {
+  mkdirSync(parent, { recursive: true });
+  const root = mkdtempSync(join(parent, "candidate-"));
   mkdirSync(join(root, "frontend", "src-tauri"), { recursive: true });
+  mkdirSync(join(root, "frontend", "src-tauri", "src"), { recursive: true });
   mkdirSync(join(root, "third_party", "rust"), { recursive: true });
   cpSync(join(REPOSITORY, "frontend", "src-tauri", "Cargo.toml"), join(root, "frontend", "src-tauri", "Cargo.toml"));
   cpSync(join(REPOSITORY, "frontend", "src-tauri", "Cargo.lock"), join(root, "frontend", "src-tauri", "Cargo.lock"));
+  writeFileSync(join(root, "frontend", "src-tauri", "src", "main.rs"), "fn main() {}\n");
   cpSync(join(REPOSITORY, "third_party", "rust", "glib-0.18.5-patched"), join(root, "third_party", "rust", "glib-0.18.5-patched"), { recursive: true });
   return root;
 }
 
-function verify(root) {
-  return spawnSync(process.execPath, [VERIFIER, "--repo-root", root], { cwd: REPOSITORY, encoding: "utf8", shell: false });
+function verify(root, environment = process.env) {
+  return spawnSync(process.execPath, [VERIFIER, "--repo-root", root], { cwd: REPOSITORY, encoding: "utf8", env: environment, shell: false });
 }
 
 function withFixture(run) {
@@ -32,6 +36,114 @@ function withFixture(run) {
 test("valid semantic Cargo configuration and complete vendored tree pass", () => withFixture((root) => {
   const result = verify(root);
   assert.equal(result.status, 0, result.stderr);
+}));
+
+test("trusted Cargo metadata ignores a PATH-selected fake cargo executable", () => withFixture((root) => {
+  const fakeBin = join(root, "fake-bin");
+  const fakeCargo = join(fakeBin, process.platform === "win32" ? "cargo.exe" : "cargo");
+  mkdirSync(fakeBin, { recursive: true });
+  copyFileSync(process.execPath, fakeCargo);
+  chmodSync(fakeCargo, 0o755);
+  const result = verify(root, { ...process.env, PATH: `${fakeBin}${process.platform === "win32" ? ";" : ":"}${process.env.PATH ?? ""}` });
+  assert.equal(result.status, 0, result.stderr);
+}));
+
+test("hostile Cargo environment variables cannot redirect trusted resolution", () => withFixture((root) => {
+  const hostile = join(root, "hostile-cargo-home");
+  const result = verify(root, {
+    ...process.env,
+    CARGO_HOME: hostile,
+    CARGO_TARGET_DIR: join(hostile, "target"),
+    CARGO_BUILD_TARGET: "attacker-controlled-target",
+    RUSTFLAGS: "--cfg attacker_controlled",
+  });
+  assert.equal(result.status, 0, result.stderr);
+}));
+
+test("user Cargo resolution configuration is rejected", () => withFixture((root) => {
+  const userHome = join(root, "hostile-user-home");
+  const config = join(userHome, ".cargo", "config.toml");
+  mkdirSync(dirname(config), { recursive: true });
+  writeFileSync(config, '[source.crates-io]\nreplace-with = "attacker"\n');
+  const result = verify(root, { ...process.env, HOME: userHome, USERPROFILE: userHome });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /trusted Cargo home must not contain dependency-resolution configuration/);
+}));
+
+test("workspace-ancestor Cargo resolution configuration is rejected", () => {
+  mkdirSync(TEST_ROOT, { recursive: true });
+  const workspace = mkdtempSync(join(TEST_ROOT, "workspace-"));
+  const root = fixture(workspace);
+  try {
+    const config = join(workspace, ".cargo", "config.toml");
+    mkdirSync(dirname(config), { recursive: true });
+    writeFileSync(config, '[patch.crates-io]\nglib = { path = "attacker" }\n');
+    const result = verify(root);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /project Cargo configuration is forbidden/);
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("vendored path substitution through a symbolic link is rejected", () => withFixture((root) => {
+  const vendored = join(root, "third_party", "rust", "glib-0.18.5-patched");
+  const retained = join(root, "third_party", "rust", "retained-glib");
+  cpSync(vendored, retained, { recursive: true });
+  rmSync(vendored, { recursive: true, force: true });
+  symlinkSync(retained, vendored, process.platform === "win32" ? "junction" : "dir");
+  const result = verify(root);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /must not be a symbolic link/);
+}));
+
+test("canonical manifest comparison preserves platform case semantics", () => {
+  const canonicalize = (path) => path;
+  assert.equal(canonicalPathsEqual("/trusted/Cargo.toml", "/trusted/cargo.toml", { canonicalize, platform: "linux" }), false);
+  assert.equal(canonicalPathsEqual("C:\\TRUSTED\\Cargo.toml", "c:\\trusted\\cargo.toml", { canonicalize, platform: "win32" }), true);
+});
+
+test("expected manifest identity accepts a hardlink and rejects a copied object", () => withFixture((root) => {
+  const manifest = join(root, "third_party", "rust", "glib-0.18.5-patched", "Cargo.toml");
+  const alias = join(root, "manifest-hardlink.toml");
+  const copy = join(root, "manifest-copy.toml");
+  linkSync(manifest, alias);
+  copyFileSync(manifest, copy);
+  assert.equal(sameFilesystemObject(manifest, alias), true);
+  assert.equal(sameFilesystemObject(manifest, copy), false);
+}));
+
+test("TOML mappings retain prototype-sensitive keys as own data only", () => {
+  const parsed = parseTomlData('__proto__.patch."crates-io".glib = { path = "vendor/glib" }\n');
+  assert.equal(Object.getPrototypeOf(parsed), null);
+  assert.equal(Object.hasOwn(parsed, "__proto__"), true);
+  assert.equal(Object.hasOwn(parsed, "patch"), false);
+  assert.equal(Object.getPrototypeOf(parsed.__proto__), null);
+  assert.equal(parsed.__proto__.patch["crates-io"].glib.path, "vendor/glib");
+});
+
+test("prototype-bearing TOML cannot synthesize the trusted glib override", () => withFixture((root) => {
+  const path = join(root, "frontend", "src-tauri", "Cargo.toml");
+  const manifest = readFileSync(path, "utf8").replace(
+    '[patch.crates-io]\nglib = { path = "../../third_party/rust/glib-0.18.5-patched" }',
+    '["__proto__".patch.crates-io]\nglib = { path = "../../third_party/rust/glib-0.18.5-patched" }',
+  );
+  writeFileSync(path, manifest);
+  const result = verify(root);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /expected one semantic glib crates\.io override/);
+}));
+
+for (const [relativeConfig, content] of [
+  [join(".cargo", "config.toml"), '[source.crates-io]\nreplace-with = "alternate"\n[source.alternate]\ndirectory = "alternate-vendor"\n'],
+  [join("frontend", "src-tauri", ".cargo", "config"), 'paths = ["../../../../alternate-glib"]\n'],
+]) test(`project Cargo resolution configuration is rejected: ${relativeConfig}`, () => withFixture((root) => {
+  const config = join(root, relativeConfig);
+  mkdirSync(dirname(config), { recursive: true });
+  writeFileSync(config, content);
+  const result = verify(root);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /project Cargo configuration is forbidden/);
 }));
 
 test("quoted-key and multiline patch-path decoys are rejected", () => withFixture((root) => {

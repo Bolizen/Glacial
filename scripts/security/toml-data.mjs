@@ -8,8 +8,10 @@ export function parseTomlData(text) {
   return parser.parse();
 }
 
+function mapping() { return Object.create(null); }
+
 class TomlParser {
-  constructor(text) { this.text = text; this.index = 0; this.root = {}; this.table = this.root; }
+  constructor(text) { this.text = text; this.index = 0; this.root = mapping(); this.table = this.root; }
 
   parse() {
     while (this.skipSpaceAndComments(true), !this.end()) {
@@ -140,7 +142,7 @@ class TomlParser {
   }
 
   parseInlineTable() {
-    this.take("{"); const value = {};
+    this.take("{"); const value = mapping();
     for (;;) {
       this.skipSpaceAndComments(false);
       if (this.peek() === "}") { this.index += 1; return value; }
@@ -154,7 +156,7 @@ class TomlParser {
   assign(base, path, value) {
     let target = base;
     for (const part of path.slice(0, -1)) {
-      if (!Object.hasOwn(target, part)) target[part] = {};
+      if (!Object.hasOwn(target, part)) target[part] = mapping();
       if (!target[part] || Array.isArray(target[part]) || typeof target[part] !== "object") this.error("key conflicts with value");
       target = target[part];
     }
@@ -166,7 +168,7 @@ class TomlParser {
   openTable(path, array) {
     let target = this.root;
     for (const part of path.slice(0, -1)) {
-      if (!Object.hasOwn(target, part)) target[part] = {};
+      if (!Object.hasOwn(target, part)) target[part] = mapping();
       if (Array.isArray(target[part])) target = target[part].at(-1);
       else if (target[part] && typeof target[part] === "object") target = target[part];
       else this.error("table conflicts with value");
@@ -175,9 +177,9 @@ class TomlParser {
     if (array) {
       if (!Object.hasOwn(target, leaf)) target[leaf] = [];
       if (!Array.isArray(target[leaf])) this.error("array table conflicts with value");
-      const entry = {}; target[leaf].push(entry); return entry;
+      const entry = mapping(); target[leaf].push(entry); return entry;
     }
-    if (!Object.hasOwn(target, leaf)) target[leaf] = {};
+    if (!Object.hasOwn(target, leaf)) target[leaf] = mapping();
     if (!target[leaf] || Array.isArray(target[leaf]) || typeof target[leaf] !== "object") this.error("table conflicts with value");
     return target[leaf];
   }

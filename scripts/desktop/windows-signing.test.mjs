@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
   existsSync,
+  linkSync,
   mkdirSync,
   readFileSync,
   readdirSync,
+  renameSync,
   writeFileSync,
 } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -39,6 +41,7 @@ import {
   sha256,
   signOne,
   signingAuditRecord,
+  serializeSigningAuditRecord,
   signingBrokerEnvironment,
   signingEnvironment,
   validateStructuredDigest,
@@ -56,6 +59,7 @@ import {
   packageSetDifference,
   parseRequirementsLock,
   parseReleaseArguments,
+  parseAuditLog,
   publishCandidate,
   releaseProfileManifestFields,
   requireApplicationCapture,
@@ -74,6 +78,7 @@ const REPOSITORY = resolve(dirname(TEST_PATH), "..", "..");
 const TEST_ROOT = join(DESKTOP_BUILD_ROOT, "release-signing-tests");
 const THUMBPRINT = "A".repeat(40);
 const RELEASE_ID = "Glacial-0.9.12-ffffffffffff-20260720T120000Z";
+const AUDIT_KEY = "9".repeat(64);
 const CERTIFICATE_VALIDITY = {
   NotBeforeUtc: "2026-01-01T00:00:00.000Z",
   NotAfterUtc: "2027-01-01T00:00:00.000Z",
@@ -252,8 +257,9 @@ test("command provider keeps the file as one direct argument and forwards only n
     AZURE_CLIENT_SECRET: "not-allowed",
     AWS_SECRET_ACCESS_KEY: "not-allowed-either",
   });
-  const releaseEnvironment = signingEnvironment(source, "Glacial-0.9.12-ffffffffffff-20260719T120000Z");
+  const releaseEnvironment = signingEnvironment(source, "Glacial-0.9.12-ffffffffffff-20260719T120000Z", AUDIT_KEY);
   assert.equal(releaseEnvironment.AZURE_CLIENT_ID, "allowed-value");
+  assert.equal(releaseEnvironment.GLACIAL_WINDOWS_SIGN_AUDIT_KEY, AUDIT_KEY);
   assert.equal("AZURE_CLIENT_SECRET" in releaseEnvironment, false);
   assert.equal("AWS_SECRET_ACCESS_KEY" in releaseEnvironment, false);
   const config = loadSigningConfig(releaseEnvironment, { dryRun: true });
@@ -350,6 +356,9 @@ test("PowerShell child diagnostics redact fake standalone hex canaries", () => {
 test("signing audit preserves only validated structured hashes and sanitizes free text", () => {
   const record = {
     path: join(TEST_ROOT, "Glacial.exe"),
+    artifactRole: "application",
+    releaseId: RELEASE_ID,
+    objectIdentity: "A1:B2",
     beforeSha256: "A1".repeat(32),
     sha256: "b2".repeat(32),
     applicationCapturePath: null,
@@ -369,6 +378,21 @@ test("signing audit preserves only validated structured hashes and sanitizes fre
   assert.throws(() => signingAuditRecord({ ...record, signerThumbprint: "f".repeat(39) }));
   assert.equal(validateStructuredDigest("a".repeat(40), "git-commit"), "a".repeat(40));
   assert.throws(() => validateStructuredDigest("a".repeat(64), "git-commit"));
+});
+
+test("authenticated signing audit JSONL rejects content tampering", () => {
+  const auditLog = join(TEST_ROOT, "authenticated-audit", "signing-events.jsonl");
+  const record = {
+    path: join(TEST_ROOT, "Glacial.exe"), artifactRole: "installer", releaseId: RELEASE_ID,
+    objectIdentity: "A1:B2", evidenceObjectIdentity: null, beforeSha256: "A".repeat(64), sha256: "B".repeat(64),
+    applicationCapturePath: null, signerThumbprint: THUMBPRINT, canonicalSubject: "CN=ICEFIELDS DEVELOPMENT",
+    timestampThumbprint: "E".repeat(40), trustClassification: "self-signed", signedUtc: "2026-07-27T12:00:00.000Z",
+  };
+  mkdirSync(dirname(auditLog), { recursive: true });
+  writeFileSync(auditLog, `${serializeSigningAuditRecord(record, AUDIT_KEY)}\n`);
+  assert.equal(parseAuditLog(auditLog, AUDIT_KEY).length, 1);
+  writeFileSync(auditLog, readFileSync(auditLog, "utf8").replace(record.sha256, "C".repeat(64)));
+  assert.throws(() => parseAuditLog(auditLog, AUDIT_KEY), /authentication failed/);
 });
 
 test("Tauri overlay uses object-form direct arguments and no embedded certificate identity", () => {
@@ -480,7 +504,7 @@ test("signed application capture survives Tauri restoration and remains installe
   writeFileSync(failedEvidence, "preserve failed build");
   writeFileSync(nsisScript, `!define MAINBINARYSRCPATH "${workingApplication}"\r\nFile "\${MAINBINARYSRCPATH}"\r\n`);
   const config = {
-    ...loadSigningConfig(storeEnvironment({ GLACIAL_WINDOWS_RELEASE_ID: RELEASE_ID }), { dryRun: true }),
+    ...loadSigningConfig(storeEnvironment({ GLACIAL_WINDOWS_RELEASE_ID: RELEASE_ID, GLACIAL_WINDOWS_SIGN_AUDIT_KEY: AUDIT_KEY }), { dryRun: true }),
     applicationTarget: workingApplication,
     applicationCapture: capture,
     auditLog,
@@ -495,7 +519,7 @@ test("signed application capture survives Tauri restoration and remains installe
     throw new Error(`Unexpected signing command: ${command}`);
   };
 
-  signOne(workingApplication, config, { runner, pathInspector: false, authorization: exactSigningAuthorization(workingApplication, "application") });
+  signOne(workingApplication, config, { runner, pathInspector: false, authorization: exactSigningAuthorization(workingApplication, "application", { releaseId: RELEASE_ID, pathInspector: false }) });
   const capturedBytes = readFileSync(capture);
   const [applicationEvent] = readFileSync(auditLog, "utf8").trim().split(/\r?\n/).map((line) => JSON.parse(line));
   assert.notDeepEqual(capturedBytes, original);
@@ -507,13 +531,13 @@ test("signed application capture survives Tauri restoration and remains installe
   writeFileSync(workingApplication, original);
   assert.equal(assertExpectedTauriRestoration(workingApplication, capture, { signature: { status: "NotSigned" } }).status, "NotSigned");
   assert.equal(assertNsisApplicationSource(nsisScript, workingApplication), workingApplication);
-  assert.throws(() => signOne(workingApplication, config, { runner, pathInspector: false, authorization: exactSigningAuthorization(workingApplication, "application") }), /duplicate/);
+  assert.throws(() => signOne(workingApplication, config, { runner, pathInspector: false, authorization: exactSigningAuthorization(workingApplication, "application", { releaseId: RELEASE_ID, pathInspector: false }) }), /duplicate/);
   assert.equal(readFileSync(failedEvidence, "utf8"), "preserve failed build");
 
   const unrelated = join(TEST_ROOT, "unrelated.exe");
   writeFileSync(unrelated, minimalPe());
   assert.throws(() => signOne(unrelated, config, { runner, pathInspector: false }), /authorization/);
-  assert.throws(() => signOne(unrelated, config, { runner, pathInspector: false, authorization: exactSigningAuthorization(workingApplication, "application") }), /authorized artifact path/);
+  assert.throws(() => signOne(unrelated, config, { runner, pathInspector: false, authorization: exactSigningAuthorization(workingApplication, "application", { releaseId: RELEASE_ID, pathInspector: false }) }), /authorized artifact path/);
   assert.deepEqual(readFileSync(capture), capturedBytes);
   const events = readFileSync(auditLog, "utf8").trim().split(/\r?\n/).map((line) => JSON.parse(line));
   assert.equal(events.length, 1);
@@ -545,6 +569,66 @@ test("Tauri signer authorization binds application and installer roles to canoni
   assert.throws(() => signOne(application, { provider: "store" }, { authorization }), /pre-signing digest/);
 });
 
+test("Tauri signer rejects a pre-authorized hardlink alias", () => {
+  const root = join(TEST_ROOT, "hardlink-authorization");
+  const application = join(root, "target", "glacial.exe");
+  const alias = join(root, "retained-alias.exe");
+  mkdirSync(dirname(application), { recursive: true });
+  writeFileSync(application, minimalPe());
+  linkSync(application, alias);
+  const config = { applicationTarget: application, releaseId: RELEASE_ID };
+  assert.throws(() => authorizeTauriSigningRequest(application, config), /multiple hardlinks/);
+});
+
+test("immutable signing plans bind release context and reject object substitution races", () => {
+  const target = join(TEST_ROOT, "identity-race.exe");
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, minimalPe());
+  const identities = [
+    { objectId: "AA:AAAA", linkCount: 1, size: minimalPe().length, reparsePoint: false },
+    { objectId: "AA:AAAA", linkCount: 1, size: minimalPe().length, reparsePoint: false },
+    { objectId: "AA:BBBB", linkCount: 1, size: minimalPe().length, reparsePoint: false },
+  ];
+  const objectInspector = () => identities.shift();
+  const authorization = exactSigningAuthorization(target, "application", { releaseId: RELEASE_ID, objectInspector });
+  assert.equal(Object.isFrozen(authorization), true);
+  assert.equal(authorization.releaseId, RELEASE_ID);
+  assert.equal(authorization.objectIdentity, "AA:AAAA");
+  const signature = { Status: "Valid", SignerThumbprint: THUMBPRINT, CanonicalSubject: "CN=ICEFIELDS DEVELOPMENT", TimestampThumbprint: "B".repeat(40), TrustValid: true, TrustClassification: "self-signed", ChainStatuses: [], ...SIGNATURE_VALIDITY };
+  const runner = (command, args, options = {}) => {
+    if (options.env?.GLACIAL_WINDOWS_HELPER_OPERATION === "canonical-subject") return { status: 0, stdout: '{"CanonicalSubject":"CN=ICEFIELDS DEVELOPMENT"}', stderr: "" };
+    if (options.env?.GLACIAL_WINDOWS_HELPER_OPERATION === "signature") return { status: 0, stdout: JSON.stringify(signature), stderr: "" };
+    return { status: 0, stdout: "", stderr: "" };
+  };
+  assert.throws(
+    () => signOne(target, { provider: "store", signToolPath: "signtool.exe", expectedSubject: "CN=Icefields Development", expectedThumbprint: THUMBPRINT, applicationTarget: null }, { authorization, objectInspector, runner }),
+    /filesystem object identity changed/,
+  );
+});
+
+test("signing rejects same-object byte mutation after the signed hash is captured", () => {
+  const target = join(TEST_ROOT, "same-object-byte-race.exe");
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, minimalPe());
+  let inspections = 0;
+  const objectInspector = () => {
+    inspections += 1;
+    if (inspections === 3) writeFileSync(target, Buffer.concat([readFileSync(target), Buffer.from("post-hash mutation")]));
+    return { objectId: "AA:AAAA", linkCount: 1, size: readFileSync(target).length, reparsePoint: false };
+  };
+  const authorization = exactSigningAuthorization(target, "installer", { releaseId: RELEASE_ID, objectInspector });
+  const signature = { Status: "Valid", SignerThumbprint: THUMBPRINT, CanonicalSubject: "CN=ICEFIELDS DEVELOPMENT", TimestampThumbprint: "B".repeat(40), TrustValid: true, TrustClassification: "self-signed", ChainStatuses: [], ...SIGNATURE_VALIDITY };
+  const runner = (command, args, options = {}) => {
+    if (options.env?.GLACIAL_WINDOWS_HELPER_OPERATION === "canonical-subject") return { status: 0, stdout: '{"CanonicalSubject":"CN=ICEFIELDS DEVELOPMENT"}', stderr: "" };
+    if (options.env?.GLACIAL_WINDOWS_HELPER_OPERATION === "signature") return { status: 0, stdout: JSON.stringify(signature), stderr: "" };
+    return { status: 0, stdout: "", stderr: "" };
+  };
+  assert.throws(
+    () => signOne(target, { provider: "store", signToolPath: "signtool.exe", expectedSubject: "CN=Icefields Development", expectedThumbprint: THUMBPRINT, applicationTarget: null, releaseId: RELEASE_ID }, { authorization, objectInspector, runner }),
+    /signed bytes changed before signing evidence was committed/,
+  );
+});
+
 test("application capture validation rejects missing, duplicate, unrelated, and hash-mismatched events", () => {
   const capture = join(TEST_ROOT, "capture", "Glacial.exe");
   const target = join(TEST_ROOT, "target", "glacial.exe");
@@ -557,6 +641,33 @@ test("application capture validation rejects missing, duplicate, unrelated, and 
   assert.throws(() => requireApplicationCapture([event, event], config, "CN=ICEFIELDS DEVELOPMENT"), /exactly one/);
   assert.throws(() => requireApplicationCapture([{ ...event, path: join(TEST_ROOT, "other.exe") }], config, "CN=ICEFIELDS DEVELOPMENT"), /unrelated/);
   assert.throws(() => requireApplicationCapture([{ ...event, sha256: "D".repeat(64) }], config, "CN=ICEFIELDS DEVELOPMENT"), /hash/);
+});
+
+test("final signing evidence revalidates the authorized filesystem object", () => {
+  const root = join(TEST_ROOT, "final-object-evidence");
+  const target = join(root, "glacial.exe");
+  const capture = join(root, "Glacial.capture.exe");
+  mkdirSync(root, { recursive: true });
+  writeFileSync(target, minimalPe());
+  writeFileSync(capture, minimalPe());
+  const config = { releaseId: RELEASE_ID, expectedThumbprint: THUMBPRINT, applicationTarget: target, applicationCapture: capture };
+  const event = {
+    path: target,
+    artifactRole: "application",
+    releaseId: RELEASE_ID,
+    objectIdentity: "AA:AAAA",
+    evidenceObjectIdentity: "AA:AAAA",
+    beforeSha256: "C".repeat(64),
+    sha256: sha256(capture),
+    applicationCapturePath: capture,
+    signerThumbprint: THUMBPRINT,
+    canonicalSubject: "CN=ICEFIELDS DEVELOPMENT",
+    timestampThumbprint: "B".repeat(40),
+  };
+  assert.throws(
+    () => requireApplicationCapture([event], config, "CN=ICEFIELDS DEVELOPMENT", { objectInspector: () => ({ objectId: "AA:BBBB", linkCount: 1, size: minimalPe().length, reparsePoint: false }) }),
+    /object identity changed before final evidence verification/,
+  );
 });
 
 test("Tauri signing evidence requires one transient uninstaller between plugins and final installer", () => {
@@ -574,6 +685,28 @@ test("Tauri signing evidence requires one transient uninstaller between plugins 
   assert.equal(requireSigningEvents([application, ...plugins, uninstaller, installerEvent], config, installer, "CN=ICEFIELDS DEVELOPMENT").uninstallerEvent, uninstaller);
   assert.throws(() => requireSigningEvents([application, ...plugins, installerEvent], config, installer, "CN=ICEFIELDS DEVELOPMENT"), /cardinality|transient NSIS uninstaller/);
   assert.throws(() => requireSigningEvents([application, ...plugins, uninstaller, installerEvent, { ...installerEvent, path: join(TEST_ROOT, "extra.exe") }], config, installer, "CN=ICEFIELDS DEVELOPMENT"), /cardinality/);
+});
+
+test("Tauri signing evidence binds plugin and installer events to current bytes", () => {
+  const root = join(TEST_ROOT, "event-byte-binding");
+  const target = join(root, "target", "glacial.exe");
+  const capture = join(root, "capture", "Glacial.exe");
+  const installer = join(root, "bundle", "Glacial_0.9.12_x64-setup.exe");
+  const pluginPaths = ["NSISdl.dll", "StartMenu.dll", "System.dll", "nsDialogs.dll", "nsis_tauri_utils.dll"].map((name) => join(root, "plugins", name));
+  for (const path of [target, capture, installer, ...pluginPaths]) { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, minimalPe()); }
+  const common = { releaseId: RELEASE_ID, objectIdentity: "AA:AAAA", evidenceObjectIdentity: null, beforeSha256: "C".repeat(64), signerThumbprint: THUMBPRINT, canonicalSubject: "CN=ICEFIELDS DEVELOPMENT", timestampThumbprint: "B".repeat(40), applicationCapturePath: null };
+  const application = { ...common, path: target, artifactRole: "application", sha256: sha256(capture), applicationCapturePath: capture, evidenceObjectIdentity: "AA:AAAA" };
+  const plugins = pluginPaths.map((path) => ({ ...common, path, artifactRole: `nsis-plugin:${basename(path).toLowerCase()}`, sha256: sha256(path) }));
+  const uninstaller = { ...common, path: join(root, "temp", "nst1234.tmp"), artifactRole: "nsis-uninstaller", sha256: "E".repeat(64) };
+  const installerEvent = { ...common, path: installer, artifactRole: "installer", sha256: sha256(installer) };
+  const config = { releaseId: RELEASE_ID, expectedThumbprint: THUMBPRINT, applicationTarget: target, applicationCapture: capture };
+  const options = { objectInspector: () => ({ objectId: "AA:AAAA", linkCount: 1, size: minimalPe().length, reparsePoint: false }) };
+
+  const mismatchedPlugin = plugins.map((event, index) => index === 0 ? { ...event, sha256: "D".repeat(64) } : event);
+  assert.throws(() => requireSigningEvents([application, ...mismatchedPlugin, uninstaller, installerEvent], config, installer, "CN=ICEFIELDS DEVELOPMENT", options), /signed bytes do not match the signing event/);
+
+  writeFileSync(installer, Buffer.concat([minimalPe().subarray(0, -1), Buffer.from([1])]));
+  assert.throws(() => requireSigningEvents([application, ...plugins, uninstaller, installerEvent], config, installer, "CN=ICEFIELDS DEVELOPMENT", options), /signed bytes do not match the signing event/);
 });
 
 test("Tauri signing evidence starts after the immutable backend audit boundary", () => {
@@ -792,7 +925,28 @@ test("candidate publication verifies final hashes before the last Git check and 
     renamer: () => order.push("rename"),
     pathOptions: { pathInspector: false },
   });
-  assert.deepEqual(order, ["hashes", "git", "rename"]);
+  assert.deepEqual(order, ["hashes", "git", "rename", "hashes"]);
+});
+
+test("candidate publication rejects mutation during the atomic rename boundary", () => {
+  const workRoot = join(TEST_ROOT, "mutation-release-work", "candidate");
+  const finalRoot = join(TEST_ROOT, "mutation-release-candidates", "candidate");
+  mkdirSync(workRoot, { recursive: true });
+  writeFileSync(join(workRoot, "marker"), "authorized candidate");
+  assert.throws(() => publishCandidate({
+    workRoot,
+    finalRoot,
+    sourceBefore: sourceState(),
+    integrityVerifier: (root = workRoot) => {
+      if (readFileSync(join(root, "marker"), "utf8") !== "authorized candidate") throw new Error("candidate integrity changed");
+    },
+    sourceVerifier: sourceState,
+    renamer: (source, destination) => {
+      renameSync(source, destination);
+      writeFileSync(join(destination, "marker"), "mutated during publication");
+    },
+    pathOptions: { pathInspector: false },
+  }), /candidate integrity changed/);
 });
 
 test("actual release-step executor stops before publication after any failed step", async () => {

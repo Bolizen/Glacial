@@ -19,6 +19,7 @@ import {
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const FRONTEND = join(REPOSITORY, "frontend");
 const TAURI_CLI = join(FRONTEND, "node_modules", "@tauri-apps", "cli", "tauri.js");
+const GLIB_VERIFIER = join(REPOSITORY, "scripts", "security", "verify-glib-backport.mjs");
 
 function gitText(git, args) {
   return String(runCommand(git, args, {
@@ -46,6 +47,12 @@ export function runTauriBuild(args = process.argv.slice(2), environment = proces
     GLACIAL_BUILD_IDENTITY_JSON: serializeBuildIdentity(identity),
   }, ["GLACIAL_BUILD_IDENTITY_JSON", "GLACIAL_WINDOWS_RELEASE_ID",
     "GLACIAL_WINDOWS_SIGN_BROKER_PORT", "GLACIAL_WINDOWS_SIGN_BROKER_TOKEN"]);
+  runCommand(process.execPath, [GLIB_VERIFIER], {
+    cwd: REPOSITORY,
+    env: minimalEnvironment(environment),
+    timeoutMs: 300_000,
+    includeFailureOutput: true,
+  });
   return runCommand(process.execPath, [TAURI_CLI, "build", ...args], {
     cwd: FRONTEND,
     env: buildEnvironment,
