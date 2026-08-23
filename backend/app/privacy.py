@@ -4,6 +4,7 @@ import base64
 import binascii
 import hashlib
 import re
+import unicodedata
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlsplit, urlunsplit
@@ -91,6 +92,7 @@ _DEPENDENCY_STRUCTURE_BY_CODE = {
     "40": "@",
     "5c": "\\",
 }
+_DEPENDENCY_STRUCTURE_MARKERS = tuple(_DEPENDENCY_STRUCTURE_BY_CODE.values())
 _URL_DEPENDENCY_LOCATOR_RE = re.compile(
     r"^(?:(?:git|hg|svn|bzr)\+)?(?:https?|ssh|git|svn|hg|bzr)://",
     re.IGNORECASE,
@@ -101,6 +103,10 @@ _ENCODED_DEPENDENCY_DELIMITER_RE = re.compile(
 )
 _DIRECT_ENCODED_DEPENDENCY_STRUCTURE_RE = re.compile(
     r"%(?P<code>2b|2f|3a|3f|23|40|5c)",
+    re.IGNORECASE,
+)
+_DEPENDENCY_SELECTOR_BOUNDARY_RE = re.compile(
+    r"[@?#]|%(?:25)*(?:40|3f|23)",
     re.IGNORECASE,
 )
 _SCP_DEPENDENCY_LOCATOR_RE = re.compile(
@@ -341,9 +347,33 @@ def _dependency_component_introduces_structure(
     return any(normalized.count(marker) > value.count(marker) for marker in markers)
 
 
+def _dependency_unicode_introduces_structure(value: str) -> bool:
+    normalized = unicodedata.normalize("NFKC", value)
+    return _dependency_component_introduces_structure(
+        value,
+        normalized,
+        markers=_DEPENDENCY_STRUCTURE_MARKERS,
+    )
+
+
 def _without_dependency_selector(value: str) -> str:
     locator = re.split(r"[?#]", value, maxsplit=1)[0]
     return locator.rsplit("@", 1)[0] if "@" in locator else locator
+
+
+def _without_encoded_dependency_selector(value: str) -> str:
+    return _DEPENDENCY_SELECTOR_BOUNDARY_RE.split(value, maxsplit=1)[0]
+
+
+def _provider_dependency_locator(value: str) -> bool:
+    locator = value.lstrip("/")
+    segments = locator.split("/")
+    return len(segments) >= 2 and all(
+        segment
+        and not any(character.isspace() for character in segment)
+        and not any(marker in segment for marker in ("\\", ":", "@", "?", "#"))
+        for segment in segments
+    )
 
 
 def _scp_dependency_locator(value: str) -> tuple[str, str] | None:
@@ -430,6 +460,11 @@ def _sanitize_dependency_url_candidate(
         path, path_normalized = _normalized_dependency_locator(raw_path)
         if not authority_normalized or not path_normalized:
             return "redacted dependency locator"
+        if (
+            _dependency_unicode_introduces_structure(authority)
+            or _dependency_unicode_introduces_structure(path)
+        ):
+            return "redacted dependency locator"
         # Authority is reparsed below, and newly decoded query/fragment suffixes are
         # discarded. Other decoded path delimiters can reclassify private bytes as
         # retained locator structure, so ambiguous paths must fail closed.
@@ -479,6 +514,7 @@ def sanitize_dependency_locator(value: Any, *, limit: int = 500) -> str:
             introduced_structure=introduced_structure,
             limit=limit,
         )
+    raw_text = normalize_control_characters(value, preserve_lines=False).strip()
     text, normalized = _normalized_dependency_locator(value)
     if not text:
         return ""
@@ -486,9 +522,35 @@ def sanitize_dependency_locator(value: Any, *, limit: int = 500) -> str:
         return "redacted dependency locator"
     if "://" in text:
         return "redacted dependency locator"
+    if _dependency_unicode_introduces_structure(text):
+        return "redacted dependency locator"
+    decoded_structure = _dependency_component_introduces_structure(
+        raw_text,
+        text,
+        markers=_DEPENDENCY_STRUCTURE_MARKERS,
+    )
     provider = re.match(r"^(github|gitlab|bitbucket):(.+)$", text, re.IGNORECASE)
     if provider:
         locator = _without_dependency_selector(provider.group(2)).lstrip("/")
+        raw_provider = re.match(
+            r"^(github|gitlab|bitbucket):(.+)$",
+            raw_text,
+            re.IGNORECASE,
+        )
+        raw_locator = (
+            _without_encoded_dependency_selector(raw_provider.group(2)).lstrip("/")
+            if raw_provider
+            else ""
+        )
+        if decoded_structure and (
+            not _provider_dependency_locator(raw_locator)
+            or _dependency_component_introduces_structure(
+                raw_locator,
+                locator,
+                markers=_DEPENDENCY_STRUCTURE_MARKERS,
+            )
+        ):
+            return "redacted dependency locator"
         return f"{provider.group(1).lower()}:{locator}"[:limit]
     if re.match(r"^(?:git\+|hg\+|svn\+|bzr\+)?(?:https?|ssh|git|svn|hg|bzr)(?::|/)", text, re.IGNORECASE):
         return "malformed remote source"
@@ -496,9 +558,37 @@ def sanitize_dependency_locator(value: Any, *, limit: int = 500) -> str:
     if scp:
         host, raw_path = scp
         path = _without_dependency_selector(raw_path).lstrip("/")
+        raw_colon = raw_text.find(":")
+        raw_scp = (
+            _scp_dependency_locator(
+                raw_text[: raw_colon + 1]
+                + _without_encoded_dependency_selector(raw_text[raw_colon + 1 :])
+            )
+            if raw_colon >= 0
+            else None
+        )
+        if decoded_structure and (
+            raw_scp is None
+            or _dependency_component_introduces_structure(
+                raw_scp[1].lstrip("/"),
+                path,
+                markers=_DEPENDENCY_STRUCTURE_MARKERS,
+            )
+        ):
+            return "redacted dependency locator"
         return f"vcs:{host.lower()}/{path}"[:limit]
     bare = re.match(r"^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)(?:[?@#].*)?$", text)
     if bare:
+        raw_bare = _without_encoded_dependency_selector(raw_text)
+        if decoded_structure and (
+            not re.fullmatch(r"[A-Za-z0-9_.%~-]+/[A-Za-z0-9_.%~-]+", raw_bare)
+            or _dependency_component_introduces_structure(
+                raw_bare,
+                bare.group(1),
+                markers=_DEPENDENCY_STRUCTURE_MARKERS,
+            )
+        ):
+            return "redacted dependency locator"
         return bare.group(1)[:limit]
     if any(marker in text for marker in ("?", "#")) and ("/" in text or "@" in text):
         return "redacted dependency locator"

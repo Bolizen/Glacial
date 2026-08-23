@@ -372,6 +372,10 @@ G105_COMPATIBILITY_CASES = {
         "github.com/org/repository.git",
         "https://github.com/org/repository.git",
     ),
+    "fully-encoded-safe-url": (
+        percent_encode("https://github.com/org/encoded-safe.git", 1),
+        "https://github.com/org/encoded-safe.git",
+    ),
     "literal-selector": (
         "https://github.com/org/repository.git@g105controlselector",
         "https://github.com/org/repository.git",
@@ -391,6 +395,57 @@ G105_COMPATIBILITY_CASES = {
     "scoped-npm": (
         "npm:@scope/package@1.0.0",
         "npm:@scope/package@1.0.0",
+    ),
+}
+G106_UNICODE_CANARY = "ghp_G106UnicodeCanary0123456789abcdefAB"
+G106_PROVIDER_CANARY = "ghp_G106ProviderCanary0123456789abcdefAB"
+G106_SCP_CANARY = "ghp_G106ScpCanary0123456789abcdefAB"
+G106_BARE_CANARY = "ghp_G106BareCanary0123456789abcdefAB"
+G106_HOSTILE_CASES = {
+    "unicode-fullwidth-at": (
+        percent_encode(
+            f"https://safe.example/{G106_UNICODE_CANARY}\uff20x/y",
+            1,
+        ),
+        (G106_UNICODE_CANARY,),
+    ),
+    "unicode-small-at-mixed-rounds": (
+        percent_encode("https://safe.example", 1)
+        + percent_encode(
+            f"/ghp_G106SmallAtCanary0123456789abcdefAB\ufe6bx/y",
+            2,
+        ),
+        ("ghp_G106SmallAtCanary0123456789abcdefAB",),
+    ),
+    "provider-manufactured-at": (
+        f"github:{G106_PROVIDER_CANARY}%40x/y",
+        (G106_PROVIDER_CANARY,),
+    ),
+    "provider-manufactured-prefix-and-path": (
+        "github%3Aorg%2Fghp_G106ProviderPrefixCanary0123456789abcdefAB%40selector",
+        ("ghp_G106ProviderPrefixCanary0123456789abcdefAB",),
+    ),
+    "provider-manufactured-query": (
+        "github:ghp_G106ProviderQueryCanary0123456789abcdefAB%3Fx/y",
+        ("ghp_G106ProviderQueryCanary0123456789abcdefAB",),
+    ),
+    "scp-manufactured-path-and-selector": (
+        f"git@github.com:{G106_SCP_CANARY}%2Frepo%40selector",
+        (G106_SCP_CANARY,),
+    ),
+    "bare-manufactured-path-and-selector": (
+        f"{G106_BARE_CANARY}%2Frepo%40selector",
+        (G106_BARE_CANARY,),
+    ),
+    "encoded-plus-and-later-at": (
+        "git%2Bhttps://safe.example/org/"
+        "ghp_G106PlusCanary0123456789abcdefAB%2540x/y",
+        ("ghp_G106PlusCanary0123456789abcdefAB",),
+    ),
+    "backslash-slash-composition": (
+        "https%3A%2F%2Fsafe.example%2Forg%2F"
+        "ghp_G106BackslashCanary0123456789abcdefAB%255Cpivot%252Fx",
+        ("ghp_G106BackslashCanary0123456789abcdefAB",),
     ),
 }
 LOCATOR_CANARIES = tuple(
@@ -638,6 +693,130 @@ class PrivacyHelperTests(unittest.TestCase):
             )["requestedSpecification"]
             self.assertEqual(direct, expected, label)
             self.assertEqual(nested, expected, label)
+
+    def test_g106_decoded_structure_cannot_retain_private_locator_identity(self) -> None:
+        for label, (locator, canaries) in G106_HOSTILE_CASES.items():
+            direct = sanitize_dependency_locator(locator)
+            nested = sanitize_scan_value(
+                {"requestedSpecification": locator},
+                project_root=r"C:\workspace\project",
+            )["requestedSpecification"]
+            self.assertEqual(direct, "redacted dependency locator", label)
+            self.assertEqual(nested, "redacted dependency locator", label)
+            for output in (direct, nested):
+                folded = output.casefold()
+                for canary in canaries:
+                    self.assertNotIn(canary.casefold(), folded, label)
+
+    def test_g106_nfkc_delimiter_lookalikes_fail_closed(self) -> None:
+        lookalikes = {
+            "plus": "\uff0b",
+            "slash": "\uff0f",
+            "backslash": "\uff3c",
+            "colon": "\uff1a",
+            "at": "\uff20",
+            "query": "\uff1f",
+            "fragment": "\uff03",
+        }
+        for label, lookalike in lookalikes.items():
+            canary = f"ghp_G106{label.title()}Canary0123456789abcdefAB"
+            locator = percent_encode(
+                f"https://safe.example/org/{canary}{lookalike}pivot/repository.git",
+                1,
+            )
+            direct = sanitize_dependency_locator(locator)
+            nested = sanitize_scan_value(
+                {"requestedSpecification": locator},
+                project_root=r"C:\workspace\project",
+            )["requestedSpecification"]
+            self.assertEqual(direct, "redacted dependency locator", label)
+            self.assertEqual(nested, "redacted dependency locator", label)
+            self.assertNotIn(canary.casefold(), direct.casefold(), label)
+            self.assertNotIn(canary.casefold(), nested.casefold(), label)
+
+    def test_g106_structure_sentinel_collisions_fail_closed_or_remain_inert(self) -> None:
+        literal_sentinel = "\ue000"
+        inert_locator = f"https://safe.example/org/{literal_sentinel}-repository.git"
+        self.assertEqual(sanitize_dependency_locator(inert_locator), inert_locator)
+        self.assertEqual(
+            sanitize_scan_value(
+                {"requestedSpecification": inert_locator},
+                project_root=r"C:\workspace\project",
+            )["requestedSpecification"],
+            inert_locator,
+        )
+
+        collision_canary = "ghp_G106SentinelCanary0123456789abcdefAB"
+        collision_cases = (
+            percent_encode(
+                f"https://safe.example/org/{literal_sentinel}{collision_canary}@x/y",
+                1,
+            ),
+            percent_encode(
+                percent_encode(
+                    f"https://safe.example/org/{literal_sentinel}{collision_canary}@x/y",
+                    1,
+                ),
+                1,
+            ),
+        )
+        for locator in collision_cases:
+            direct = sanitize_dependency_locator(locator)
+            nested = sanitize_scan_value(
+                {"requestedSpecification": locator},
+                project_root=r"C:\workspace\project",
+            )["requestedSpecification"]
+            self.assertEqual(direct, "redacted dependency locator")
+            self.assertEqual(nested, "redacted dependency locator")
+            self.assertNotIn(collision_canary.casefold(), direct.casefold())
+            self.assertNotIn(collision_canary.casefold(), nested.casefold())
+
+        exhausted = "https://safe.example/org/" + "".join(
+            chr(codepoint) for codepoint in range(0xE000, 0xF900)
+        )
+        exhausted += "/repository.git"
+        self.assertEqual(
+            sanitize_dependency_locator(exhausted),
+            "redacted dependency locator",
+        )
+        self.assertEqual(
+            sanitize_scan_value(
+                {"requestedSpecification": exhausted},
+                project_root=r"C:\workspace\project",
+            )["requestedSpecification"],
+            "redacted dependency locator",
+        )
+
+    def test_g106_reproduced_bypasses_do_not_reach_serialized_scan_metadata(self) -> None:
+        for label in (
+            "unicode-fullwidth-at",
+            "provider-manufactured-at",
+            "scp-manufactured-path-and-selector",
+            "bare-manufactured-path-and-selector",
+        ):
+            locator, canaries = G106_HOSTILE_CASES[label]
+            result = sanitize_scan_value(
+                {
+                    "dependencyTrust": {
+                        "entries": [
+                            {"requestedSpecification": locator},
+                        ],
+                    },
+                },
+                project_root=r"C:\workspace\project",
+            )
+            persisted = json.dumps(
+                {"scan_metadata_json": result},
+                ensure_ascii=False,
+                sort_keys=True,
+            ).casefold()
+            self.assertEqual(
+                result["dependencyTrust"]["entries"][0]["requestedSpecification"],
+                "redacted dependency locator",
+                label,
+            )
+            for canary in canaries:
+                self.assertNotIn(canary.casefold(), persisted, label)
 
     def test_dependency_locator_malformed_inputs_fail_closed_without_false_positives(self) -> None:
         malformed = sanitize_scan_value(
