@@ -136,6 +136,68 @@ LOCATOR_CASES = {
         "https://github.com/org/backslash.git",
         ("pvtB1", "pvtB2", "pvtB3", "pvtB4", "pvtB5"),
     ),
+    "g102-minimal-mixed-path": (
+        "https://mxu4a:1/mxp4b%40x/y",
+        "redacted dependency locator",
+        ("mxu4a", "mxp4b"),
+    ),
+    "g102-full-mixed-path": (
+        "https://mxu4a:443/mxp4b%40github.com/fresh/ice.git"
+        "?token=mxq4c#mxf4d",
+        "redacted dependency locator",
+        ("mxu4a", "mxp4b", "mxq4c", "mxf4d"),
+    ),
+    "g103-mixed-at-depth-one": (
+        "https://au3a:7443/ap3b"
+        + percent_encode("@mirror.example", 1)
+        + "/org/one.git?token=aq3c#af3d",
+        "redacted dependency locator",
+        ("au3a", "ap3b", "aq3c", "af3d"),
+    ),
+    "g103-mixed-at-depth-two": (
+        "https://au3e:7443/ap3f"
+        + percent_encode("@mirror.example", 2)
+        + "/org/two.git?token=aq3g#af3h",
+        "redacted dependency locator",
+        ("au3e", "ap3f", "aq3g", "af3h"),
+    ),
+    "g103-mixed-at-depth-eight": (
+        "https://au3i:7443/ap3j"
+        + percent_encode("@mirror.example", 8)
+        + "/org/eight.git?token=aq3k#af3l",
+        "redacted dependency locator",
+        ("au3i", "ap3j", "aq3k", "af3l"),
+    ),
+    "g103-encoded-colon-in-path": (
+        "https://github.com/org/pc3m%3Apc3n/repo.git",
+        "redacted dependency locator",
+        ("pc3m", "pc3n"),
+    ),
+    "g103-encoded-slash-in-path": (
+        "https://github.com/org/ps3o%2Fps3p.git",
+        "redacted dependency locator",
+        ("ps3o", "ps3p"),
+    ),
+    "g103-encoded-backslash-in-path": (
+        "https://github.com/org/pb3q%5Cpb3r.git",
+        "redacted dependency locator",
+        ("pb3q", "pb3r"),
+    ),
+    "g103-mixed-path-markers": (
+        "https://mirror.example:9443/org/pm3s%253Apm3t%2540host.example/repo.git",
+        "redacted dependency locator",
+        ("pm3s", "pm3t"),
+    ),
+    "g103-benign-encoded-period": (
+        "https://github.com/org/repo%2Egit",
+        "https://github.com/org/repo.git",
+        (),
+    ),
+    "g103-legitimate-port": (
+        "https://github.com:8443/org/port.git",
+        "https://github.com:8443/org/port.git",
+        (),
+    ),
     "encoded-delimiters-userinfo": (
         "https://g097-user%3Ag097-password%40github.com/org/encoded.git%3Ftoken%3Dg097-query%23g097-encoded-selector",
         "https://github.com/org/encoded.git",

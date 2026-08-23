@@ -81,6 +81,7 @@ _DEPENDENCY_LOCATOR_KEYS = {
     "requestedspecification",
     "resolvedversion",
 }
+_DEPENDENCY_PATH_STRUCTURE_MARKERS = ("/", "\\", "@", ":")
 _URL_DEPENDENCY_LOCATOR_RE = re.compile(
     r"^(?:(?:git|hg|svn|bzr)\+)?(?:https?|ssh|git|svn|hg|bzr)://",
     re.IGNORECASE,
@@ -264,6 +265,15 @@ def _dependency_locator_shape(value: str) -> str:
     )
 
 
+def _dependency_component_introduces_structure(
+    value: str,
+    normalized: str,
+    *,
+    markers: tuple[str, ...],
+) -> bool:
+    return any(normalized.count(marker) > value.count(marker) for marker in markers)
+
+
 def _without_dependency_selector(value: str) -> str:
     locator = re.split(r"[?#]", value, maxsplit=1)[0]
     return locator.rsplit("@", 1)[0] if "@" in locator else locator
@@ -327,9 +337,19 @@ def _sanitize_dependency_url_candidate(value: str, *, limit: int) -> str:
         if not parsed.scheme or not parsed.netloc:
             return "malformed remote source"
 
+        raw_path = parsed.path or ""
         authority, authority_normalized = _normalized_dependency_locator(parsed.netloc)
-        path, path_normalized = _normalized_dependency_locator(parsed.path or "")
+        path, path_normalized = _normalized_dependency_locator(raw_path)
         if not authority_normalized or not path_normalized:
+            return "redacted dependency locator"
+        # Authority is reparsed below, and newly decoded query/fragment suffixes are
+        # discarded. Other decoded path delimiters can reclassify private bytes as
+        # retained locator structure, so ambiguous paths must fail closed.
+        if _dependency_component_introduces_structure(
+            raw_path,
+            path,
+            markers=_DEPENDENCY_PATH_STRUCTURE_MARKERS,
+        ):
             return "redacted dependency locator"
 
         authority = authority.rsplit("@", 1)[-1]
