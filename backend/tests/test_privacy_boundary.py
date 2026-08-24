@@ -34,6 +34,7 @@ from app.schemas import (
     ProjectPathRequest,
     TrustProfileRequest,
 )
+from app.trusted_dependency_baseline import approval_for_analysis, snapshot_from_analysis
 from app.version import GLACIAL_VERSION
 
 
@@ -461,6 +462,24 @@ G107_CONVERGENCE_CASES = {
     ),
 }
 LOCATOR_CASES.update(G107_CONVERGENCE_CASES)
+G108_MULTIPLE_SELECTOR_CASES = {
+    "g108-provider-multi-at": (
+        "github:org/repository@g108-private-selector@release",
+        "github:org/repository",
+        ("g108-private-selector",),
+    ),
+    "g108-url-multi-at": (
+        "https://github.com/org/repository.git@g108-private-selector@release",
+        "https://github.com/org/repository.git",
+        ("g108-private-selector",),
+    ),
+    "g108-scp-multi-at": (
+        "git@github.com:org/repository.git@g108-private-selector@release",
+        "vcs:github.com/org/repository.git",
+        ("g108-private-selector",),
+    ),
+}
+LOCATOR_CASES.update(G108_MULTIPLE_SELECTOR_CASES)
 LOCATOR_CANARIES = tuple(
     canary
     for _, _, canaries in LOCATOR_CASES.values()
@@ -830,6 +849,70 @@ class PrivacyHelperTests(unittest.TestCase):
             )
             for canary in canaries:
                 self.assertNotIn(canary.casefold(), persisted, label)
+
+    def test_g108_multiple_at_selectors_do_not_enter_trusted_baseline(self) -> None:
+        entries = []
+        expected_by_name = {}
+        for label, (locator, expected, canaries) in G108_MULTIPLE_SELECTOR_CASES.items():
+            sanitized = sanitize_scan_value(
+                {
+                    "metadata": {"source": locator},
+                    "requestedSpecification": locator,
+                },
+                project_root=r"C:\workspace\project",
+            )
+            self.assertEqual(sanitize_dependency_locator(locator), expected, label)
+            self.assertEqual(sanitized["metadata"]["source"], expected, label)
+            self.assertEqual(sanitized["requestedSpecification"], expected, label)
+            for canary in canaries:
+                self.assertNotIn(canary, json.dumps(sanitized), label)
+            expected_by_name[label] = expected
+            entries.append({
+                "ecosystem": "node",
+                "name": label,
+                "group": "dependencies",
+                "requestedSpecification": locator,
+                "lockedVersion": "1.0.0",
+                "sourceType": "vcs",
+                "sourceIdentifier": "vcs:github.com/org/repository",
+                "integrity": "",
+                "integrityPresent": False,
+                "direct": True,
+                "optional": False,
+                "dev": False,
+                "peer": False,
+                "installScriptIndicator": False,
+                "manifestPath": "package.json",
+                "lockfilePath": "package-lock.json",
+            })
+
+        dependency_trust = sanitize_scan_value(
+            {
+                "schemaVersion": 1,
+                "status": "complete",
+                "ecosystems": ["node"],
+                "manifests": ["package.json"],
+                "lockfiles": ["package-lock.json"],
+                "packageManagers": ["npm"],
+                "entries": entries,
+            },
+            project_root=r"C:\workspace\project",
+        )
+        approval = approval_for_analysis(dependency_trust)
+        snapshot = snapshot_from_analysis(dependency_trust)
+        self.assertTrue(approval["eligible"])
+        self.assertEqual(
+            {
+                entry["name"]: entry["requestedSpecification"]
+                for entry in snapshot["entries"]
+            },
+            expected_by_name,
+        )
+        self.assertNotIn("g108-private-selector", json.dumps(snapshot))
+
+        for label in ("provider-selector", "https-selector", "scp-encoded-at-selector"):
+            locator, expected, _ = LOCATOR_CASES[label]
+            self.assertEqual(sanitize_dependency_locator(locator), expected, label)
 
     def test_dependency_locator_malformed_inputs_fail_closed_without_false_positives(self) -> None:
         malformed = sanitize_scan_value(

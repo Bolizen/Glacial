@@ -368,11 +368,6 @@ def _dependency_unicode_changes_structure_or_grammar(value: str) -> bool:
 
 
 def _without_dependency_selector(value: str) -> str:
-    locator = re.split(r"[?#]", value, maxsplit=1)[0]
-    return locator.rsplit("@", 1)[0] if "@" in locator else locator
-
-
-def _without_encoded_dependency_selector(value: str) -> str:
     return _DEPENDENCY_SELECTOR_BOUNDARY_RE.split(value, maxsplit=1)[0]
 
 
@@ -556,7 +551,7 @@ def sanitize_dependency_locator(value: Any, *, limit: int = 500) -> str:
             re.IGNORECASE,
         )
         raw_locator = (
-            _without_encoded_dependency_selector(raw_provider.group(2)).lstrip("/")
+            _without_dependency_selector(raw_provider.group(2)).lstrip("/")
             if raw_provider
             else ""
         )
@@ -580,7 +575,7 @@ def sanitize_dependency_locator(value: Any, *, limit: int = 500) -> str:
         raw_scp = (
             _scp_dependency_locator(
                 raw_text[: raw_colon + 1]
-                + _without_encoded_dependency_selector(raw_text[raw_colon + 1 :])
+                + _without_dependency_selector(raw_text[raw_colon + 1 :])
             )
             if raw_colon >= 0
             else None
@@ -597,7 +592,7 @@ def sanitize_dependency_locator(value: Any, *, limit: int = 500) -> str:
         return f"vcs:{host.lower()}/{path}"[:limit]
     bare = re.match(r"^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)(?:[?@#].*)?$", text)
     if bare:
-        raw_bare = _without_encoded_dependency_selector(raw_text)
+        raw_bare = _without_dependency_selector(raw_text)
         if decoded_structure and (
             not re.fullmatch(r"[A-Za-z0-9_.%~-]+/[A-Za-z0-9_.%~-]+", raw_bare)
             or _dependency_component_introduces_structure(
