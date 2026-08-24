@@ -448,6 +448,19 @@ G106_HOSTILE_CASES = {
         ("ghp_G106BackslashCanary0123456789abcdefAB",),
     ),
 }
+G107_CONVERGENCE_CASES = {
+    "g107-fullwidth-percent": (
+        "github:org/repo%EF%BC%852540g107-private-selector",
+        "redacted dependency locator",
+        ("g107-private-selector",),
+    ),
+    "g107-nfkc-provider": (
+        "\uff47\uff49\uff54\uff48\uff55\uff42:org/repo%40g107-private-selector",
+        "redacted dependency locator",
+        ("g107-private-selector",),
+    ),
+}
+LOCATOR_CASES.update(G107_CONVERGENCE_CASES)
 LOCATOR_CANARIES = tuple(
     canary
     for _, _, canaries in LOCATOR_CASES.values()

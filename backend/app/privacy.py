@@ -93,6 +93,7 @@ _DEPENDENCY_STRUCTURE_BY_CODE = {
     "5c": "\\",
 }
 _DEPENDENCY_STRUCTURE_MARKERS = tuple(_DEPENDENCY_STRUCTURE_BY_CODE.values())
+_DEPENDENCY_UNICODE_STRUCTURE_MARKERS = (*_DEPENDENCY_STRUCTURE_MARKERS, "%")
 _URL_DEPENDENCY_LOCATOR_RE = re.compile(
     r"^(?:(?:git|hg|svn|bzr)\+)?(?:https?|ssh|git|svn|hg|bzr)://",
     re.IGNORECASE,
@@ -347,12 +348,22 @@ def _dependency_component_introduces_structure(
     return any(normalized.count(marker) > value.count(marker) for marker in markers)
 
 
-def _dependency_unicode_introduces_structure(value: str) -> bool:
+def _dependency_unicode_changes_structure_or_grammar(value: str) -> bool:
     normalized = unicodedata.normalize("NFKC", value)
-    return _dependency_component_introduces_structure(
-        value,
-        normalized,
-        markers=_DEPENDENCY_STRUCTURE_MARKERS,
+    # Percent is itself a structural introducer: NFKC can manufacture a %25...
+    # sequence that a later percent-decoding pass turns into a delimiter. NFKC can
+    # also manufacture a locator grammar keyword without changing delimiter counts.
+    return (
+        _dependency_component_introduces_structure(
+            value,
+            normalized,
+            markers=_DEPENDENCY_UNICODE_STRUCTURE_MARKERS,
+        )
+        or (
+            normalized != value
+            and not _looks_like_normalized_dependency_locator(value)
+            and _looks_like_normalized_dependency_locator(normalized)
+        )
     )
 
 
@@ -418,6 +429,13 @@ def _looks_like_dependency_locator(value: Any) -> bool:
     text, normalized = _normalized_dependency_locator(value)
     if not normalized:
         text = _dependency_locator_shape(text)
+    for _ in range(MAX_DEPENDENCY_LOCATOR_DECODE_ROUNDS):
+        if _looks_like_normalized_dependency_locator(text):
+            return True
+        converged = unquote(unicodedata.normalize("NFKC", text))
+        if converged == text:
+            return False
+        text = converged
     return _looks_like_normalized_dependency_locator(text)
 
 
@@ -461,8 +479,8 @@ def _sanitize_dependency_url_candidate(
         if not authority_normalized or not path_normalized:
             return "redacted dependency locator"
         if (
-            _dependency_unicode_introduces_structure(authority)
-            or _dependency_unicode_introduces_structure(path)
+            _dependency_unicode_changes_structure_or_grammar(authority)
+            or _dependency_unicode_changes_structure_or_grammar(path)
         ):
             return "redacted dependency locator"
         # Authority is reparsed below, and newly decoded query/fragment suffixes are
@@ -522,7 +540,7 @@ def sanitize_dependency_locator(value: Any, *, limit: int = 500) -> str:
         return "redacted dependency locator"
     if "://" in text:
         return "redacted dependency locator"
-    if _dependency_unicode_introduces_structure(text):
+    if _dependency_unicode_changes_structure_or_grammar(text):
         return "redacted dependency locator"
     decoded_structure = _dependency_component_introduces_structure(
         raw_text,
