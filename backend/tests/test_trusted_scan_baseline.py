@@ -155,6 +155,47 @@ class TrustedScanBaselineTests(unittest.TestCase):
         self.assertTrue(reduced["reviewedFilesTruncated"])
         self.assertFalse(reduced["scanMetadataReliable"])
 
+    def test_malformed_legacy_findings_degrade_without_blocking_recovery(self) -> None:
+        self.add_scan(1)
+        with database.get_connection() as connection:
+            connection.execute(
+                "UPDATE scans SET findings_json = '{truncated', finding_count = 1 WHERE id = 1"
+            )
+
+        history = main.scan_history(str(self.project))["scans"]
+        self.assertEqual(history[0]["findings"], [])
+        self.assertEqual(history[0]["findingCount"], 1)
+        self.assertIsNone(history[0]["scanCompleteness"])
+        self.assertFalse(history[0]["scanMetadataReliable"])
+        self.assertIsNone(history[0]["dependencyTrust"])
+        with self.assertRaises(HTTPException) as rejected:
+            self.set_baseline(1)
+        self.assertEqual(rejected.exception.status_code, 409)
+        self.assertEqual(self.activity_types(), [])
+
+        self.add_scan(2)
+        recovered = self.set_baseline(2)
+        self.assertEqual(recovered["status"], "valid")
+        self.assertEqual(recovered["baseline"]["scanId"], 2)
+
+    def test_partial_legacy_completeness_is_unknown_and_cannot_be_pinned(self) -> None:
+        self.add_scan(1)
+        with database.get_connection() as connection:
+            row = connection.execute("SELECT scan_metadata_json FROM scans WHERE id = 1").fetchone()
+            metadata = json.loads(row["scan_metadata_json"])
+            metadata["scanCompleteness"].pop("resourceBudgetExceededCount")
+            connection.execute(
+                "UPDATE scans SET scan_metadata_json = ? WHERE id = 1",
+                (json.dumps(metadata),),
+            )
+
+        history = main.scan_history(str(self.project))["scans"][0]
+        self.assertIsNone(history["scanCompleteness"])
+        with self.assertRaises(HTTPException) as rejected:
+            self.set_baseline(1)
+        self.assertEqual(rejected.exception.status_code, 409)
+        self.assertEqual(self.activity_types(), [])
+
     def test_cross_project_scan_cannot_be_pinned(self) -> None:
         self.add_scan(1, project=self.other)
 

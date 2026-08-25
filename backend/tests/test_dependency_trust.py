@@ -606,6 +606,30 @@ class DependencyTrustPersistenceTests(unittest.TestCase):
         project_payload = main.list_projects()["projects"][0]
         self.assertNotIn("entries", project_payload)
 
+    def test_revision_only_vcs_change_is_detected_without_exposing_selector(self) -> None:
+        def write_revision(revision: str) -> None:
+            (self.project / "requirements.txt").write_text(
+                f"demo @ git+https://github.com/org/repo.git@{revision}\n",
+                encoding="utf-8",
+            )
+
+        write_revision("PRIVATE_REVISION_ONE")
+        main.run_scan(ProjectPathRequest(project_path=str(self.project)))
+        write_revision("PRIVATE_REVISION_TWO")
+        changed = main.run_scan(ProjectPathRequest(project_path=str(self.project)))
+
+        self.assertTrue(any(
+            change["changeType"] == "vcs-revision-changed"
+            for change in changed["dependencyTrust"]["comparison"]["changes"]
+        ))
+        finding = next(
+            item for item in changed["findings"]
+            if item["type"] == "dependency-vcs-revision-changed"
+        )
+        serialized = json.dumps({"comparison": changed["dependencyTrust"], "finding": finding})
+        self.assertNotIn("PRIVATE_REVISION_ONE", serialized)
+        self.assertNotIn("PRIVATE_REVISION_TWO", serialized)
+
     def test_dependency_baseline_never_crosses_projects(self) -> None:
         main.run_scan(ProjectPathRequest(project_path=str(self.project)))
         other = self.root / "other"

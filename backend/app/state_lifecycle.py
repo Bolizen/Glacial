@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import secrets
 import sqlite3
@@ -279,16 +278,6 @@ REQUIRED_SQL_MARKERS = {
         "foreign key (baseline_scan_id) references scans(id)",
     ),
 }
-JSON_STATE_COLUMNS = (
-    ("scans", "findings_json", list),
-    ("scans", "finding_summary_json", dict),
-    ("scans", "scan_metadata_json", dict),
-    ("project_trust_profiles", "profile_json", dict),
-    ("trusted_dependency_baselines", "snapshot_json", dict),
-    ("project_activity_events", "details_json", dict),
-)
-
-
 def configure_connection(connection: sqlite3.Connection) -> None:
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")
@@ -523,7 +512,6 @@ def _validate_legacy_shape(
                 "was not changed; use a documented compatible backup or explicit reset."
             )
         _require_sql_markers(table, details["sql"])
-    _validate_json_state(connection, shape)
 
 
 def _verify_current_database(
@@ -566,37 +554,12 @@ def _verify_current_database(
             "The database contains invalid foreign-key relationships."
         )
     _require_integrity(connection, "database")
-    _validate_json_state(connection, shape)
-
-
 def _require_sql_markers(table: str, sql: str) -> None:
     normalized = " ".join(str(sql or "").lower().split())
     if any(marker not in normalized for marker in REQUIRED_SQL_MARKERS.get(table, ())):
         raise DatabaseStateError(
             f"The database table {table} is missing required constraints."
         )
-
-
-def _validate_json_state(
-    connection: sqlite3.Connection,
-    shape: dict[str, dict[str, Any]],
-) -> None:
-    for table, column, expected_type in JSON_STATE_COLUMNS:
-        if table not in shape or column not in shape[table]["columns"]:
-            continue
-        for row in connection.execute(f"SELECT {column} FROM {table}"):
-            try:
-                value = json.loads(row[column])
-            except (TypeError, json.JSONDecodeError) as exc:
-                raise DatabaseStateError(
-                    f"Glacial found malformed persisted JSON in {table}.{column}; "
-                    "the database was not changed."
-                ) from exc
-            if not isinstance(value, expected_type):
-                raise DatabaseStateError(
-                    f"Glacial found unsupported persisted JSON in {table}.{column}; "
-                    "the database was not changed."
-                )
 
 
 def _schema_shape(connection: sqlite3.Connection) -> dict[str, dict[str, Any]]:

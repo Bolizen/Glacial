@@ -1576,6 +1576,27 @@ def _compare_snapshots(
     if previous.get("schemaVersion") != SCHEMA_VERSION or not isinstance(previous.get("entries"), list):
         return _empty_comparison("incompatible", "The previous dependency analysis schema is unavailable or incompatible."), []
     previous_entries = [entry for entry in previous["entries"] if isinstance(entry, dict)]
+    identity_incomplete = next(
+        (
+            entry
+            for entry in (*previous_entries, *current_entries)
+            if entry.get("sourceType") == "vcs" and not _vcs_revision_identity_complete(entry)
+        ),
+        None,
+    )
+    if identity_incomplete is not None:
+        return _empty_comparison(
+            "incompatible",
+            "VCS dependency comparison is unavailable because opaque revision identity is missing.",
+        ), [
+            _change_finding(
+                "dependency-comparison-incomplete",
+                "medium",
+                identity_incomplete,
+                "A VCS dependency lacks enough opaque revision identity for reliable historical comparison.",
+                "Regenerate the scan from dependency metadata that records a requested, locked, or resolved revision.",
+            )
+        ]
     current_direct = {_direct_key(entry): entry for entry in current_entries if entry.get("direct") is True}
     previous_direct = {_direct_key(entry): entry for entry in previous_entries if entry.get("direct") is True}
     changes: list[dict[str, Any]] = []
@@ -1611,6 +1632,18 @@ def _compare_snapshots(
                 changes.append(_change("source-changed", current, previous=f"{previous_source}:{previous_identifier}"))
                 severity = "high" if current.get("sourceType") == "url" and current.get("sourceIdentifier", "").startswith("http:") else "medium"
                 findings.append(_change_finding("dependency-source-changed", severity, current, "A dependency source changed since the previous scan.", "Verify that the new source and host are expected before installing."))
+            if (
+                current.get("sourceType") == "vcs"
+                and _vcs_revision_identity(current) != _vcs_revision_identity(old)
+            ):
+                changes.append(_change("vcs-revision-changed", current))
+                findings.append(_change_finding(
+                    "dependency-vcs-revision-changed",
+                    "high",
+                    current,
+                    "A VCS dependency revision changed since the previous compatible scan.",
+                    "Review the revision change before installing or running dependency tooling.",
+                ))
             if (
                 current.get("lockedVersion") == old.get("lockedVersion")
                 and current.get("sourceType") == old.get("sourceType")
@@ -1693,9 +1726,27 @@ def _change_finding(finding_type: str, severity: str, entry: dict[str, Any], exp
     }
     if finding_type == "dependency-integrity-changed" and entry.get("integrity"):
         finding["metadata"] = {"integrity": _safe_text(entry["integrity"], 300)}
+    if finding_type == "dependency-vcs-revision-changed":
+        finding["metadata"] = {
+            key: entry[key]
+            for key in ("vcsRequestedRevision", "vcsLockedRevision", "vcsResolvedRevision")
+            if entry.get(key)
+        }
     if entry.get("manifestPath") or entry.get("lockfilePath"):
         finding["path"] = entry.get("manifestPath") or entry.get("lockfilePath")
     return _compact(finding)
+
+
+def _vcs_revision_identity(entry: dict[str, Any]) -> tuple[str, str, str]:
+    return tuple(
+        str(entry.get(field) or "")
+        for field in ("vcsRequestedRevision", "vcsLockedRevision", "vcsResolvedRevision")
+    )
+
+
+def _vcs_revision_identity_complete(entry: dict[str, Any]) -> bool:
+    requested, locked, resolved = _vcs_revision_identity(entry)
+    return bool(requested) if entry.get("direct") is True else bool(locked or resolved)
 
 
 def _entry(ecosystem: str, name: str, group: str, *, direct: bool, **values: Any) -> dict[str, Any]:

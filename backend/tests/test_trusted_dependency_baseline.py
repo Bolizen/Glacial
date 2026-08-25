@@ -487,6 +487,54 @@ class TrustedBaselineApiTests(unittest.TestCase):
         self.assertFalse(main.get_trusted_dependency_baseline(str(self.project))["configured"])
         self.assertTrue(main.clear_trusted_dependency_baseline(ProjectPathRequest(project_path=str(self.project)))["cleared"])
 
+    def test_g111_invalid_legacy_baseline_stays_invalid_until_fresh_reapproval(self) -> None:
+        current = self.scan(self.project)
+        approval = current["dependencyTrust"]["trustedBaseline"]["approval"]
+        snapshot = snapshot_from_analysis(current["dependencyTrust"])
+        legacy_entry = dict(snapshot["entries"][0])
+        legacy_entry.update({
+            "sourceType": "vcs",
+            "sourceIdentifier": "github.com",
+            "integrity": "",
+            "integrityPresent": False,
+            "vcsRequestedRevision": "",
+            "vcsLockedRevision": "",
+            "vcsResolvedRevision": "",
+        })
+        snapshot["entries"] = [legacy_entry]
+        with database.get_connection() as connection:
+            connection.execute(
+                "INSERT INTO trusted_dependency_baselines "
+                "(project_path, baseline_schema_version, dependency_schema_version, fingerprint, "
+                "snapshot_json, source_scan_id, source_scan_date, note, created_at, updated_at) "
+                "VALUES (?, 2, 1, ?, ?, ?, ?, '', 'legacy', 'legacy')",
+                (
+                    str(self.project),
+                    "cfdb2_" + "0" * 64,
+                    json.dumps(snapshot),
+                    current["id"],
+                    current["scan_date"],
+                ),
+            )
+
+        rejected = main.get_trusted_dependency_baseline(str(self.project))
+        self.assertTrue(rejected["configured"])
+        self.assertEqual(rejected["status"], "invalid")
+        history = main.scan_history(str(self.project))["scans"][0]
+        self.assertEqual(
+            history["dependencyTrust"]["trustedBaseline"]["comparison"]["status"],
+            "invalid",
+        )
+
+        replaced = main.approve_trusted_dependency_baseline(TrustedDependencyBaselineApprove(
+            project_path=str(self.project),
+            scan_id=current["id"],
+            fingerprint=approval["fingerprint"],
+            replace=True,
+        ))
+        self.assertTrue(replaced["valid"])
+        self.assertEqual(replaced["fingerprint"], approval["fingerprint"])
+
     def test_stale_arbitrary_ineligible_and_cross_project_approvals_are_rejected(self) -> None:
         first = self.scan(self.project)
         fingerprint = first["dependencyTrust"]["trustedBaseline"]["approval"]["fingerprint"]

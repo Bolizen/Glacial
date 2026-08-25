@@ -165,7 +165,7 @@ class ScanCompletenessPersistenceTests(unittest.TestCase):
         self.assertEqual(scan["manifests"], [])
         self.assertFalse(scan["scanMetadataReliable"])
 
-    def test_legacy_complete_scan_with_ignored_files_is_reclassified(self) -> None:
+    def test_legacy_partial_completeness_with_ignored_files_is_unknown(self) -> None:
         legacy_result = {
             "overall_risk": "none",
             "findings": [],
@@ -198,21 +198,8 @@ class ScanCompletenessPersistenceTests(unittest.TestCase):
             history = main.scan_history(str(self.project_path))["scans"]
             project = main.list_projects()["projects"][0]
 
-        expected = {
-            "complete": False,
-            "traversalFailureCount": 0,
-            "fileInspectionFailureCount": 0,
-            "oversizedFileCount": 0,
-            "unsafePathCount": 0,
-            "dependencyAnalysisFailureCount": 0,
-            "policyExcludedFileCount": 1,
-            "builtInExcludedDirectoryCount": 0,
-            "unsupportedEncodingFileCount": 0,
-            "resourceBudgetExceededCount": 0,
-            "issueCount": 1,
-        }
-        self.assertEqual(history[0]["scanCompleteness"], expected)
-        self.assertEqual(project["last_scan_completeness"], expected)
+        self.assertIsNone(history[0]["scanCompleteness"])
+        self.assertIsNone(project["last_scan_completeness"])
 
 
 if __name__ == "__main__":

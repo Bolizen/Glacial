@@ -103,11 +103,10 @@ def note_counts() -> dict[str, int]:
 
 
 def row_to_scan(row: sqlite3.Row) -> dict[str, Any]:
-    findings = sanitize_scan_value(
-        [_normalize_finding(finding) for finding in json.loads(row["findings_json"])],
-        project_root=row["project_path"],
-    )
+    findings, findings_reliable = _load_findings(row)
     finding_count = _row_value(row, "finding_count", len(findings))
+    if not isinstance(finding_count, int) or isinstance(finding_count, bool) or finding_count < 0:
+        finding_count = len(findings)
     metadata = sanitize_scan_value(
         _load_scan_metadata(row),
         project_root=row["project_path"],
@@ -133,10 +132,24 @@ def row_to_scan(row: sqlite3.Row) -> dict[str, Any]:
         "reviewedFiles": _metadata_list(metadata, "reviewedFiles"),
         "reviewedFilesTruncated": metadata.get("reviewedFilesTruncated") is True,
         "zone": str(metadata.get("zone") or "Unknown"),
-        "scanCompleteness": _scan_completeness(metadata),
-        "scanMetadataReliable": _scan_metadata_reliable(metadata),
-        "dependencyTrust": _dependency_trust(metadata),
+        "scanCompleteness": _scan_completeness(metadata) if findings_reliable else None,
+        "scanMetadataReliable": findings_reliable and _scan_metadata_reliable(metadata),
+        "dependencyTrust": _dependency_trust(metadata) if findings_reliable else None,
     }
+
+
+def _load_findings(row: sqlite3.Row) -> tuple[list[dict[str, Any]], bool]:
+    try:
+        value = json.loads(row["findings_json"])
+    except (TypeError, json.JSONDecodeError):
+        return [], False
+    if not isinstance(value, list) or any(not isinstance(finding, dict) for finding in value):
+        return [], False
+    findings = sanitize_scan_value(
+        [_normalize_finding(finding) for finding in value],
+        project_root=row["project_path"],
+    )
+    return (findings, True) if isinstance(findings, list) else ([], False)
 
 
 def scan_completeness_for_row(row: sqlite3.Row) -> dict[str, Any] | None:
@@ -222,23 +235,30 @@ def _scan_completeness(metadata: dict[str, Any]) -> dict[str, Any] | None:
         "unsupportedEncodingFileCount",
         "resourceBudgetExceededCount",
     )
-    counts = {
-        field: max(0, int(value.get(field, 0)))
-        if isinstance(value.get(field, 0), int)
-        else 0
+    if any(
+        not isinstance(value.get(field), int)
+        or isinstance(value.get(field), bool)
+        or value[field] < 0
         for field in count_fields
-    }
-    counts["policyExcludedFileCount"] = max(
-        counts["policyExcludedFileCount"],
-        len(_metadata_list(metadata, "ignoredFiles")),
-    )
-    counts["builtInExcludedDirectoryCount"] = max(
-        counts["builtInExcludedDirectoryCount"],
-        len(_metadata_list(metadata, "builtInExcludedDirectories")),
-    )
+    ):
+        return None
+    counts = {field: value[field] for field in count_fields}
     issue_count = sum(counts.values())
+    stored_issue_count = value.get("issueCount")
+    complete = value.get("complete")
+    if (
+        not isinstance(stored_issue_count, int)
+        or isinstance(stored_issue_count, bool)
+        or stored_issue_count != issue_count
+        or not isinstance(complete, bool)
+        or complete is not (issue_count == 0)
+        or counts["policyExcludedFileCount"] < len(_metadata_list(metadata, "ignoredFiles"))
+        or counts["builtInExcludedDirectoryCount"]
+        < len(_metadata_list(metadata, "builtInExcludedDirectories"))
+    ):
+        return None
     return {
-        "complete": value.get("complete") is True and issue_count == 0,
+        "complete": complete,
         **counts,
         "issueCount": issue_count,
     }

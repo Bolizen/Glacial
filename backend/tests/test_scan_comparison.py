@@ -192,6 +192,27 @@ class ScanComparisonTests(unittest.TestCase):
         self.assertEqual(section["counts"]["removed"], 1)
         self.assertEqual(section["counts"]["versionChanged"], 1)
 
+    def test_vcs_revision_changes_and_legacy_missing_identity_are_not_unchanged(self) -> None:
+        base = entry("vcsdep", "1.0.0")
+        base.update({
+            "sourceType": "vcs",
+            "sourceIdentifier": "github.com",
+            "vcsRequestedRevision": "ref:sha256:" + "a" * 64,
+        })
+        changed = {**base, "vcsRequestedRevision": "ref:sha256:" + "b" * 64}
+        self.add_scan(1, date="2026-05-01T12:00:00+00:00", dependency=dependency_snapshot(base))
+        self.add_scan(2, date="2026-05-02T12:00:00+00:00", dependency=dependency_snapshot(changed))
+
+        section = self.compare(1, 2)["sections"]["dependencies"]
+        self.assertEqual(section["counts"]["versionChanged"], 1)
+        self.assertEqual(section["counts"]["unchanged"], 0)
+        self.assertEqual(section["examples"]["versionChanged"][0]["identityChanged"], "vcs-revision")
+
+        legacy = dict(changed)
+        legacy.pop("vcsRequestedRevision")
+        self.add_scan(3, date="2026-05-03T12:00:00+00:00", dependency=dependency_snapshot(legacy))
+        self.assertEqual(self.compare(2, 3)["sections"]["dependencies"]["status"], "indeterminate")
+
     def test_legacy_dependency_locators_are_sanitized_before_comparison_output(self) -> None:
         private_marker = "g110-private-provenance"
         legacy_entry = entry("alpha", "")

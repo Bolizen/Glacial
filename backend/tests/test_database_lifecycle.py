@@ -450,9 +450,17 @@ class DatabaseLifecycleTests(unittest.TestCase):
                 self.assertEqual(path.read_bytes(), before)
                 self.assertEqual(self.backup_files(), [])
 
-    def test_malformed_legacy_json_fails_closed_without_backup(self) -> None:
+    def test_malformed_legacy_json_migrates_for_fail_closed_read_recovery(self) -> None:
         self.create_core_legacy(with_record=False)
         connection = self.raw_connection()
+        connection.execute(
+            "INSERT INTO projects (path, name, created_at) "
+            "VALUES ('C:/project', 'project', '2026-01-01')"
+        )
+        connection.execute(
+            "INSERT INTO notes (project_path, body, created_at) "
+            "VALUES ('C:/project', 'preserved note', '2026-01-01')"
+        )
         connection.execute(
             "INSERT INTO scans "
             "(project_path, scan_date, overall_risk, findings_json) "
@@ -460,16 +468,20 @@ class DatabaseLifecycleTests(unittest.TestCase):
         )
         connection.commit()
         connection.close()
-        before = self.database_path.read_bytes()
+        database.init_db()
 
-        with self.assertRaisesRegex(
-            state_lifecycle.DatabaseStateError,
-            "malformed persisted JSON",
-        ):
-            database.init_db()
-
-        self.assertEqual(self.database_path.read_bytes(), before)
-        self.assertEqual(self.backup_files(), [])
+        connection = database.get_connection()
+        try:
+            row = connection.execute("SELECT * FROM scans").fetchone()
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 2)
+            self.assertEqual(connection.execute("SELECT body FROM notes").fetchone()[0], "preserved note")
+        finally:
+            connection.close()
+        recovered = database.row_to_scan(row)
+        self.assertEqual(recovered["findings"], [])
+        self.assertIsNone(recovered["scanCompleteness"])
+        self.assertFalse(recovered["scanMetadataReliable"])
+        self.assertEqual(len(self.backup_files()), 1)
 
     def test_backup_publication_is_atomic_and_collision_never_overwrites(self) -> None:
         self.create_core_legacy()

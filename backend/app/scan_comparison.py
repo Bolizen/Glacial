@@ -76,6 +76,13 @@ def compare_scan_rows(first_row: Any, second_row: Any) -> dict[str, Any]:
 
 def trusted_scan_eligibility(row: Any) -> dict[str, Any]:
     scan = _comparison_scan(row)
+    findings = _raw_object_list(row["findings_json"])
+    if findings is None or not _findings_reliable(findings):
+        return {
+            "eligible": False,
+            "status": "indeterminate",
+            "reason": "Persisted findings are missing, malformed, or lack reliable identity.",
+        }
     coverage = _coverage_snapshot(row)
     if coverage is None:
         return {
@@ -178,7 +185,9 @@ def _chronological_rows(first: Any, second: Any) -> tuple[Any, Any]:
 def _scan_summary(row: Any, scan: dict[str, Any]) -> dict[str, Any]:
     coverage = _coverage_snapshot(row)
     complete = coverage["complete"] if coverage else None
-    metadata_reliable = scan.get("scanMetadataReliable") is True
+    findings = _raw_object_list(row["findings_json"])
+    findings_reliable = findings is not None and _findings_reliable(findings)
+    metadata_reliable = scan.get("scanMetadataReliable") is True and findings_reliable
     if complete is True and metadata_reliable:
         reliability = "reliable"
     elif complete is False or metadata_reliable is False:
@@ -377,14 +386,21 @@ def _compare_dependencies(base: dict[str, Any], target: dict[str, Any]) -> dict[
             **_dependency_example(new_entries[key]),
             "beforeVersion": _dependency_version(old_entries[key]),
             "afterVersion": _dependency_version(new_entries[key]),
+            **(
+                {"identityChanged": "vcs-revision"}
+                if _dependency_version(old_entries[key]) == _dependency_version(new_entries[key])
+                else {}
+            ),
         }
         for key in shared_keys
-        if _dependency_version(old_entries[key]) != _dependency_version(new_entries[key])
+        if _dependency_comparison_identity(old_entries[key])
+        != _dependency_comparison_identity(new_entries[key])
     ]
     unchanged = [
         _dependency_example(new_entries[key])
         for key in shared_keys
-        if _dependency_version(old_entries[key]) == _dependency_version(new_entries[key])
+        if _dependency_comparison_identity(old_entries[key])
+        == _dependency_comparison_identity(new_entries[key])
     ]
     fully_comparable = old["state"] == "complete" and new["state"] == "complete"
     added_keys = sorted(set(new_entries) - set(old_entries)) if fully_comparable else []
@@ -436,6 +452,8 @@ def _dependency_inventory(value: Any) -> dict[str, Any]:
         direct = entry.get("direct") is True
         if not name or not ecosystem:
             return {"state": "indeterminate", "status": status, "entries": {}}
+        if entry.get("sourceType") == "vcs" and not _vcs_revision_identity_complete(entry):
+            return {"state": "indeterminate", "status": status, "entries": {}}
         key = f"{ecosystem}|{name}|{group}|{int(direct)}"
         if key in normalized:
             return {"state": "indeterminate", "status": status, "entries": {}}
@@ -459,6 +477,26 @@ def _dependency_version(entry: dict[str, Any]) -> str:
     ):
         return "[non-version specification]"
     return specification
+
+
+def _dependency_comparison_identity(entry: dict[str, Any]) -> tuple[str, ...]:
+    if entry.get("sourceType") != "vcs":
+        return (_dependency_version(entry),)
+    return (
+        _dependency_version(entry),
+        _bounded_text(entry.get("sourceIdentifier"), 200),
+        *(
+            _bounded_text(entry.get(field), 300)
+            for field in ("vcsRequestedRevision", "vcsLockedRevision", "vcsResolvedRevision")
+        ),
+    )
+
+
+def _vcs_revision_identity_complete(entry: dict[str, Any]) -> bool:
+    requested = _bounded_text(entry.get("vcsRequestedRevision"), 300)
+    locked = _bounded_text(entry.get("vcsLockedRevision"), 300)
+    resolved = _bounded_text(entry.get("vcsResolvedRevision"), 300)
+    return bool(requested) if entry.get("direct") is True else bool(locked or resolved)
 
 
 def _dependency_example(entry: dict[str, Any]) -> dict[str, Any]:
