@@ -12,8 +12,10 @@ if (-not $resolvedStage.Equals($expectedStage, [System.StringComparison]::Ordina
 
 $sourceExecutable = Join-Path $sourceRoot "glacial-backend.exe"
 $sourceSupport = Join-Path $sourceRoot "_internal"
+$sourceReceipt = Join-Path $sourceRoot ".glacial-backend-stage.json"
 if (-not (Test-Path -LiteralPath $sourceExecutable -PathType Leaf) -or
-    -not (Test-Path -LiteralPath $sourceSupport -PathType Container)) {
+    -not (Test-Path -LiteralPath $sourceSupport -PathType Container) -or
+    -not (Test-Path -LiteralPath $sourceReceipt -PathType Leaf)) {
     throw "Build the PyInstaller onedir backend before staging the Tauri sidecar."
 }
 
@@ -28,4 +30,5 @@ if (Test-Path -LiteralPath $stageRoot) {
 New-Item -ItemType Directory -Path $stageRoot | Out-Null
 Copy-Item -LiteralPath $sourceExecutable -Destination (Join-Path $stageRoot "glacial-backend-$targetTriple.exe")
 Copy-Item -LiteralPath $sourceSupport -Destination (Join-Path $stageRoot "_internal") -Recurse
+Copy-Item -LiteralPath $sourceReceipt -Destination (Join-Path $stageRoot ".glacial-backend-stage.json")
 Write-Output "<REPOSITORY_ROOT>\frontend\src-tauri\binaries"

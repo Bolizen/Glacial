@@ -45,6 +45,7 @@ import {
 } from "../release/build-identity.mjs";
 import { validateProductionDependencies } from "../release/validate-production-dependencies.mjs";
 import { assertWindowsReleasePythonIdentity } from "../release/release-contract.mjs";
+import { backendStageReceipt, writeBackendStageReceipt } from "./backend-stage-integrity.mjs";
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const SIGNING_BROKER = resolve(dirname(SCRIPT_PATH), "windows-signing-broker.mjs");
@@ -374,13 +375,25 @@ function buildBackend(buildPython) {
   if (!existsSync(join(PYINSTALLER_PAYLOAD, "glacial-backend.exe")) || !existsSync(join(PYINSTALLER_PAYLOAD, "_internal"))) throw new Error("PyInstaller did not produce the expected backend payload.");
 }
 
-function stageSignedBackend(rustcPath) {
+function stageSignedBackend(rustcPath, source) {
   const targetTriple = runText(rustcPath, ["--print", "host-tuple"], { env: minimalEnvironment(process.env) });
   if (targetTriple !== "x86_64-pc-windows-msvc") throw new Error(`Expected x86_64-pc-windows-msvc; found ${targetTriple}.`);
+  const expectedReceipt = backendStageReceipt({
+    root: PYINSTALLER_PAYLOAD,
+    executableName: "glacial-backend.exe",
+    sourceCommit: source.commit,
+    productVersion: source.version,
+  });
   removeSafeTree(REPOSITORY, SIDECAR_STAGE);
   ensureSafeDirectory(REPOSITORY, SIDECAR_STAGE);
   copyFileSync(join(PYINSTALLER_PAYLOAD, "glacial-backend.exe"), join(SIDECAR_STAGE, `glacial-backend-${targetTriple}.exe`));
   cpSync(join(PYINSTALLER_PAYLOAD, "_internal"), join(SIDECAR_STAGE, "_internal"), { recursive: true, errorOnExist: true });
+  writeBackendStageReceipt({
+    root: SIDECAR_STAGE,
+    executableName: `glacial-backend-${targetTriple}.exe`,
+    sourceCommit: source.commit,
+    productVersion: source.version,
+  }, expectedReceipt);
 }
 
 export function parseAuditLog(path, auditKey) {
@@ -631,7 +644,7 @@ async function buildSignedRelease(releaseProfile) {
           state.backendSigningRecords = signBackendTree(PYINSTALLER_PAYLOAD, config);
           state.backendSigningEventCount = parseAuditLog(config.auditLog, config.auditKey).length;
         } },
-        { name: "stage-backend", run: () => stageSignedBackend(rustcPath) },
+        { name: "stage-backend", run: () => stageSignedBackend(rustcPath, source) },
         { name: "clean-tauri-release-output", run: () => removeSafeTree(REPOSITORY, TAURI_TARGET) },
         { name: "tauri-build", run: async () => {
           const broker = await startSigningBroker(releaseEnvironment);

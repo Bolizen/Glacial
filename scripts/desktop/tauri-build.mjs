@@ -15,11 +15,14 @@ import {
   sanitizeDiagnosticText,
   validateStructuredDigest,
 } from "./windows-signing.mjs";
+import { verifyBackendStageReceipt } from "./backend-stage-integrity.mjs";
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const FRONTEND = join(REPOSITORY, "frontend");
 const TAURI_CLI = join(FRONTEND, "node_modules", "@tauri-apps", "cli", "tauri.js");
 const GLIB_VERIFIER = join(REPOSITORY, "scripts", "security", "verify-glib-backport.mjs");
+const BACKEND_STAGE = join(FRONTEND, "src-tauri", "binaries");
+const BACKEND_EXECUTABLE = "glacial-backend-x86_64-pc-windows-msvc.exe";
 
 function gitText(git, args) {
   return String(runCommand(git, args, {
@@ -43,6 +46,13 @@ export function runTauriBuild(args = process.argv.slice(2), environment = proces
     throw new Error("The locked Tauri CLI is unavailable.");
   }
   const identity = resolveProductionBuildIdentity(environment);
+  const receiptOptions = {
+    root: BACKEND_STAGE,
+    executableName: BACKEND_EXECUTABLE,
+    sourceCommit: identity.sourceCommit,
+    productVersion: identity.productVersion,
+  };
+  verifyBackendStageReceipt(receiptOptions);
   const buildEnvironment = minimalEnvironment(environment, {
     GLACIAL_BUILD_IDENTITY_JSON: serializeBuildIdentity(identity),
   }, ["GLACIAL_BUILD_IDENTITY_JSON", "GLACIAL_WINDOWS_RELEASE_ID",
@@ -53,12 +63,14 @@ export function runTauriBuild(args = process.argv.slice(2), environment = proces
     timeoutMs: 300_000,
     includeFailureOutput: true,
   });
-  return runCommand(process.execPath, [TAURI_CLI, "build", ...args], {
+  const result = runCommand(process.execPath, [TAURI_CLI, "build", ...args], {
     cwd: FRONTEND,
     env: buildEnvironment,
     timeoutMs: 900_000,
     includeFailureOutput: true,
   });
+  verifyBackendStageReceipt(receiptOptions);
+  return result;
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(SCRIPT_PATH)) {

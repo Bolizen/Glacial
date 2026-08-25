@@ -75,7 +75,12 @@ from .trusted_scan_baseline import PROVENANCE_MANUAL, trusted_scan_baseline_stat
 from .version import GLACIAL_VERSION
 
 
-app = FastAPI(title="Glacial API")
+app = FastAPI(
+    title="Glacial API",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
 
 TRUST_PROFILE_FIELDS = (
     "trustedPackageManagers",

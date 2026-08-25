@@ -166,6 +166,14 @@ class DesktopAuthenticationTests(unittest.TestCase):
             self.assertNotIn(TOKEN, json.dumps(headers))
             self.assertNotIn(TOKEN.encode("ascii"), body)
 
+    def test_api_schema_and_interactive_documentation_are_not_exposed(self) -> None:
+        with patch.dict(os.environ, {DESKTOP_AUTH_TOKEN_ENV: TOKEN}, clear=False):
+            for path in ("/openapi.json", "/docs", "/redoc"):
+                with self.subTest(path=path):
+                    status, _, body = asyncio.run(asgi_request("GET", path))
+                    self.assertEqual(status, 404)
+                    self.assertNotIn(b"/api/agents", body)
+
     def test_authenticated_mutation_succeeds(self) -> None:
         root = Path(tempfile.gettempdir()).resolve()
         with (

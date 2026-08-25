@@ -6,10 +6,13 @@ import {
   ensureSafeDirectory,
   minimalEnvironment,
   removeSafeTree,
+  resolveToolExecutable,
   runCommand,
   sanitizeDiagnosticText,
 } from "./windows-signing.mjs";
 import { validateDesktopBuildEnvironment } from "./Build-SignedWindowsRelease.mjs";
+import { writeBackendStageReceipt } from "./backend-stage-integrity.mjs";
+import { currentProductVersion } from "../release/release-contract.mjs";
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const REPOSITORY = resolve(dirname(SCRIPT_PATH), "..", "..");
@@ -28,7 +31,24 @@ function requireFile(path, label) {
   return path;
 }
 
+function currentCleanSourceCommit() {
+  const environment = minimalEnvironment(process.env);
+  const git = resolveToolExecutable("git.exe", process.env, { forbiddenRoot: REPOSITORY });
+  const status = String(runCommand(git, ["status", "--short"], {
+    cwd: REPOSITORY,
+    env: environment,
+  }).stdout ?? "").trim();
+  if (status) throw new Error("Backend evidence construction requires a clean source tree.");
+  const commit = String(runCommand(git, ["rev-parse", "HEAD"], {
+    cwd: REPOSITORY,
+    env: environment,
+  }).stdout ?? "").trim();
+  if (!/^[0-9a-f]{40}$/.test(commit)) throw new Error("The backend source commit is unavailable.");
+  return commit;
+}
+
 function buildBackend() {
+  const sourceCommit = currentCleanSourceCommit();
   const python = validateDesktopBuildEnvironment({ validateRuntime: false });
   removeSafeTree(DESKTOP_BUILD_ROOT, PYINSTALLER_ROOT);
   ensureSafeDirectory(DESKTOP_BUILD_ROOT, PYINSTALLER_ROOT);
@@ -36,6 +56,12 @@ function buildBackend() {
   runVisible(python, ["-m", "PyInstaller", "--noconfirm", "--clean", "--distpath", join(PYINSTALLER_ROOT, "dist"), "--workpath", join(PYINSTALLER_ROOT, "work"), join(REPOSITORY, "backend", "glacial-backend.spec")], { env: environment });
   requireFile(join(BACKEND_PAYLOAD, "glacial-backend.exe"), "Packaged backend");
   if (!existsSync(join(BACKEND_PAYLOAD, "_internal"))) throw new Error("Packaged backend runtime is missing.");
+  writeBackendStageReceipt({
+    root: BACKEND_PAYLOAD,
+    executableName: "glacial-backend.exe",
+    sourceCommit,
+    productVersion: currentProductVersion(REPOSITORY),
+  });
 }
 
 export function developmentPlan(command) {
