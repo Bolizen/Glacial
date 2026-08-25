@@ -381,7 +381,7 @@ class ReviewCheckpointTests(unittest.TestCase):
                 "node_modules/alpha": {
                     "version": "1.0.0",
                     "resolved": "https://registry.npmjs.org/alpha/-/alpha-1.0.0.tgz",
-                    "integrity": "sha512-AAAA",
+                    "integrity": "sha256:" + ("a" * 64),
                 },
             },
         }), encoding="utf-8")

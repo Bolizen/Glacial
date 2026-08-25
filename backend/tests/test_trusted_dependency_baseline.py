@@ -13,6 +13,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from app import database, main
+from app.privacy import sanitize_scan_value
 from app.schemas import ProjectPathRequest, TrustedDependencyBaselineApprove, TrustedDependencyBaselineNote
 from app.trusted_dependency_baseline import (
     BASELINE_SCHEMA_VERSION,
@@ -25,6 +26,10 @@ from app.trusted_dependency_baseline import (
     snapshot_from_analysis,
     snapshot_json,
 )
+
+
+INTEGRITY_A = "sha256:" + ("a" * 64)
+INTEGRITY_B = "sha256:" + ("b" * 64)
 
 
 def analysis(entries: list[dict[str, object]] | None = None, **overrides: object) -> dict[str, object]:
@@ -50,7 +55,7 @@ def entry(name: str, *, direct: bool = True, **overrides: object) -> dict[str, o
         "lockedVersion": "1.0.0",
         "sourceType": "registry",
         "sourceIdentifier": "registry.npmjs.org",
-        "integrity": "sha512-AAAA",
+        "integrity": INTEGRITY_A,
         "integrityPresent": True,
         "direct": direct,
         "optional": False,
@@ -130,6 +135,92 @@ class BaselineIdentityTests(unittest.TestCase):
         self.assertEqual(drift["status"], "drift")
         self.assertIn("vcs-revision-changed", {change["changeType"] for change in drift["changes"]})
 
+    def test_privacy_canonicalization_cannot_manufacture_trusted_identity(self) -> None:
+        project_root = r"C:\workspace\project"
+
+        def sanitized(candidate: dict[str, object]) -> dict[str, object]:
+            return sanitize_scan_value(
+                analysis([candidate]),
+                project_root=project_root,
+            )
+
+        unsafe = (
+            entry(
+                "vcsdep",
+                sourceType="vcs",
+                sourceIdentifier="vcs:github.com/owner/repository",
+                requestedSpecification="github:owner/repository#private-selector",
+                integrity="",
+                integrityPresent=False,
+            ),
+            entry(
+                "urldep",
+                sourceType="url",
+                sourceIdentifier="packages.example",
+                requestedSpecification="https://packages.example/archive.whl#sha256=private",
+                integrity="",
+                integrityPresent=False,
+            ),
+            entry(
+                "unknown-dep",
+                sourceType="unknown",
+                sourceIdentifier="",
+                requestedSpecification="unknown:owner/repository#private-selector",
+                integrity="",
+                integrityPresent=False,
+            ),
+            entry(
+                "malformed-dep",
+                sourceType="vcs",
+                sourceIdentifier="vcs:github.com/owner/repository",
+                requestedSpecification="https:/user:password@github.com/owner/repository#private",
+                integrity="",
+                integrityPresent=False,
+            ),
+            entry(
+                "local-dep",
+                sourceType="local",
+                sourceIdentifier="local:cache",
+                requestedSpecification="file:C:/Users/private/cache",
+                integrity="",
+                integrityPresent=False,
+            ),
+            entry("path-dep", manifestPath=r"C:\Users\private\package.json"),
+        )
+        for candidate in unsafe:
+            with self.subTest(candidate=candidate):
+                approval = approval_for_analysis(sanitized(candidate))
+                self.assertFalse(approval["eligible"])
+                self.assertEqual(approval["fingerprint"], "")
+
+        vcs_control = sanitized(entry(
+            "vcs-control",
+            sourceType="vcs",
+            sourceIdentifier="vcs:github.com/owner/repository",
+            requestedSpecification="github:owner/repository#private-selector",
+            vcsRequestedRevision=vcs_identity("ref", "private-selector"),
+            integrity="",
+            integrityPresent=False,
+        ))
+        url_control = sanitized(entry(
+            "url-control",
+            sourceType="url",
+            sourceIdentifier="packages.example",
+            requestedSpecification="https://packages.example/archive.whl?credential=private",
+            integrity=INTEGRITY_A,
+            integrityPresent=True,
+        ))
+        self.assertTrue(approval_for_analysis(vcs_control)["eligible"])
+        self.assertTrue(approval_for_analysis(url_control)["eligible"])
+        self.assertEqual(
+            snapshot_from_analysis(vcs_control)["entries"][0]["requestedSpecification"],
+            "github:owner/repository",
+        )
+        self.assertEqual(
+            snapshot_from_analysis(url_control)["entries"][0]["requestedSpecification"],
+            "https://packages.example/archive.whl",
+        )
+
     def test_legacy_baseline_without_vcs_identity_requires_reapproval(self) -> None:
         current = analysis([entry(
             "vcsdep", sourceType="vcs", sourceIdentifier="github.com",
@@ -176,6 +267,7 @@ class BaselineIdentityTests(unittest.TestCase):
             entry("alpha", sourceIdentifier="a" * 201),
             entry("alpha", sourceType="vcs", vcsRequestedRevision="rev:RAW_SECRET"),
             entry("alpha", sourceType="registry", vcsRequestedRevision=vcs_identity("rev", "hidden")),
+            entry("alpha", integrity="sha512-AAAA", integrityPresent=True),
         ]
         for unsafe in unsafe_values:
             with self.subTest(unsafe=unsafe), self.assertRaises(BaselineError):
@@ -208,7 +300,7 @@ class BaselineComparisonTests(unittest.TestCase):
         original = analysis([
             entry("alpha"),
             entry("removed"),
-            entry("integrity", integrity="sha512-AAAA"),
+            entry("integrity", integrity=INTEGRITY_A),
             entry("transitive", direct=False),
         ])
         snapshot = snapshot_from_analysis(original)
@@ -220,7 +312,7 @@ class BaselineComparisonTests(unittest.TestCase):
         current = analysis([
             entry("alpha", requestedSpecification="^2.0.0", lockedVersion="2.0.0", sourceType="url", sourceIdentifier="http:packages.example"),
             entry("added"),
-            entry("integrity", integrity="sha512-BBBB"),
+            entry("integrity", integrity=INTEGRITY_B),
             entry("new-transitive", direct=False),
         ], packageManagers=["npm", "pnpm"], lockfiles=["package-lock.json", "npm-shrinkwrap.json"])
         drift = compare_with_baseline(current, row)
@@ -330,7 +422,7 @@ class TrustedBaselineApiTests(unittest.TestCase):
                 "node_modules/alpha": {
                     "version": version,
                     "resolved": f"https://registry.npmjs.org/alpha/-/alpha-{version}.tgz",
-                    "integrity": "sha512-AAAA",
+                    "integrity": INTEGRITY_A,
                 },
             },
         }), encoding="utf-8")
@@ -442,7 +534,7 @@ class TrustedBaselineApiTests(unittest.TestCase):
                 "node_modules/alpha": {
                     "version": "1.0.0",
                     "resolved": "https://user:token@packages.example/alpha.tgz?auth=secret#fragment",
-                    "integrity": "sha512-AAAA",
+                    "integrity": INTEGRITY_A,
                 },
             },
         }), encoding="utf-8")

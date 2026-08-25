@@ -7,7 +7,7 @@ from collections import defaultdict
 from typing import Any, Iterable, Mapping
 from urllib.parse import urlsplit
 
-from .privacy import sanitize_private_text
+from .privacy import sanitize_private_text, validate_dependency_integrity
 
 
 BASELINE_SCHEMA_VERSION = 2
@@ -20,6 +20,16 @@ MAX_STRING = 500
 SEVERITY_ORDER = {"none": 0, "low": 1, "medium": 2, "high": 3}
 SUPPORTED_ECOSYSTEMS = {"node", "python"}
 SUPPORTED_SOURCE_TYPES = {"registry", "url", "vcs", "local", "unknown"}
+_PRIVACY_REDACTION_MARKERS = (
+    "[redacted",
+    "<glacial_data_dir>",
+    "<host_path>",
+    "<project_root>",
+    "<temp_dir>",
+    "<user_profile>",
+    "malformed remote source",
+    "redacted dependency locator",
+)
 
 
 class BaselineError(ValueError):
@@ -280,6 +290,19 @@ def _entry(value: Mapping[str, Any]) -> dict[str, Any]:
         raise BaselineError("Dependency inventory contains malformed or unsupported integrity data.")
     if integrity_present != bool(integrity):
         raise BaselineError("Dependency inventory contains inconsistent integrity data.")
+    direct = value.get("direct") is True
+    if source_type == "vcs" and direct and not vcs_requested_revision:
+        raise BaselineError(
+            "Direct VCS dependency identity lacks an opaque requested revision."
+        )
+    if (
+        source_type == "vcs"
+        and not direct
+        and not any((vcs_locked_revision, vcs_resolved_revision))
+    ):
+        raise BaselineError("Locked VCS dependency identity lacks an opaque revision.")
+    if source_type == "url" and not integrity:
+        raise BaselineError("URL dependency identity lacks artifact integrity.")
     entry = {
         "ecosystem": ecosystem,
         "name": name,
@@ -293,7 +316,7 @@ def _entry(value: Mapping[str, Any]) -> dict[str, Any]:
         "vcsResolvedRevision": vcs_resolved_revision,
         "integrity": integrity,
         "integrityPresent": integrity_present,
-        "direct": value.get("direct") is True,
+        "direct": direct,
         "optional": value.get("optional") is True,
         "dev": value.get("dev") is True,
         "peer": value.get("peer") is True,
@@ -610,7 +633,12 @@ def _path(value: Any, *, allow_empty: bool = False) -> str:
         text = text[2:]
     if not text and allow_empty:
         return ""
-    if not text or text.startswith("/") or re.match(r"^[A-Za-z]:", text):
+    if (
+        not text
+        or _contains_privacy_redaction(text)
+        or text.startswith("/")
+        or re.match(r"^[A-Za-z]:", text)
+    ):
         raise BaselineError("Dependency paths must be project-relative.")
     parts = [part for part in text.split("/") if part not in ("", ".")]
     if ".." in parts or "\x00" in text:
@@ -637,6 +665,8 @@ def _mapping_list(value: Any) -> list[Mapping[str, Any]]:
 
 def _safe_spec(value: Any) -> str:
     text = _canonical_text(value, MAX_STRING, "dependency specification")
+    if _contains_privacy_redaction(text):
+        raise BaselineError("Dependency specification contains redacted identity data.")
     if "?" in text or "#" in text or re.match(r"^[^@\s]+@[^:\s]+:.+", text):
         raise BaselineError("Dependency specification contains unsafe remote-source data.")
     if "://" in text:
@@ -657,6 +687,8 @@ def _safe_spec(value: Any) -> str:
 
 def _source_identifier(value: Any) -> str:
     text = _canonical_text(value, 200, "dependency source identity")
+    if _contains_privacy_redaction(text):
+        raise BaselineError("Dependency source identity contains redacted data.")
     if "?" in text or "#" in text or "@" in text or "\\" in text:
         raise BaselineError("Dependency source identity contains unsafe data.")
     if re.match(r"^(?:/|[A-Za-z]:)", text):
@@ -704,9 +736,16 @@ def _canonical_text(value: Any, limit: int, label: str) -> str:
 
 def _identity_text(value: Any, limit: int, label: str) -> str:
     text = _canonical_text(value, limit, label)
-    if any(marker in text for marker in ("://", "?", "#", "\\", "\x00")):
+    if _contains_privacy_redaction(text) or any(
+        marker in text for marker in ("://", "?", "#", "\\", "\x00")
+    ):
         raise BaselineError(f"{label.capitalize()} contains unsafe identity data.")
     return text
+
+
+def _contains_privacy_redaction(value: str) -> bool:
+    folded = value.casefold()
+    return any(marker in folded for marker in _PRIVACY_REDACTION_MARKERS)
 
 
 def _package_name(ecosystem: str, value: Any) -> str:
@@ -739,8 +778,11 @@ def _validate_snapshot_relationships(snapshot: Mapping[str, Any]) -> None:
 
 
 def _valid_integrity(value: Any) -> bool:
-    tokens = str(value or "").split()
-    return bool(tokens) and all(re.fullmatch(r"(?:sha256|sha384|sha512)[:-][A-Za-z0-9+/=_-]+", token) for token in tokens)
+    try:
+        validate_dependency_integrity(value)
+    except ValueError:
+        return False
+    return True
 
 
 def _bounded_snapshot(snapshot: Mapping[str, Any]) -> None:

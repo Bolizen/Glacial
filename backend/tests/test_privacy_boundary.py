@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import json
 import sqlite3
@@ -875,6 +876,10 @@ class PrivacyHelperTests(unittest.TestCase):
                 "lockedVersion": "1.0.0",
                 "sourceType": "vcs",
                 "sourceIdentifier": "vcs:github.com/org/repository",
+                "vcsRequestedRevision": (
+                    "ref:sha256:"
+                    + hashlib.sha256(locator.encode("utf-8")).hexdigest()
+                ),
                 "integrity": "",
                 "integrityPresent": False,
                 "direct": True,
