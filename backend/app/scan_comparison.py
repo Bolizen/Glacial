@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any, Iterable
 
 from .finding_reviews import finding_fingerprint
+from .privacy import sanitize_scan_value
 
 
 MAX_COMPARISON_EXAMPLES = 10
@@ -612,7 +613,11 @@ def _raw_metadata(row: Any) -> dict[str, Any]:
 
 
 def _comparison_scan(row: Any) -> dict[str, Any]:
-    metadata = _raw_metadata(row)
+    raw_metadata = _raw_metadata(row)
+    metadata = sanitize_scan_value(
+        raw_metadata,
+        project_root=row["project_path"],
+    )
     return {
         "manifests": metadata.get("manifests"),
         "lockfiles": metadata.get("lockfiles"),
@@ -622,7 +627,7 @@ def _comparison_scan(row: Any) -> dict[str, Any]:
         "reviewedFiles": metadata.get("reviewedFiles"),
         "reviewedFilesTruncated": metadata.get("reviewedFilesTruncated") is True,
         "scanCompleteness": metadata.get("scanCompleteness"),
-        "scanMetadataReliable": _raw_scan_metadata_reliable(metadata),
+        "scanMetadataReliable": _raw_scan_metadata_reliable(raw_metadata),
         "dependencyTrust": metadata.get("dependencyTrust"),
     }
 

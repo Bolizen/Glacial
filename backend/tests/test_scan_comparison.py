@@ -192,6 +192,42 @@ class ScanComparisonTests(unittest.TestCase):
         self.assertEqual(section["counts"]["removed"], 1)
         self.assertEqual(section["counts"]["versionChanged"], 1)
 
+    def test_legacy_dependency_locators_are_sanitized_before_comparison_output(self) -> None:
+        private_marker = "g110-private-provenance"
+        legacy_entry = entry("alpha", "")
+        legacy_entry.update({
+            "requestedSpecification": f"owner/repository#{private_marker}",
+            "metadata": {
+                "source": (
+                    "https://user:password@github.com/owner/repository.git"
+                    f"?token={private_marker}#{private_marker}"
+                ),
+            },
+        })
+        for scan_id, date in (
+            (1, "2026-05-01T12:00:00+00:00"),
+            (2, "2026-05-02T12:00:00+00:00"),
+        ):
+            self.add_scan(
+                scan_id,
+                date=date,
+                dependency=dependency_snapshot(legacy_entry),
+            )
+
+        result = self.compare(1, 2)
+
+        self.assertNotIn(private_marker, json.dumps(result, sort_keys=True))
+        self.assertEqual(
+            result["sections"]["dependencies"]["examples"]["unchanged"][0]["version"],
+            "owner/repository",
+        )
+        safe_entry = result["baseScan"]["metadataSource"]["scan"]["dependencyTrust"]["entries"][0]
+        self.assertEqual(safe_entry["requestedSpecification"], "owner/repository")
+        self.assertEqual(
+            safe_entry["metadata"]["source"],
+            "https://github.com/owner/repository.git",
+        )
+
     def test_malformed_coverage_and_unknown_history_are_conservative(self) -> None:
         self.add_scan(
             1,
