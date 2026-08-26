@@ -28,7 +28,6 @@ import {
   privacySafePath,
   removeSafeTree,
   resolvePrivacySafePath,
-  resolvePnpmInvocation,
   resolveToolExecutable,
   runCommand,
   sanitizeDiagnosticText,
@@ -46,6 +45,8 @@ import {
 import { validateProductionDependencies } from "../release/validate-production-dependencies.mjs";
 import { assertWindowsReleasePythonIdentity } from "../release/release-contract.mjs";
 import { backendStageReceipt, writeBackendStageReceipt } from "./backend-stage-integrity.mjs";
+import { assertReleaseInputTree, releaseInputTreeReceipt } from "../release/release-input-provenance.mjs";
+import { PINNED_PNPM, verifyPreparedInputsByReconstruction } from "../release/validate-clean-environment.mjs";
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const SIGNING_BROKER = resolve(dirname(SCRIPT_PATH), "windows-signing-broker.mjs");
@@ -66,6 +67,7 @@ const ACTUAL_RELEASE_STEPS = [
   "build-backend",
   "sign-backend",
   "stage-backend",
+  "build-frontend-from-authenticated-inputs",
   "clean-generated-tauri-release-output",
   "tauri-build-and-sign-once",
   "verify-installer-captured-application-and-restoration",
@@ -115,7 +117,7 @@ export function startSigningBroker(environment) {
 }
 
 export function tauriBuildArguments(pnpm, overlayPath) {
-  return [...pnpm.prefixArgs, "run", "tauri:build", "--config", overlayPath];
+  return [join(REPOSITORY, "scripts", "desktop", "tauri-build.mjs"), "--config", overlayPath];
 }
 
 export async function runBrokeredTauriBuild(runBuild, stopBroker) {
@@ -234,13 +236,14 @@ export async function runAfterSignerPreflight({ profile, preflight, runTrustedSt
   return state;
 }
 
-export function verifyReleaseSource(gitPath) {
+export function verifyReleaseSource(gitPath, preparedSource = null) {
   const environment = minimalEnvironment(process.env);
   const root = resolve(runText(gitPath, ["rev-parse", "--show-toplevel"], { cwd: REPOSITORY, env: environment }));
   if (root.toLowerCase() !== REPOSITORY.toLowerCase()) throw new Error(`Repository root mismatch: ${root}`);
-  const branch = runText(gitPath, ["branch", "--show-current"], { cwd: REPOSITORY, env: environment });
-  if (branch !== "main") throw new Error(`The release branch must be main; current branch is ${branch || "detached"}.`);
-  const status = runText(gitPath, ["status", "--short"], { cwd: REPOSITORY, env: environment });
+  const actualBranch = runText(gitPath, ["branch", "--show-current"], { cwd: REPOSITORY, env: environment });
+  const branch = preparedSource ? preparedSource.branch : actualBranch;
+  if ((!preparedSource && branch !== "main") || (preparedSource && actualBranch !== "")) throw new Error(`The release source has an unexpected branch state: ${actualBranch || "detached"}.`);
+  const status = runText(gitPath, ["status", "--short", ...(preparedSource ? ["--untracked-files=no"] : [])], { cwd: REPOSITORY, env: environment });
   if (status) throw new Error(`The release working tree must be clean.\n${status}`);
   const commit = validateStructuredDigest(
     runText(gitPath, ["rev-parse", "HEAD"], { cwd: REPOSITORY, env: environment }),
@@ -251,6 +254,9 @@ export function verifyReleaseSource(gitPath) {
     "git-commit",
   );
   if (commit !== originMain) throw new Error(`HEAD ${commit} does not match origin/main ${originMain}.`);
+  if (preparedSource && (commit !== preparedSource.commit || originMain !== preparedSource.originMain || preparedSource.branch !== "main")) {
+    throw new Error("Disposable release source identity differs from the primary authenticated source.");
+  }
 
   const packageJson = readJson(join(FRONTEND, "package.json"));
   const pnpmLock = readFileSync(join(FRONTEND, "pnpm-lock.yaml"), "utf8");
@@ -313,7 +319,7 @@ export function normalizeInstalledPackages(items) {
 
 export function assertInterpreterIdentity(python, identity) {
   const expectedExecutable = resolve(python).toLowerCase();
-  const expectedPrefix = resolve(dirname(dirname(python))).toLowerCase();
+  const expectedPrefix = resolve(basename(dirname(python)).toLowerCase() === "scripts" ? dirname(dirname(python)) : dirname(python)).toLowerCase();
   if (resolve(identity.executable).toLowerCase() !== expectedExecutable || resolve(identity.prefix).toLowerCase() !== expectedPrefix) {
     throw new Error(`Python interpreter identity mismatch; expected ${expectedExecutable} with prefix ${expectedPrefix}.`);
   }
@@ -326,7 +332,7 @@ function installedPackages(python, environment) {
   assertWindowsReleasePythonIdentity(identity, {
     selectionHint: "Provision the desktop build and backend runtime environments from the committed Windows release Python.",
   });
-  const result = JSON.parse(runText(python, ["-m", "pip", "list", "--format=json"], { cwd: REPOSITORY, env: environment }));
+  const result = JSON.parse(runText(python, ["-c", "import importlib.metadata as m, json; print(json.dumps([{'name': d.metadata['Name'], 'version': d.version} for d in m.distributions()]))"], { cwd: REPOSITORY, env: environment }));
   return normalizeInstalledPackages(result);
 }
 
@@ -349,8 +355,8 @@ export function assertExactPackageSet(label, approved, actual) {
 
 export function validateDesktopBuildEnvironment(options = {}) {
   const validateRuntime = options.validateRuntime !== false;
-  const buildPython = join(DESKTOP_BUILD_ROOT, "venv", "Scripts", "python.exe");
-  const runtimePython = join(REPOSITORY, "backend", ".venv", "Scripts", "python.exe");
+  const buildPython = join(DESKTOP_BUILD_ROOT, "venv", "python.exe");
+  const runtimePython = join(REPOSITORY, "backend", ".venv", "python.exe");
   const buildLock = join(REPOSITORY, "backend", "desktop-build-requirements.lock");
   const runtimeLock = join(REPOSITORY, "backend", "requirements.lock.txt");
   for (const path of [buildPython, runtimePython, buildLock, runtimeLock]) if (!existsSync(path) || !lstatSync(path).isFile()) throw new Error(`Required build input is missing: ${relative(REPOSITORY, path)}`);
@@ -361,8 +367,6 @@ export function validateDesktopBuildEnvironment(options = {}) {
   const actualRuntime = validateRuntime ? installedPackages(runtimePython, environment) : null;
   assertExactPackageSet("Desktop build packages do not match the exact build lock.", approvedBuild, actualBuild);
   if (validateRuntime) assertExactPackageSet("Backend runtime packages do not match requirements.lock.txt.", approvedRuntime, actualRuntime);
-  runCommand(buildPython, ["-m", "pip", "check"], { cwd: REPOSITORY, env: environment });
-  if (validateRuntime) runCommand(runtimePython, ["-m", "pip", "check"], { cwd: REPOSITORY, env: environment });
   if (runText(buildPython, ["-m", "PyInstaller", "--version"], { env: environment }) !== "6.21.0") throw new Error("PyInstaller 6.21.0 is required.");
   return buildPython;
 }
@@ -370,7 +374,11 @@ export function validateDesktopBuildEnvironment(options = {}) {
 function buildBackend(buildPython) {
   removeSafeTree(DESKTOP_BUILD_ROOT, PYINSTALLER_ROOT);
   ensureSafeDirectory(DESKTOP_BUILD_ROOT, PYINSTALLER_ROOT);
-  const environment = minimalEnvironment(process.env, { PYINSTALLER_CONFIG_DIR: join(PYINSTALLER_ROOT, "cache") });
+  const environment = minimalEnvironment(process.env, {
+    PYINSTALLER_CONFIG_DIR: join(PYINSTALLER_ROOT, "cache"),
+    PYTHONDONTWRITEBYTECODE: "1",
+    PYTHONNOUSERSITE: "1",
+  });
   runVisible(buildPython, ["-m", "PyInstaller", "--noconfirm", "--clean", "--distpath", join(PYINSTALLER_ROOT, "dist"), "--workpath", join(PYINSTALLER_ROOT, "work"), join(REPOSITORY, "backend", "glacial-backend.spec")], { env: environment });
   if (!existsSync(join(PYINSTALLER_PAYLOAD, "glacial-backend.exe")) || !existsSync(join(PYINSTALLER_PAYLOAD, "_internal"))) throw new Error("PyInstaller did not produce the expected backend payload.");
 }
@@ -388,7 +396,7 @@ function stageSignedBackend(rustcPath, source) {
   ensureSafeDirectory(REPOSITORY, SIDECAR_STAGE);
   copyFileSync(join(PYINSTALLER_PAYLOAD, "glacial-backend.exe"), join(SIDECAR_STAGE, `glacial-backend-${targetTriple}.exe`));
   cpSync(join(PYINSTALLER_PAYLOAD, "_internal"), join(SIDECAR_STAGE, "_internal"), { recursive: true, errorOnExist: true });
-  writeBackendStageReceipt({
+  return writeBackendStageReceipt({
     root: SIDECAR_STAGE,
     executableName: `glacial-backend-${targetTriple}.exe`,
     sourceCommit: source.commit,
@@ -506,7 +514,7 @@ function artifactRecord(kind, path, root) {
   };
 }
 
-function writeReleaseMetadata({ workRoot, source, releaseProfile, buildIdentity, signerIdentity, installer, backendSigningRecords, signingEvents, buildStartedUtc, applicationSha256, installerApplicationEvidence }) {
+function writeReleaseMetadata({ workRoot, source, releaseProfile, buildIdentity, signerIdentity, installer, backendSigningRecords, signingEvents, buildStartedUtc, applicationSha256, installerApplicationEvidence, inputProvenance }) {
   const artifacts = [artifactRecord("nsis-installer", installer, workRoot)];
   const manifest = {
     schema: "glacial-release-candidate/v1",
@@ -520,6 +528,7 @@ function writeReleaseMetadata({ workRoot, source, releaseProfile, buildIdentity,
     headMatchedOriginMain: true,
     workingTreeCleanBeforeBuild: true,
     workingTreeCleanBeforePublication: true,
+    inputProvenance,
     buildStartedUtc,
     buildCompletedUtc: new Date().toISOString(),
     signing: {
@@ -600,12 +609,71 @@ function dryRun(profile) {
   process.stdout.write(`${sanitizeDiagnosticText(JSON.stringify(buildDryRunPlan(profile, config), null, 2))}\n`);
 }
 
-async function buildSignedRelease(releaseProfile) {
+export function assertPreparedReleaseInputs(preparedInputs) {
+  if (!preparedInputs || preparedInputs.schemaVersion !== 1) throw new Error("Signed release construction requires disposable authenticated inputs.");
+  if (!preparedInputs.source || preparedInputs.source.branch !== "main"
+      || resolve(join(preparedInputs.source.root ?? "", "dist")).toLowerCase() !== REPOSITORY.toLowerCase()
+      || preparedInputs.source.commit !== preparedInputs.source.originMain) {
+    throw new Error("Signed release construction requires the authenticated primary source and its exact detached disposable checkout.");
+  }
+  const expected = {
+    node: join(FRONTEND, "node_modules"),
+    buildPython: join(DESKTOP_BUILD_ROOT, "venv"),
+    runtimePython: join(REPOSITORY, "backend", ".venv"),
+    cargo: join(DESKTOP_BUILD_ROOT, "c"),
+    pnpmTool: join(DESKTOP_BUILD_ROOT, "pnpm-tool", "package"),
+  };
+  for (const [name, root] of Object.entries(expected)) {
+    if (resolve(preparedInputs[name]?.root ?? "").toLowerCase() !== resolve(root).toLowerCase()) throw new Error(`Prepared ${name} root is unexpected.`);
+    assertReleaseInputTree(root, preparedInputs[name].receipt);
+  }
+  if (resolve(preparedInputs.pnpmTool.archive ?? "").toLowerCase() !== join(DESKTOP_BUILD_ROOT, `pnpm-${PINNED_PNPM.version}.tgz`).toLowerCase()) {
+    throw new Error("Prepared pnpm archive path is unexpected.");
+  }
+  const provenance = preparedInputs.provenance;
+  if (!provenance || provenance.schemaVersion !== 1 || provenance.sourceCommit !== preparedInputs.source?.commit
+      || JSON.stringify(provenance.executedInputTrees?.node) !== JSON.stringify(preparedInputs.node.receipt)
+      || JSON.stringify(provenance.executedInputTrees?.buildPython) !== JSON.stringify(preparedInputs.buildPython.receipt)
+      || JSON.stringify(provenance.executedInputTrees?.runtimePython) !== JSON.stringify(preparedInputs.runtimePython.receipt)) {
+    throw new Error("Prepared input provenance does not bind the executed input receipts and source identity.");
+  }
+  if (JSON.stringify(provenance.executedInputTrees?.cargo) !== JSON.stringify(preparedInputs.cargo.receipt)) {
+    throw new Error("Prepared input provenance does not bind the isolated Cargo tree.");
+  }
+  if (JSON.stringify(provenance.executedInputTrees?.pnpmTool) !== JSON.stringify(preparedInputs.pnpmTool.receipt)
+      || provenance.pnpm?.toolIntegrity !== PINNED_PNPM.integrity
+      || resolve(preparedInputs.pnpmTool.cli ?? "").toLowerCase() !== join(expected.pnpmTool, "bin", "pnpm.cjs").toLowerCase()) {
+    throw new Error("Prepared input provenance does not bind the authenticated pnpm tool.");
+  }
+  for (const digest of [provenance.pnpm?.lockSha256, provenance.python?.artifactManifestSha256,
+    provenance.python?.buildLockSha256, provenance.python?.runtimeLockSha256]) validateStructuredDigest(digest, "sha256");
+  if (provenance.pnpm?.frozenLockfile !== true || provenance.pnpm?.verifyStoreIntegrity !== true
+      || provenance.pnpm?.isolatedStore !== true || provenance.cargo?.lockedFetch !== true
+      || provenance.cargo?.isolatedHome !== true) throw new Error("Prepared input provenance is incomplete.");
+  return preparedInputs;
+}
+
+export async function buildSignedRelease(releaseProfile, suppliedInputs = null) {
   if (process.platform !== "win32") throw new Error("The signed Windows release workflow must run on Windows.");
+  const preparedInputs = assertPreparedReleaseInputs(suppliedInputs);
   const gitPath = resolveToolExecutable("git.exe", process.env, { forbiddenRoot: REPOSITORY });
   const rustcPath = resolveToolExecutable("rustc.exe", process.env, { forbiddenRoot: REPOSITORY });
-  const pnpm = resolvePnpmInvocation(process.env, { forbiddenRoot: REPOSITORY });
-  const source = verifyReleaseSource(gitPath);
+  const cargoPath = resolveToolExecutable("cargo.exe", process.env, { forbiddenRoot: REPOSITORY });
+  const tarPath = resolveToolExecutable("tar.exe", process.env, { forbiddenRoot: REPOSITORY });
+  const pnpm = { command: process.execPath, prefixArgs: [preparedInputs.pnpmTool.cli] };
+  const source = verifyReleaseSource(gitPath, preparedInputs.source);
+  verifyPreparedInputsByReconstruction({
+    checkout: REPOSITORY,
+    preparedInputs,
+    tar: tarPath,
+    cargo: cargoPath,
+    environment: minimalEnvironment(process.env, {
+      NPM_CONFIG_GLOBALCONFIG: "NUL",
+      NPM_CONFIG_REGISTRY: "https://registry.npmjs.org/",
+      NPM_CONFIG_USERCONFIG: join(DESKTOP_BUILD_ROOT, "u"),
+      PYTHONDONTWRITEBYTECODE: "1",
+    }),
+  });
   const started = new Date();
   const buildStartedUtc = started.toISOString();
   const releaseId = `Glacial-${source.version}-${source.commit.slice(0, 12)}-${formatTimestamp(started)}`;
@@ -639,24 +707,38 @@ async function buildSignedRelease(releaseProfile) {
       ensureSafeDirectory(DESKTOP_BUILD_ROOT, join(workRoot, "artifacts"));
       writeFileSync(overlayPath, `${JSON.stringify(createTauriSigningOverlay(pnpm.command), null, 2)}\n`, { flag: "wx" });
       await runReleaseSteps([
-        { name: "build-backend", run: () => { state.buildPython = validateDesktopBuildEnvironment(); buildBackend(state.buildPython); } },
+        { name: "build-backend", run: () => {
+          for (const input of [preparedInputs.buildPython, preparedInputs.runtimePython]) assertReleaseInputTree(input.root, input.receipt);
+          state.buildPython = validateDesktopBuildEnvironment();
+          buildBackend(state.buildPython);
+          for (const input of [preparedInputs.buildPython, preparedInputs.runtimePython]) assertReleaseInputTree(input.root, input.receipt);
+        } },
         { name: "sign-backend", run: () => {
           state.backendSigningRecords = signBackendTree(PYINSTALLER_PAYLOAD, config);
           state.backendSigningEventCount = parseAuditLog(config.auditLog, config.auditKey).length;
         } },
-        { name: "stage-backend", run: () => stageSignedBackend(rustcPath, source) },
+        { name: "stage-backend", run: () => { state.backendStageAuthority = stageSignedBackend(rustcPath, source); } },
         { name: "clean-tauri-release-output", run: () => removeSafeTree(REPOSITORY, TAURI_TARGET) },
+        { name: "build-frontend", run: () => {
+          assertReleaseInputTree(preparedInputs.node.root, preparedInputs.node.receipt);
+          runVisible(process.execPath, [join(preparedInputs.node.root, "vite", "bin", "vite.js"), "build"], { cwd: FRONTEND, env: minimalEnvironment(process.env), includeFailureOutput: true });
+          assertReleaseInputTree(preparedInputs.node.root, preparedInputs.node.receipt);
+        } },
         { name: "tauri-build", run: async () => {
+          assertReleaseInputTree(preparedInputs.node.root, preparedInputs.node.receipt);
+          assertReleaseInputTree(preparedInputs.cargo.root, preparedInputs.cargo.receipt);
           const broker = await startSigningBroker(releaseEnvironment);
-          const buildEnvironment = signingBrokerEnvironment(releaseEnvironment, releaseId, broker.port, broker.token, releaseEnvironment.GLACIAL_BUILD_IDENTITY_JSON);
+          const buildEnvironment = signingBrokerEnvironment(releaseEnvironment, releaseId, broker.port, broker.token, releaseEnvironment.GLACIAL_BUILD_IDENTITY_JSON, JSON.stringify(state.backendStageAuthority), preparedInputs.cargo.root);
           await runBrokeredTauriBuild(
-            () => runVisible(pnpm.command, tauriBuildArguments(pnpm, overlayPath), {
+            () => runVisible(process.execPath, tauriBuildArguments(pnpm, overlayPath), {
               cwd: FRONTEND,
               env: buildEnvironment,
               includeFailureOutput: true,
             }),
             broker.stop,
           );
+          assertReleaseInputTree(preparedInputs.node.root, preparedInputs.node.receipt);
+          assertReleaseInputTree(preparedInputs.cargo.root, preparedInputs.cargo.receipt);
         } },
         { name: "verify-tauri-output", run: () => {
           state.installer = findInstaller(source.version);
@@ -679,19 +761,21 @@ async function buildSignedRelease(releaseProfile) {
           copyFileSync(state.installer, state.installerDestination, constants.COPYFILE_EXCL);
           verifySignature(state.installerDestination, config, { expectFirstParty: true, expectedCanonicalSubject: signerIdentity.expectedCanonicalSubject });
         } },
-        { name: "write-metadata", run: () => { state.metadata = writeReleaseMetadata({ workRoot, source, releaseProfile, buildIdentity: state.buildIdentity, signerIdentity, installer: state.installerDestination, backendSigningRecords: state.backendSigningRecords, signingEvents: state.signingEvents, buildStartedUtc, applicationSha256: state.applicationSha256, installerApplicationEvidence: state.installerApplicationEvidence }); } },
-        { name: "publish", run: () => publishCandidate({ workRoot, finalRoot, sourceBefore: source, integrityVerifier: (root) => verifyPublishedHashes(root, join(root, basename(state.metadata.manifestPath)), join(root, basename(state.metadata.sumsPath))), sourceVerifier: () => verifyReleaseSource(gitPath) }) },
+        { name: "write-metadata", run: () => { state.metadata = writeReleaseMetadata({ workRoot, source, releaseProfile, buildIdentity: state.buildIdentity, signerIdentity, installer: state.installerDestination, backendSigningRecords: state.backendSigningRecords, signingEvents: state.signingEvents, buildStartedUtc, applicationSha256: state.applicationSha256, installerApplicationEvidence: state.installerApplicationEvidence, inputProvenance: preparedInputs.provenance }); } },
+        { name: "publish", run: () => publishCandidate({ workRoot, finalRoot, sourceBefore: source, integrityVerifier: (root) => verifyPublishedHashes(root, join(root, basename(state.metadata.manifestPath)), join(root, basename(state.metadata.sumsPath))), sourceVerifier: () => verifyReleaseSource(gitPath, preparedInputs.source) }) },
       ], state);
     },
   });
 
-  process.stdout.write(`${JSON.stringify({ releaseProfile, releaseCandidate: privacySafePath(finalRoot), artifacts: state.metadata.artifacts, manifest: privacySafePath(join(finalRoot, basename(state.metadata.manifestPath))), sha256Sums: privacySafePath(join(finalRoot, basename(state.metadata.sumsPath))) }, null, 2)}\n`);
+  const result = { releaseProfile, releaseCandidate: finalRoot, candidateReceipt: releaseInputTreeReceipt(finalRoot, "release-candidate"), artifacts: state.metadata.artifacts, manifest: join(finalRoot, basename(state.metadata.manifestPath)), sha256Sums: join(finalRoot, basename(state.metadata.sumsPath)) };
+  process.stdout.write(`${JSON.stringify({ ...result, releaseCandidate: privacySafePath(result.releaseCandidate), manifest: privacySafePath(result.manifest), sha256Sums: privacySafePath(result.sha256Sums) }, null, 2)}\n`);
+  return result;
 }
 
 async function main() {
   const options = parseReleaseArguments(process.argv.slice(2));
   if (options.dryRun) { dryRun(options.profile); return; }
-  await buildSignedRelease(options.profile);
+  throw new Error("Direct signed construction is disabled; use the disposable release coordinator with an explicit base Python.");
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(SCRIPT_PATH)) {

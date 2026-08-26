@@ -24,6 +24,19 @@ const GLIB_VERIFIER = join(REPOSITORY, "scripts", "security", "verify-glib-backp
 const BACKEND_STAGE = join(FRONTEND, "src-tauri", "binaries");
 const BACKEND_EXECUTABLE = "glacial-backend-x86_64-pc-windows-msvc.exe";
 
+export function parseBackendStageAuthority(environment = process.env) {
+  const serialized = environment.GLACIAL_BACKEND_STAGE_AUTHORITY_JSON;
+  if (typeof serialized !== "string" || serialized.length < 2 || serialized.length > 16 * 1024 * 1024) {
+    throw new Error("Independent backend stage authority is required for Tauri packaging.");
+  }
+  let receipt;
+  try { receipt = JSON.parse(serialized); } catch { throw new Error("Independent backend stage authority is malformed."); }
+  if (!receipt || receipt.schemaVersion !== 1 || !Array.isArray(receipt.runtime)) {
+    throw new Error("Independent backend stage authority is malformed.");
+  }
+  return receipt;
+}
+
 function gitText(git, args) {
   return String(runCommand(git, args, {
     cwd: REPOSITORY,
@@ -33,7 +46,14 @@ function gitText(git, args) {
 
 export function resolveProductionBuildIdentity(environment = process.env) {
   const injected = parseInjectedBuildIdentity(environment);
-  if (injected) return injected;
+  if (injected) {
+    if (injected.buildProfile !== "internal-evidence"
+        && (!environment.GLACIAL_WINDOWS_SIGN_BROKER_TOKEN || !environment.GLACIAL_WINDOWS_RELEASE_ID
+          || !environment.GLACIAL_BACKEND_STAGE_AUTHORITY_JSON)) {
+      throw new Error("Signed build identity requires the authenticated signed-release coordinator.");
+    }
+    return injected;
+  }
   const git = resolveToolExecutable("git.exe", environment, { forbiddenRoot: REPOSITORY });
   const status = gitText(git, ["status", "--short"]);
   if (status) throw new Error("Internal-evidence construction requires a clean source tree.");
@@ -46,16 +66,26 @@ export function runTauriBuild(args = process.argv.slice(2), environment = proces
     throw new Error("The locked Tauri CLI is unavailable.");
   }
   const identity = resolveProductionBuildIdentity(environment);
+  if (!new Set(["signed-preview", "public-rc"]).has(identity.buildProfile)) {
+    throw new Error("Direct internal Tauri packaging is disabled; only the authenticated signed-release coordinator may package an application.");
+  }
+  if (!/^Glacial-0\.9\.12-[0-9a-f]{12}-\d{8}T\d{6}Z$/.test(String(environment.GLACIAL_WINDOWS_RELEASE_ID ?? ""))
+      || !/^[0-9a-f]{64}$/.test(String(environment.GLACIAL_WINDOWS_SIGN_BROKER_TOKEN ?? ""))
+      || !Number.isInteger(Number(environment.GLACIAL_WINDOWS_SIGN_BROKER_PORT))) {
+    throw new Error("The authenticated signed-release coordinator is unavailable.");
+  }
   const receiptOptions = {
     root: BACKEND_STAGE,
     executableName: BACKEND_EXECUTABLE,
     sourceCommit: identity.sourceCommit,
     productVersion: identity.productVersion,
   };
-  verifyBackendStageReceipt(receiptOptions);
+  const stageAuthority = parseBackendStageAuthority(environment);
+  verifyBackendStageReceipt(receiptOptions, stageAuthority);
   const buildEnvironment = minimalEnvironment(environment, {
     GLACIAL_BUILD_IDENTITY_JSON: serializeBuildIdentity(identity),
-  }, ["GLACIAL_BUILD_IDENTITY_JSON", "GLACIAL_WINDOWS_RELEASE_ID",
+  }, ["GLACIAL_BUILD_IDENTITY_JSON", "GLACIAL_BACKEND_STAGE_AUTHORITY_JSON", "GLACIAL_WINDOWS_RELEASE_ID",
+    "CARGO_HOME", "CARGO_NET_OFFLINE",
     "GLACIAL_WINDOWS_SIGN_BROKER_PORT", "GLACIAL_WINDOWS_SIGN_BROKER_TOKEN"]);
   runCommand(process.execPath, [GLIB_VERIFIER], {
     cwd: REPOSITORY,
@@ -69,7 +99,7 @@ export function runTauriBuild(args = process.argv.slice(2), environment = proces
     timeoutMs: 900_000,
     includeFailureOutput: true,
   });
-  verifyBackendStageReceipt(receiptOptions);
+  verifyBackendStageReceipt(receiptOptions, stageAuthority);
   return result;
 }
 

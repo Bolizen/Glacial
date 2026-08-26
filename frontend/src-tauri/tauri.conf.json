@@ -9,10 +9,7 @@
       "script": "pnpm run dev"
     },
     "devUrl": "http://127.0.0.1:5173",
-    "beforeBuildCommand": {
-      "cwd": "..",
-      "script": "pnpm run build"
-    },
+    "beforeBuildCommand": null,
     "frontendDist": "../dist"
   },
   "app": {
@@ -37,7 +34,7 @@
     }
   },
   "bundle": {
-    "active": true,
+    "active": false,
     "targets": ["nsis"],
     "createUpdaterArtifacts": false,
     "publisher": "Icefields",

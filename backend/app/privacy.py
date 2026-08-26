@@ -695,6 +695,8 @@ def sanitize_scan_value(
         structured_value = _validated_scan_field(value, key)
         if structured_value is not None:
             return structured_value
+        if key.casefold() in _STRUCTURED_VCS_SELECTORS:
+            return None
         if key.casefold() in _DEPENDENCY_LOCATOR_KEYS:
             return sanitize_dependency_locator(value, limit=MAX_DISCLOSURE_TEXT_CHARS)
         if _looks_like_dependency_locator(value):
@@ -771,6 +773,18 @@ def validate_dependency_integrity(value: Any) -> str:
         if len(decoded) != expected_bytes:
             raise ValueError("dependency integrity is invalid.")
     return value
+
+
+def validate_vcs_revision_identity(value: Any, key: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError("VCS revision identity is invalid.")
+    normalized_key = key.casefold()
+    if normalized_key not in _STRUCTURED_VCS_SELECTORS:
+        raise ValueError("VCS revision identity field is invalid.")
+    validated = _validated_scan_field(value, normalized_key)
+    if validated is None:
+        raise ValueError("VCS revision identity is invalid.")
+    return validated
 
 
 def _redact_long_token(match: re.Match[str]) -> str:

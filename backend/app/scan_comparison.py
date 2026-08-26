@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Any, Iterable
 
 from .finding_reviews import finding_fingerprint
-from .privacy import sanitize_scan_value
+from .privacy import sanitize_scan_value, validate_dependency_integrity, validate_vcs_revision_identity
 
 
 MAX_COMPARISON_EXAMPLES = 10
@@ -454,6 +454,12 @@ def _dependency_inventory(value: Any) -> dict[str, Any]:
             return {"state": "indeterminate", "status": status, "entries": {}}
         if entry.get("sourceType") == "vcs" and not _vcs_revision_identity_complete(entry):
             return {"state": "indeterminate", "status": status, "entries": {}}
+        integrity = _bounded_text(entry.get("integrity"), 500)
+        if integrity:
+            try:
+                validate_dependency_integrity(integrity)
+            except ValueError:
+                return {"state": "indeterminate", "status": status, "entries": {}}
         key = f"{ecosystem}|{name}|{group}|{int(direct)}"
         if key in normalized:
             return {"state": "indeterminate", "status": status, "entries": {}}
@@ -496,7 +502,19 @@ def _vcs_revision_identity_complete(entry: dict[str, Any]) -> bool:
     requested = _bounded_text(entry.get("vcsRequestedRevision"), 300)
     locked = _bounded_text(entry.get("vcsLockedRevision"), 300)
     resolved = _bounded_text(entry.get("vcsResolvedRevision"), 300)
-    return bool(requested) if entry.get("direct") is True else bool(locked or resolved)
+    try:
+        if entry.get("direct") is True:
+            validate_vcs_revision_identity(requested, "vcsRequestedRevision")
+            return True
+        if locked:
+            validate_vcs_revision_identity(locked, "vcsLockedRevision")
+            return True
+        if resolved:
+            validate_vcs_revision_identity(resolved, "vcsResolvedRevision")
+            return True
+    except ValueError:
+        return False
+    return False
 
 
 def _dependency_example(entry: dict[str, Any]) -> dict[str, Any]:

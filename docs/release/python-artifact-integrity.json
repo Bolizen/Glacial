@@ -15,6 +15,13 @@
     "bits": 64,
     "machine": "AMD64"
   },
+  "baseDistribution": {
+    "filename": "python-3.13.13-embed-amd64.zip",
+    "url": "https://www.python.org/ftp/python/3.13.13/python-3.13.13-embed-amd64.zip",
+    "bytes": 10950201,
+    "sha256": "8766a8775746235e23cf5aee5027ab1060bb981d93110577adcf3508aa0cbd55",
+    "authority": "Python.org release SHA-256 and Sigstore publication"
+  },
   "scopes": {
     "backend-runtime": {
       "lockPath": "backend/requirements.lock.txt",

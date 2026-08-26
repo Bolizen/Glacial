@@ -16,6 +16,7 @@ const repository = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 test("committed Python provenance exactly covers both locked environments", () => {
   const manifest = loadPythonArtifactManifest(repository);
   assert.equal(manifest.runtimeContract.version, "3.13.13");
+  assert.equal(manifest.baseDistribution.sha256, "8766a8775746235e23cf5aee5027ab1060bb981d93110577adcf3508aa0cbd55");
   assert.equal(manifest.runtimeContract.bits, 64);
   assert.equal(manifest.scopes["backend-runtime"].artifacts.length, 14);
   assert.equal(manifest.scopes["desktop-build"].artifacts.length, 7);

@@ -45,15 +45,16 @@ function options(root, sourceCommit = SOURCE_COMMIT) {
 
 test("backend stage receipt binds the complete payload to source identity", () => {
   withStage((root) => {
-    writeBackendStageReceipt(options(root));
-    const receipt = verifyBackendStageReceipt(options(root));
+    const authority = writeBackendStageReceipt(options(root));
+    assert.throws(() => verifyBackendStageReceipt(options(root)), /independent stage authority is missing/);
+    const receipt = verifyBackendStageReceipt(options(root), authority);
     assert.equal(receipt.sourceCommit, SOURCE_COMMIT);
     assert.equal(receipt.executable.path, "backend-executable");
     assert.deepEqual(receipt.runtime.map((item) => item.path), ["_internal/python313.dll"]);
 
     writeFileSync(join(root, "_internal", "python313.dll"), "modified runtime");
     assert.throws(
-      () => verifyBackendStageReceipt(options(root)),
+      () => verifyBackendStageReceipt(options(root), authority),
       /does not match the current source identity and complete payload/,
     );
   });
@@ -65,15 +66,28 @@ test("backend stage receipt rejects stale identity and extra files", () => {
       () => verifyBackendStageReceipt(options(root)),
       /stage receipt is missing/,
     );
-    writeBackendStageReceipt(options(root));
+    const authority = writeBackendStageReceipt(options(root));
     assert.throws(
-      () => verifyBackendStageReceipt(options(root, "b".repeat(40))),
+      () => verifyBackendStageReceipt(options(root, "b".repeat(40)), authority),
       /does not match the current source identity and complete payload/,
     );
     writeFileSync(join(root, "unexpected.txt"), "unexpected");
     assert.throws(
-      () => verifyBackendStageReceipt(options(root)),
+      () => verifyBackendStageReceipt(options(root), authority),
       /missing or unexpected top-level entry/,
+    );
+  });
+});
+
+test("copied or recomputed colocated receipts cannot replace external stage authority", () => {
+  withStage((root) => {
+    const authority = writeBackendStageReceipt(options(root));
+    writeFileSync(join(root, "_internal", "python313.dll"), "attacker-controlled runtime");
+    rmSync(join(root, ".glacial-backend-stage.json"));
+    writeBackendStageReceipt(options(root));
+    assert.throws(
+      () => verifyBackendStageReceipt(options(root), authority),
+      /independently authenticated source payload/,
     );
   });
 });

@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  PINNED_PNPM,
   compareInstalledGraph,
   parseCleanEnvironmentArguments,
   removeDisposableTree,
@@ -12,10 +13,24 @@ import {
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
+test("signed construction pins pnpm bytes and independently reconstructs prepared inputs", () => {
+  assert.deepEqual(PINNED_PNPM, {
+    version: "11.16.0",
+    url: "https://registry.npmjs.org/pnpm/-/pnpm-11.16.0.tgz",
+    integrity: "sha512-t2fpqY/IeuwPQtrvzQ6ElBws20XXPE4eaIYPsr39vgMqtZIQVHnl4Fwjf3QMil/9u7UjhXl93CKWdFobu4g+jQ==",
+    shasum: "fc0b55d90c04ed8a7c3e37659cc72c188028f6f1",
+  });
+  const builder = readFileSync(join(repository, "scripts", "desktop", "Build-SignedWindowsRelease.mjs"), "utf8");
+  assert.match(builder, /verifyPreparedInputsByReconstruction\(\{/);
+  assert.match(builder, /const source = verifyReleaseSource\(gitPath, preparedInputs\.source\);[\s\S]*verifyPreparedInputsByReconstruction\(\{[\s\S]*const started = new Date\(\);/);
+});
+
 test("clean gate requires one explicit Python executable", () => {
   assert.throws(() => parseCleanEnvironmentArguments([]), /--python is required/);
   assert.throws(() => parseCleanEnvironmentArguments(["--python", "one", "--python", "two"]), /only once/);
   assert.match(parseCleanEnvironmentArguments(["--python", "python.exe"]).python, /python\.exe$/i);
+  assert.equal(parseCleanEnvironmentArguments(["--profile", "signed-preview", "--python", "python.exe"]).profile, "signed-preview");
+  assert.throws(() => parseCleanEnvironmentArguments(["--profile", "development", "--python", "python.exe"]), /signed-preview or public-rc/);
 });
 
 test("build graph validation rejects unexpected and mislabeled installed state", () => {

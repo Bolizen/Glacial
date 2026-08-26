@@ -15,7 +15,7 @@ except ImportError:  # pragma: no cover - supported runtimes provide tomllib
     tomllib = None
 
 from .safety import has_multiple_hardlinks, is_reparse_point_or_symlink
-from .privacy import sanitize_dependency_locator
+from .privacy import sanitize_dependency_locator, validate_dependency_integrity
 
 
 SCHEMA_VERSION = 1
@@ -2082,8 +2082,9 @@ def _integrity_token_status(value: str) -> str:
     algorithm = parts[0].lower()
     if algorithm not in SUPPORTED_INTEGRITY_ALGORITHMS:
         return "unsupported algorithm"
-    payload = parts[1].strip()
-    if not re.fullmatch(r"[A-Za-z0-9+/=_-]+", payload):
+    try:
+        validate_dependency_integrity(value)
+    except ValueError:
         return "malformed"
     return "valid"
 

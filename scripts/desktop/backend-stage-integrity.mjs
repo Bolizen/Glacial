@@ -124,7 +124,7 @@ export function writeBackendStageReceipt(options, expectedReceipt = null) {
   return receipt;
 }
 
-export function verifyBackendStageReceipt(options) {
+export function verifyBackendStageReceipt(options, independentlyAuthenticatedReceipt = null) {
   const path = join(options.root, BACKEND_STAGE_RECEIPT);
   if (!existsSync(path)) fail("stage receipt is missing.");
   const metadata = lstatSync(path);
@@ -138,6 +138,12 @@ export function verifyBackendStageReceipt(options) {
   const actual = backendStageReceipt({ ...options, receiptExpected: true });
   if (JSON.stringify(stored) !== JSON.stringify(actual)) {
     fail("stage receipt does not match the current source identity and complete payload.");
+  }
+  if (independentlyAuthenticatedReceipt === null) {
+    fail("independent stage authority is missing.");
+  }
+  if (JSON.stringify(independentlyAuthenticatedReceipt) !== JSON.stringify(actual)) {
+    fail("stage differs from the independently authenticated source payload.");
   }
   return actual;
 }

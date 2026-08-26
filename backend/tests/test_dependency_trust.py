@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import sqlite3
 import tempfile
@@ -12,6 +13,12 @@ from app import database, dependency_trust, main, scanner
 from app.finding_reviews import finding_fingerprint
 from app.scanner import scan_project
 from app.schemas import ProjectPathRequest
+
+
+SRI_A = "sha512-" + base64.b64encode(b"A" * 64).decode("ascii")
+SRI_B = "sha512-" + base64.b64encode(b"B" * 64).decode("ascii")
+SRI_C = "sha512-" + base64.b64encode(b"C" * 64).decode("ascii")
+SRI_D = "sha512-" + base64.b64encode(b"D" * 64).decode("ascii")
 
 
 class DependencyTrustScannerTests(unittest.TestCase):
@@ -40,12 +47,12 @@ class DependencyTrustScannerTests(unittest.TestCase):
                     "dependencies": {"alpha": "^1.0.0", "alias": "npm:alpha@^1", "local": "file:vendor/local", "workspace": "workspace:*", "linked": "link:vendor/linked"},
                     "devDependencies": {"tool": "https://downloads.example/tool.tgz?token=secret"},
                 },
-                "node_modules/alpha": {"version": "1.2.0", "resolved": "https://registry.npmjs.org/alpha/-/alpha-1.2.0.tgz", "integrity": "sha512-YWJj"},
-                "node_modules/alias": {"name": "alias", "version": "1.2.0", "resolved": "https://registry.npmjs.org/alpha/-/alpha-1.2.0.tgz", "integrity": "sha512-YWJj"},
+                "node_modules/alpha": {"version": "1.2.0", "resolved": "https://registry.npmjs.org/alpha/-/alpha-1.2.0.tgz", "integrity": SRI_A},
+                "node_modules/alias": {"name": "alias", "version": "1.2.0", "resolved": "https://registry.npmjs.org/alpha/-/alpha-1.2.0.tgz", "integrity": SRI_A},
                 "node_modules/local": {"version": "file:vendor/local", "link": True},
                 "node_modules/workspace": {"version": "workspace:*", "link": True},
                 "node_modules/linked": {"version": "link:vendor/linked", "link": True},
-                "node_modules/tool": {"version": "2.0.0", "resolved": "https://downloads.example/tool.tgz?token=secret", "integrity": "sha512-YWJj", "hasInstallScript": True, "dev": True},
+                "node_modules/tool": {"version": "2.0.0", "resolved": "https://downloads.example/tool.tgz?token=secret", "integrity": SRI_A, "hasInstallScript": True, "dev": True},
             },
         })
 
@@ -74,8 +81,8 @@ class DependencyTrustScannerTests(unittest.TestCase):
                 "alpha": {
                     "version": "1.0.0",
                     "resolved": "https://registry.npmjs.org/alpha/-/alpha-1.0.0.tgz",
-                    "integrity": "sha512-YWJj",
-                    "dependencies": {"alpha": {"version": "2.0.0", "resolved": "https://registry.npmjs.org/alpha/-/alpha-2.0.0.tgz", "integrity": "sha512-ZGVm"}},
+                    "integrity": SRI_A,
+                    "dependencies": {"alpha": {"version": "2.0.0", "resolved": "https://registry.npmjs.org/alpha/-/alpha-2.0.0.tgz", "integrity": SRI_B}},
                 }
             },
         })
@@ -91,7 +98,7 @@ class DependencyTrustScannerTests(unittest.TestCase):
             "lockfileVersion": 2,
             "packages": {
                 "": {"dependencies": {"alpha": "^1"}},
-                "node_modules/alpha": {"version": "1.1.0", "resolved": "https://registry.npmjs.org/alpha/-/alpha-1.1.0.tgz", "integrity": "sha512-YWJj"},
+                "node_modules/alpha": {"version": "1.1.0", "resolved": "https://registry.npmjs.org/alpha/-/alpha-1.1.0.tgz", "integrity": SRI_A},
             },
         })
         second = scan_project(self.project)["dependencyTrust"]
@@ -111,7 +118,7 @@ class DependencyTrustScannerTests(unittest.TestCase):
                 "node_modules/registry-package": {
                     "version": "1.2.3",
                     "resolved": "https://registry.npmjs.org/registry-package/-/registry-package-1.2.3.tgz",
-                    "integrity": "sha512-YWJj",
+                    "integrity": SRI_A,
                     "hasInstallScript": True,
                 },
             },
@@ -144,9 +151,9 @@ class DependencyTrustScannerTests(unittest.TestCase):
             "lockfileVersion": 3,
             "packages": {
                 "": {"dependencies": {"alias-name": "npm:actual-name@1.0.0", "private-vcs": "developer@github.com:org/private.git?token=hidden#main", "@scope/tool": "1.0.0"}},
-                "node_modules/alias-name": {"name": "actual-name", "version": "1.0.0", "resolved": "https://registry.npmjs.org/actual-name/-/actual-name-1.0.0.tgz", "integrity": "sha512-AAAA"},
+                "node_modules/alias-name": {"name": "actual-name", "version": "1.0.0", "resolved": "https://registry.npmjs.org/actual-name/-/actual-name-1.0.0.tgz", "integrity": SRI_A},
                 "node_modules/private-vcs": {"version": "1.0.0", "resolved": "git+https://github.com/org/private.git"},
-                "node_modules/@scope/tool": {"version": "1.0.0", "resolved": "https://registry.npmjs.org/@scope/tool/-/tool-1.0.0.tgz", "integrity": "sha512-BBBB"},
+                "node_modules/@scope/tool": {"version": "1.0.0", "resolved": "https://registry.npmjs.org/@scope/tool/-/tool-1.0.0.tgz", "integrity": SRI_B},
             },
         })
 
@@ -193,9 +200,9 @@ class DependencyTrustScannerTests(unittest.TestCase):
             "lockfileVersion": 3,
             "packages": {
                 "": {"dependencies": {"alpha": "1.0.0", "extra": "1.0.0"}},
-                "node_modules/alpha": {"version": "1.0.0", "resolved": "https://registry.npmjs.org/alpha/-/alpha-1.0.0.tgz", "integrity": "sha512-AAAA"},
+                "node_modules/alpha": {"version": "1.0.0", "resolved": "https://registry.npmjs.org/alpha/-/alpha-1.0.0.tgz", "integrity": SRI_A},
                 "node_modules/extra": {"version": "1.0.0", "resolved": "https://registry.npmjs.org/extra/-/extra-1.0.0.tgz"},
-                "node_modules/transitive": {"version": "1.0.0", "resolved": "https://registry.npmjs.org/transitive/-/transitive-1.0.0.tgz", "integrity": "sha512-CCCC"},
+                "node_modules/transitive": {"version": "1.0.0", "resolved": "https://registry.npmjs.org/transitive/-/transitive-1.0.0.tgz", "integrity": SRI_C},
             },
         })
         first = scan_project(self.project)
@@ -205,20 +212,20 @@ class DependencyTrustScannerTests(unittest.TestCase):
         self.assertIn("dependency-integrity-missing", first_types)
 
         lock = json.loads((self.project / "package-lock.json").read_text(encoding="utf-8"))
-        lock["packages"]["node_modules/alpha"]["integrity"] = "sha512-BBBB"
+        lock["packages"]["node_modules/alpha"]["integrity"] = SRI_B
         lock["packages"]["node_modules/transitive"]["version"] = "2.0.0"
         self.write_json("package-lock.json", lock)
         second = scan_project(self.project, previous_dependency_trust=first["dependencyTrust"])
         changed = next(finding for finding in second["findings"] if finding["type"] == "dependency-integrity-changed")
         self.assertEqual(changed["severity"], "high")
         self.assertEqual(changed["resolvedVersion"], "1.0.0")
-        self.assertEqual(changed["metadata"]["integrity"], "sha512-BBBB")
+        self.assertEqual(changed["metadata"]["integrity"], SRI_B)
         self.assertEqual(second["dependencyTrust"]["comparison"]["baselineStatus"], "available")
         change_types = {change["changeType"] for change in second["dependencyTrust"]["comparison"]["changes"]}
         self.assertIn("locked-added", change_types)
         self.assertIn("locked-removed", change_types)
 
-        lock["packages"]["node_modules/alpha"]["integrity"] = "sha512-DDDD"
+        lock["packages"]["node_modules/alpha"]["integrity"] = SRI_D
         self.write_json("package-lock.json", lock)
         third = scan_project(self.project, previous_dependency_trust=second["dependencyTrust"])
         next_changed = next(finding for finding in third["findings"] if finding["type"] == "dependency-integrity-changed")
@@ -336,13 +343,29 @@ class DependencyTrustScannerTests(unittest.TestCase):
         self.assertFalse(any(finding["type"] == "dependency-integrity-changed" for finding in second["findings"]))
         self.assertTrue(any(finding["type"] == "dependency-integrity-malformed" for finding in second["findings"]))
 
+    def test_truncated_sha512_integrities_fail_closed_while_full_sri_remains_valid(self) -> None:
+        self.assertEqual(dependency_trust._integrity_status("sha512-YQ=="), "malformed")
+        self.assertEqual(dependency_trust._integrity_status("sha512-AAAA"), "malformed")
+        self.assertEqual(dependency_trust._integrity_status(SRI_A), "valid")
+
+        self.write_json("package.json", {"dependencies": {"alpha": "1.0.0"}})
+        self.write_json("package-lock.json", {
+            "lockfileVersion": 3,
+            "packages": {
+                "": {"dependencies": {"alpha": "1.0.0"}},
+                "node_modules/alpha": {"version": "1.0.0", "integrity": "sha512-AAAA"},
+            },
+        })
+        result = scan_project(self.project)
+        self.assertTrue(any(finding["type"] == "dependency-integrity-malformed" for finding in result["findings"]))
+
     def test_multiple_node_contexts_do_not_cross_merge_lock_entries(self) -> None:
         self.write_json("package.json", {"dependencies": {"alpha": "1.0.0"}})
-        self.write_json("package-lock.json", {"lockfileVersion": 3, "packages": {"": {"dependencies": {"alpha": "1.0.0"}}, "node_modules/alpha": {"version": "1.0.0", "integrity": "sha512-AAAA"}}})
+        self.write_json("package-lock.json", {"lockfileVersion": 3, "packages": {"": {"dependencies": {"alpha": "1.0.0"}}, "node_modules/alpha": {"version": "1.0.0", "integrity": SRI_A}}})
         nested = self.project / "nested"
         nested.mkdir()
         (nested / "package.json").write_text(json.dumps({"dependencies": {"alpha": "2.0.0"}}), encoding="utf-8")
-        (nested / "package-lock.json").write_text(json.dumps({"lockfileVersion": 3, "packages": {"": {"dependencies": {"alpha": "2.0.0"}}, "node_modules/alpha": {"version": "2.0.0", "integrity": "sha512-BBBB"}}}), encoding="utf-8")
+        (nested / "package-lock.json").write_text(json.dumps({"lockfileVersion": 3, "packages": {"": {"dependencies": {"alpha": "2.0.0"}}, "node_modules/alpha": {"version": "2.0.0", "integrity": SRI_B}}}), encoding="utf-8")
 
         trust = scan_project(self.project)["dependencyTrust"]
 
@@ -726,7 +749,7 @@ class DependencyTrustPersistenceTests(unittest.TestCase):
                 "node_modules/registry-package": {
                     "version": "1.2.3",
                     "resolved": "https://registry.npmjs.org/registry-package/-/registry-package-1.2.3.tgz",
-                    "integrity": "sha512-YWJj",
+                    "integrity": SRI_A,
                     "hasInstallScript": True,
                 },
             },

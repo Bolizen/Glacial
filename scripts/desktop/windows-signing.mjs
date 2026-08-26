@@ -596,7 +596,7 @@ export function buildCommandSignArgs(config, file) {
 }
 
 export function createTauriSigningOverlay(nodePath = process.execPath, scriptPath = SIGNING_SCRIPT_PATH) {
-  return { bundle: { windows: { digestAlgorithm: "sha256", signCommand: { cmd: resolve(nodePath), args: [resolve(scriptPath), "sign-request", "%1"] } } } };
+  return { bundle: { active: true, targets: ["nsis"], windows: { digestAlgorithm: "sha256", signCommand: { cmd: resolve(nodePath), args: [resolve(scriptPath), "sign-request", "%1"] } } } };
 }
 
 export function isPortableExecutable(buffer) {
@@ -1004,12 +1004,15 @@ export function signingEnvironment(source, releaseId, auditKey) {
   return minimalEnvironment(source, { GLACIAL_WINDOWS_RELEASE_ID: releaseId, GLACIAL_WINDOWS_SIGN_AUDIT_KEY: validateSigningAuditKey(auditKey) }, [...INTERNAL_ENVIRONMENT_NAMES, ...providerNames]);
 }
 
-export function signingBrokerEnvironment(source, releaseId, port, token, buildIdentity) {
+export function signingBrokerEnvironment(source, releaseId, port, token, buildIdentity, backendStageAuthority, cargoHome) {
   return minimalEnvironment(source, {
     GLACIAL_WINDOWS_RELEASE_ID: releaseId,
     GLACIAL_WINDOWS_SIGN_BROKER_PORT: port,
     GLACIAL_WINDOWS_SIGN_BROKER_TOKEN: token,
     GLACIAL_BUILD_IDENTITY_JSON: buildIdentity,
+    GLACIAL_BACKEND_STAGE_AUTHORITY_JSON: backendStageAuthority,
+    CARGO_HOME: cargoHome,
+    CARGO_NET_OFFLINE: "true",
   }, ["GLACIAL_WINDOWS_RELEASE_ID"]);
 }
 

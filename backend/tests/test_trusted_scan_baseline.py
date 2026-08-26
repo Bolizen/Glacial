@@ -63,6 +63,7 @@ class TrustedScanBaselineTests(unittest.TestCase):
         metadata_reliable: bool = True,
         dependency_status: str = "complete",
         reviewed_files_truncated: bool = False,
+        dependency_entry: dict[str, object] | None = None,
     ) -> None:
         issue_count = 0 if complete else 1
         metadata = {
@@ -88,7 +89,7 @@ class TrustedScanBaselineTests(unittest.TestCase):
             "dependencyTrust": {
                 "schemaVersion": 1,
                 "status": dependency_status,
-                "entries": [{
+                "entries": [dependency_entry or {
                     "ecosystem": "node",
                     "name": "alpha",
                     "group": "runtime",
@@ -154,6 +155,43 @@ class TrustedScanBaselineTests(unittest.TestCase):
         reduced = main.scan_history(str(self.project))["scans"][0]
         self.assertTrue(reduced["reviewedFilesTruncated"])
         self.assertFalse(reduced["scanMetadataReliable"])
+
+    def test_legacy_raw_vcs_selector_cannot_regain_trusted_scan_eligibility(self) -> None:
+        self.add_scan(1, dependency_entry={
+            "ecosystem": "node",
+            "name": "private-vcs",
+            "group": "runtime",
+            "direct": True,
+            "sourceType": "vcs",
+            "vcsRequestedRevision": "legacy-raw-branch",
+        })
+        with self.assertRaises(HTTPException) as error:
+            self.set_baseline(1)
+        self.assertEqual(error.exception.status_code, 409)
+
+        self.add_scan(2, dependency_entry={
+            "ecosystem": "node",
+            "name": "private-vcs",
+            "group": "runtime",
+            "direct": True,
+            "sourceType": "vcs",
+            "vcsRequestedRevision": "ref:sha256:" + "a" * 64,
+        })
+        self.assertEqual(self.set_baseline(2)["status"], "valid")
+
+    def test_truncated_integrity_cannot_regain_trusted_scan_eligibility(self) -> None:
+        for scan_id, integrity in ((1, "sha512-YQ=="), (2, "sha512-AAAA")):
+            self.add_scan(scan_id, dependency_entry={
+                "ecosystem": "node",
+                "name": "alpha",
+                "group": "runtime",
+                "direct": True,
+                "lockedVersion": "1.0.0",
+                "integrity": integrity,
+            })
+            with self.subTest(integrity=integrity), self.assertRaises(HTTPException) as error:
+                self.set_baseline(scan_id)
+            self.assertEqual(error.exception.status_code, 409)
 
     def test_malformed_legacy_findings_degrade_without_blocking_recovery(self) -> None:
         self.add_scan(1)

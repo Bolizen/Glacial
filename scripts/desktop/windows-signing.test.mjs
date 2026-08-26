@@ -48,6 +48,7 @@ import {
 } from "./windows-signing.mjs";
 import {
   assertReleaseProfileTrust,
+  assertPreparedReleaseInputs,
   assertExpectedTauriRestoration,
   assertExactPackageSet,
   assertInterpreterIdentity,
@@ -72,6 +73,7 @@ import {
   verifyPublishedHashes,
 } from "./Build-SignedWindowsRelease.mjs";
 import { developmentPlan, runDevelopmentCommand } from "./desktop-development.mjs";
+import { parseBackendStageAuthority } from "./tauri-build.mjs";
 
 const TEST_PATH = fileURLToPath(import.meta.url);
 const REPOSITORY = resolve(dirname(TEST_PATH), "..", "..");
@@ -265,9 +267,11 @@ test("command provider keeps the file as one direct argument and forwards only n
   const config = loadSigningConfig(releaseEnvironment, { dryRun: true });
   assert.deepEqual(buildCommandSignArgs(config, "C:\\a b;&()\\file.exe"), ["sign", "--file", "C:\\a b;&()\\file.exe"]);
   assert.equal(config.providerEnvironment.AZURE_CLIENT_ID, "allowed-value");
-  const buildEnvironment = signingBrokerEnvironment(releaseEnvironment, "Glacial-0.9.12-ffffffffffff-20260719T120000Z", 32123, "a".repeat(64), "identity");
+  const stageAuthority = JSON.stringify({ schemaVersion: 1, runtime: [] });
+  const buildEnvironment = signingBrokerEnvironment(releaseEnvironment, "Glacial-0.9.12-ffffffffffff-20260719T120000Z", 32123, "a".repeat(64), "identity", stageAuthority);
   assert.equal(buildEnvironment.GLACIAL_WINDOWS_SIGN_BROKER_PORT, "32123");
   assert.equal(buildEnvironment.GLACIAL_WINDOWS_SIGN_BROKER_TOKEN, "a".repeat(64));
+  assert.equal(buildEnvironment.GLACIAL_BACKEND_STAGE_AUTHORITY_JSON, stageAuthority);
   assert.equal("AZURE_CLIENT_ID" in buildEnvironment, false);
   assert.equal("GLACIAL_WINDOWS_SIGN_COMMAND" in buildEnvironment, false);
   assert.equal("GLACIAL_WINDOWS_SIGN_COMMAND_ENV" in buildEnvironment, false);
@@ -276,6 +280,15 @@ test("command provider keeps the file as one direct argument and forwards only n
     '["sign","https://provider.example/sign?credential=value","{file}"]',
     '["sign","line\\nbreak","{file}"]',
   ]) assert.throws(() => loadSigningConfig(commandEnvironment({ GLACIAL_WINDOWS_SIGN_COMMAND_ARGS: commandArgs }), { dryRun: true }));
+});
+
+test("Tauri packaging requires backend authority supplied outside the stage", () => {
+  assert.throws(() => parseBackendStageAuthority({}), /authority is required/);
+  assert.throws(() => parseBackendStageAuthority({ GLACIAL_BACKEND_STAGE_AUTHORITY_JSON: "{}" }), /malformed/);
+  assert.deepEqual(
+    parseBackendStageAuthority({ GLACIAL_BACKEND_STAGE_AUTHORITY_JSON: '{"schemaVersion":1,"runtime":[]}' }),
+    { schemaVersion: 1, runtime: [] },
+  );
 });
 
 test("base child environment excludes unrelated credential variables", () => {
@@ -743,6 +756,17 @@ test("release profile arguments accept only one exact explicit supported profile
   assert.throws(() => parseReleaseArguments(["--profile", "public-rc", "--bypass-trust"]), /Unsupported release argument/);
 });
 
+test("signed construction rejects self-attested primary persistent inputs before use", () => {
+  assert.throws(() => assertPreparedReleaseInputs({ schemaVersion: 1 }), /authenticated primary source/);
+  assert.throws(
+    () => assertPreparedReleaseInputs({
+      schemaVersion: 1,
+      source: { root: REPOSITORY, branch: "main", commit: "a".repeat(40), originMain: "a".repeat(40) },
+    }),
+    /exact detached disposable checkout/,
+  );
+});
+
 test("release profiles accept only their established verified signer trust classifications", () => {
   const selfSigned = { trustClassification: "self-signed" };
   const publiclyTrusted = { trustClassification: "publicly-trusted" };
@@ -871,12 +895,17 @@ test("release package commands and established version sources identify 0.9.12",
     legacySigned: packageJson.scripts["release:windows:signed"],
   }, {
     signedPreviewPlan: "node ../scripts/desktop/Build-SignedWindowsRelease.mjs --profile signed-preview --dry-run",
-    signedPreview: "node ../scripts/desktop/Build-SignedWindowsRelease.mjs --profile signed-preview",
+    signedPreview: "node ../scripts/release/validate-clean-environment.mjs --profile signed-preview",
     publicRcPlan: "node ../scripts/desktop/Build-SignedWindowsRelease.mjs --profile public-rc --dry-run",
-    publicRc: "node ../scripts/desktop/Build-SignedWindowsRelease.mjs --profile public-rc",
+    publicRc: "node ../scripts/release/validate-clean-environment.mjs --profile public-rc",
     legacyPlan: "node ../scripts/desktop/Build-SignedWindowsRelease.mjs --profile signed-preview --dry-run",
-    legacySigned: "node ../scripts/desktop/Build-SignedWindowsRelease.mjs --profile signed-preview",
+    legacySigned: "node ../scripts/release/validate-clean-environment.mjs --profile signed-preview",
   });
+  assert.equal(packageJson.scripts.tauri, undefined);
+  assert.equal(packageJson.scripts["tauri:build"], undefined);
+  assert.equal(tauri.bundle.active, false);
+  assert.equal(createTauriSigningOverlay().bundle.active, true);
+  assert.match(releaseTool, /Direct signed construction is disabled/);
   assert.deepEqual(
     [packageJson.version, packageJson.packageManager, tauri.version],
     ["0.9.12", "pnpm@11.16.0", "0.9.12"],
@@ -1016,7 +1045,7 @@ test("brokered Tauri build passes config without a literal delimiter and preserv
   assert.match(releaseTool, /includeFailureOutput: true/);
   assert.deepEqual(
     tauriBuildArguments({ prefixArgs: ["C:\\Tools\\pnpm.cjs"] }, "C:\\release\\overlay.json"),
-    ["C:\\Tools\\pnpm.cjs", "run", "tauri:build", "--config", "C:\\release\\overlay.json"],
+    [join(REPOSITORY, "scripts", "desktop", "tauri-build.mjs"), "--config", "C:\\release\\overlay.json"],
   );
   await assert.rejects(
     runBrokeredTauriBuild(

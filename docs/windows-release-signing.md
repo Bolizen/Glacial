@@ -23,14 +23,14 @@ The signed-preview profile is for internal development, local testing, and relea
 
 ```powershell
 pnpm --dir frontend run release:windows:signed-preview:plan
-pnpm --dir frontend run release:windows:signed-preview
+pnpm --dir frontend run release:windows:signed-preview -- --python C:\Path\To\Python313\python.exe
 ```
 
 The legacy commands remain exact signed-preview aliases and never select the public-release profile:
 
 ```powershell
 pnpm --dir frontend run release:windows:plan
-pnpm --dir frontend run release:windows:signed
+pnpm --dir frontend run release:windows:signed -- --python C:\Path\To\Python313\python.exe
 ```
 
 ### Public release candidate
@@ -39,10 +39,10 @@ The public-rc profile is for a candidate that may be publicly distributed. It fa
 
 ```powershell
 pnpm --dir frontend run release:windows:public-rc:plan
-pnpm --dir frontend run release:windows:public-rc
+pnpm --dir frontend run release:windows:public-rc -- --python C:\Path\To\Python313\python.exe
 ```
 
-Both profiles retain the established RFC 3161 timestamp, exact signer identity, signature, installer-payload, restoration, hash, and atomic-publication checks. Each profile produces only the installed NSIS artifact and its release metadata. Glacial does not currently claim to possess or configure a publicly trusted code-signing certificate.
+Both profiles retain the established RFC 3161 timestamp, exact signer identity, signature, installer-payload, restoration, hash, and atomic-publication checks. Actual signed construction runs in a detached checkout and consumes only a frozen fresh pnpm installation, an isolated locked Cargo home, and build/runtime Python trees reconstructed from the repository-pinned Python.org embeddable archive plus SHA-256-verified wheels. The operator-selected Python is bootstrap transport only and is not the interpreter executed by PyInstaller or packaged into the backend. Persistent `frontend/node_modules`, Cargo state, `backend/.venv`, and `.desktop-build/venv` in the primary checkout are not release inputs. Each profile produces only the installed NSIS artifact and its release metadata. Glacial does not currently claim to possess or configure a publicly trusted code-signing certificate.
 
 ### Signer preflight only
 
@@ -234,14 +234,14 @@ pnpm --dir frontend run release:windows:signed-preview:plan
 After separate certificate provisioning, a clean `main`, and `HEAD == origin/main`, produce an internal signed preview with:
 
 ```powershell
-pnpm --dir frontend run release:windows:signed-preview
+pnpm --dir frontend run release:windows:signed-preview -- --python C:\Path\To\Python313\python.exe
 ```
 
 Plan or produce a public release candidate only after configuring a publicly trusted signer:
 
 ```powershell
 pnpm --dir frontend run release:windows:public-rc:plan
-pnpm --dir frontend run release:windows:public-rc
+pnpm --dir frontend run release:windows:public-rc -- --python C:\Path\To\Python313\python.exe
 ```
 
 The coordinator performs this order:
@@ -249,13 +249,13 @@ The coordinator performs this order:
 1. Verify repository identity, branch, clean status, `HEAD == origin/main`, and v0.9.12 metadata.
 2. Select one exact CurrentUser certificate or external signer and sign/verify a disposable timestamped PE probe.
 3. Enforce the selected profile immediately from the verified `trustClassification`: signed preview accepts `self-signed` or `publicly-trusted`; public RC accepts exactly `publicly-trusted`.
-4. Verify build/runtime environments, build the backend once, preserve valid vendor bytes, and sign every unsigned PE.
-5. Stage the signed backend and let Tauri request Glacial.exe, supported NSIS components, uninstaller, and final installer signing; the broker rejects reparse/multi-link objects and binds each request to an immutable role/path/digest/object/release plan before provider delegation.
-6. Verify the final installer, captured application, authenticated object-and-byte-bound signing audit events, retained object identities, restored working-file state, and generated NSIS main-binary source.
-7. Copy only the verified NSIS installer into release-candidate state.
-8. Generate final manifest and hashes only after all binary mutation is complete, recording the selected profile, required signer trust, and verified signer trust classification.
-9. Recheck branch, HEAD, origin/main, clean status, and release metadata.
-10. Atomically publish a new unique candidate directory, reverify its hashes after the rename boundary, and roll it back to work state if that final check fails.
+4. Create a detached checkout at the authenticated commit; provision frozen pnpm state and both Python environments from pinned authenticated repository inputs; bind their complete executed trees to the build and revalidate them after use.
+5. Build the backend once from those retained disposable inputs, preserve valid vendor bytes, and sign every unsigned PE.
+6. Stage the signed backend and pass the coordinator-retained source inventory as authority outside the stage; Tauri rejects missing, stale, copied, or recomputed colocated receipts before and after packaging. The broker then handles Glacial.exe, supported NSIS components, uninstaller, and final installer signing, rejecting reparse/multi-link objects and binding each request to an immutable role/path/digest/object/release plan before provider delegation.
+7. Verify the final installer, captured application, authenticated object-and-byte-bound signing audit events, retained object identities, restored working-file state, and generated NSIS main-binary source.
+8. Copy only the verified NSIS installer into release-candidate state.
+9. Generate final manifest and hashes only after all binary mutation is complete, recording the selected profile, required signer trust, verified signer trust classification, and dependency-input provenance.
+10. Recheck the detached source identity and tracked state, atomically publish a unique candidate inside the disposable checkout, copy and reverify it in primary release-candidate state, then remove the checkout and its inputs.
 
 The failed unsigned candidate `Glacial-0.4.0-fbf96d568350-20260719T065059Z` is historical evidence and must never be overwritten or removed.
 

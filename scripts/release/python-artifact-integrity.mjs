@@ -53,6 +53,17 @@ function validateRuntimeContract(value) {
   }
 }
 
+function validateBaseDistribution(value) {
+  if (value?.filename !== "python-3.13.13-embed-amd64.zip"
+      || value?.url !== "https://www.python.org/ftp/python/3.13.13/python-3.13.13-embed-amd64.zip"
+      || value?.bytes !== 10950201
+      || !digestPattern.test(String(value?.sha256 ?? ""))
+      || value?.authority !== "Python.org release SHA-256 and Sigstore publication") {
+    fail("Python artifact manifest base distribution is invalid.");
+  }
+  return { ...value };
+}
+
 function validateScope(root, id, value) {
   const expectedLockPath = scopePaths[id];
   if (!expectedLockPath || value?.lockPath !== expectedLockPath) fail(`Python artifact manifest scope ${id} has an invalid lock path.`);
@@ -107,6 +118,7 @@ export function loadPythonArtifactManifest(root, manifestPath = join(root, "docs
     sha256: sha256Bytes(readFileSync(canonicalManifest)),
     source: manifest.source,
     runtimeContract: manifest.runtimeContract,
+    baseDistribution: validateBaseDistribution(manifest.baseDistribution),
     scopes: Object.fromEntries(ids.map((id) => [id, validateScope(canonicalRoot, id, manifest.scopes[id])])),
   };
 }
