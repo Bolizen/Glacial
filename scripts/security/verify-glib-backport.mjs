@@ -6,6 +6,7 @@ import { dirname, isAbsolute, join, parse as parsePath, relative, resolve } from
 import { fileURLToPath } from "node:url";
 import { parseTomlData } from "./toml-data.mjs";
 import { canonicalPathsEqual, sameFilesystemObject } from "./path-identity.mjs";
+import { assertAuthenticatedReleaseTool, authenticateReleaseTool } from "../release/release-authority.mjs";
 
 const defaultRepoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const repoRoot = parseRepoRoot(process.argv.slice(2));
@@ -124,6 +125,13 @@ function sanitizedCargoEnvironment(cargoHome, targetDirectory) {
 }
 
 function trustedCargoExecutable(cargoHome) {
+  const serializedAuthority = process.env.GLACIAL_RELEASE_CARGO_AUTHORITY_JSON;
+  if (serializedAuthority) {
+    let record;
+    try { record = JSON.parse(serializedAuthority); } catch { fail("the signed-release Cargo authority is malformed"); }
+    const tool = authenticateReleaseTool(record, process.env.CARGO);
+    return assertAuthenticatedReleaseTool(tool);
+  }
   const parts = [cargoHome, resolve(cargoHome, "bin"), resolve(cargoHome, "bin", process.platform === "win32" ? "cargo.exe" : "cargo")];
   for (const [index, path] of parts.entries()) {
     let metadata;

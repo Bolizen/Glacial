@@ -200,6 +200,11 @@ All signed modes require:
 | `GLACIAL_WINDOWS_SIGNTOOL_PATH` | Absolute path to the reviewed Windows SDK `signtool.exe` |
 | `GLACIAL_WINDOWS_REQUIRE_TIMESTAMP` | Must be `1` |
 | `GLACIAL_WINDOWS_TIMESTAMP_URL` | Credential-free HTTPS RFC 3161 endpoint, or the exact `http://timestamp.digicert.com` endpoint, with no query or fragment |
+| `GLACIAL_WINDOWS_RELEASE_AUTHORITY_PATH` | Absolute path outside the repository to the exact UTF-8 JSON release-authority manifest |
+| `GLACIAL_WINDOWS_RELEASE_AUTHORITY_SIGNATURE_PATH` | Absolute path outside the repository to its raw RSA PKCS#1 SHA-256 signature |
+| `GLACIAL_WINDOWS_RELEASE_AUTHORITY_CERTIFICATE_PATH` | Absolute path outside the repository to the offline authority's public certificate whose thumbprint must equal the configured authority identity |
+| `GLACIAL_WINDOWS_RELEASE_AUTHORITY_EXPECTED_THUMBPRINT` | Exact thumbprint of the separate offline authorization certificate; it must differ from the artifact signer |
+| `GLACIAL_WINDOWS_ARTIFACT_SIGNER_CERTIFICATE_PATH` | Absolute path outside the repository to the artifact signer's public certificate; its public key must differ from the authority key |
 
 Store mode also requires:
 
@@ -218,6 +223,33 @@ Command mode also requires:
 
 There is no operator-supplied trust label. The pipeline derives `self-signed` or `publicly trusted` from the actual verified signer chain. It rejects invalid, ambiguous, or privately rooted non-self-signed chains.
 
+The release-authority manifest is the independent approval for both source and producer identity. It has `schemaVersion: 1`, a unique `authorityId`, source repository `https://github.com/Bolizen/Glacial.git`, the exact approved 40-hex commit, and exactly ten tool records named `node`, `python`, `git`, `tar`, `cargo`, `rustc`, `linker`, `resourceCompiler`, `cCompiler`, and `librarian`. Each tool record contains its approved absolute `path` and lowercase SHA-256. Cargo and Rustc records must identify the actual approved toolchain binaries, not rustup proxies. Create the manifest only after the immutable release commit exists, keep it outside the checkout and Git common directory, and sign its exact bytes with a separate offline authorization key. The authorization certificate thumbprint and public key must differ from the artifact signer's certificate and public key, and the authority private key must not be installed on or accessible to the release host. Export only the two public certificates to the release host. The release process therefore cannot recompute approval for different source or tool bytes.
+
+On the separate authorization system, an authorized operator can create the detached signature without exporting the private key:
+
+```powershell
+$manifestPath = "C:\ReleaseAuthority\Glacial-G118.json"
+$signaturePath = "C:\ReleaseAuthority\Glacial-G118.sig"
+$certificatePath = "C:\ReleaseAuthority\Glacial-G118.cer"
+$certificate = Get-Item -LiteralPath "Cert:\CurrentUser\My\<offline-authorization-thumbprint>"
+$privateKey = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($certificate)
+$manifestBytes = [System.IO.File]::ReadAllBytes($manifestPath)
+$signature = $privateKey.SignData($manifestBytes, [System.Security.Cryptography.HashAlgorithmName]::SHA256, [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
+[System.IO.File]::WriteAllBytes($signaturePath, $signature)
+Export-Certificate -Cert $certificate -FilePath $certificatePath -Type CERT | Out-Null
+$privateKey.Dispose()
+
+$env:GLACIAL_WINDOWS_RELEASE_AUTHORITY_PATH = $manifestPath
+$env:GLACIAL_WINDOWS_RELEASE_AUTHORITY_SIGNATURE_PATH = $signaturePath
+$env:GLACIAL_WINDOWS_RELEASE_AUTHORITY_CERTIFICATE_PATH = $certificatePath
+$env:GLACIAL_WINDOWS_ARTIFACT_SIGNER_CERTIFICATE_PATH = $artifactSignerCertificatePath
+$env:GLACIAL_WINDOWS_RELEASE_AUTHORITY_EXPECTED_THUMBPRINT = "<offline-authorization-thumbprint>"
+```
+
+The coordinator verifies the detached signature, authority certificate thumbprint, and public-key separation in Node before the first child-tool launch. It then requires the current Node and selected bootstrap Python paths to match their signed records, uses only signed absolute producer paths, and rechecks canonical path, SHA-256, and filesystem identity immediately before every direct launch. Cargo, actual Rustc, the MSVC linker, resource compiler, C compiler, and librarian are explicitly propagated to Tauri descendants and revalidated after packaging; an earlier ambient `PATH` entry is not an authorization source. A tool or authorization change requires a new externally signed manifest.
+
+This boundary does not claim resistance to an already malicious Node runtime, arbitrary active same-user process interference, or a race that swaps and restores an approved file or tracked source between checks. Node is the verifier's bootstrap runtime, so release operations should invoke the authority-approved absolute Node path from a controlled host rather than rely on an unreviewed shell resolution. Persistent tool replacement is detected before direct use and after descendant packaging; persistent source mutation is detected by the existing clean-tree and final source checks. Stronger guarantees against a hostile process already executing as the release user require host isolation or code-integrity enforcement outside this repository.
+
 Example signed-preview store-mode plan:
 
 ```powershell
@@ -231,7 +263,7 @@ $env:GLACIAL_WINDOWS_REQUIRE_TIMESTAMP = "1"
 pnpm --dir frontend run release:windows:signed-preview:plan
 ```
 
-After separate certificate provisioning, a clean `main`, and `HEAD == origin/main`, produce an internal signed preview with:
+After separate certificate provisioning, a signed release-authority manifest for the immutable commit and approved tools, a clean `main`, and `HEAD == origin/main`, produce an internal signed preview with:
 
 ```powershell
 pnpm --dir frontend run release:windows:signed-preview -- --python C:\Path\To\Python313\python.exe
@@ -246,7 +278,7 @@ pnpm --dir frontend run release:windows:public-rc -- --python C:\Path\To\Python3
 
 The coordinator performs this order:
 
-1. Verify repository identity, branch, clean status, `HEAD == origin/main`, and v0.9.12 metadata.
+1. Verify the externally signed exact repository, commit, and release-tool identities; then verify branch, clean status, `HEAD == origin/main`, canonical origin identity, and v0.9.12 metadata.
 2. Select one exact CurrentUser certificate or external signer and sign/verify a disposable timestamped PE probe.
 3. Enforce the selected profile immediately from the verified `trustClassification`: signed preview accepts `self-signed` or `publicly-trusted`; public RC accepts exactly `publicly-trusted`.
 4. Create a detached checkout at the authenticated commit; provision frozen pnpm state and both Python environments from pinned authenticated repository inputs; bind their complete executed trees to the build and revalidate them after use.
@@ -254,7 +286,7 @@ The coordinator performs this order:
 6. Stage the signed backend and pass the coordinator-retained source inventory as authority outside the stage; Tauri rejects missing, stale, copied, or recomputed colocated receipts before and after packaging. The broker then handles Glacial.exe, supported NSIS components, uninstaller, and final installer signing, rejecting reparse/multi-link objects and binding each request to an immutable role/path/digest/object/release plan before provider delegation.
 7. Verify the final installer, captured application, authenticated object-and-byte-bound signing audit events, retained object identities, restored working-file state, and generated NSIS main-binary source.
 8. Copy only the verified NSIS installer into release-candidate state.
-9. Generate final manifest and hashes only after all binary mutation is complete, recording the selected profile, required signer trust, verified signer trust classification, and dependency-input provenance.
+9. Generate final manifest and hashes only after all binary mutation is complete, recording the selected profile, required signer trust, verified signer trust classification, independent source authority, and dependency-input provenance.
 10. Recheck the detached source identity and tracked state, atomically publish a unique candidate inside the disposable checkout, copy and reverify it in primary release-candidate state, then remove the checkout and its inputs.
 
 The failed unsigned candidate `Glacial-0.4.0-fbf96d568350-20260719T065059Z` is historical evidence and must never be overwritten or removed.

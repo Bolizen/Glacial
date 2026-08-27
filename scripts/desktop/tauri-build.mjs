@@ -85,11 +85,13 @@ export function runTauriBuild(args = process.argv.slice(2), environment = proces
   const buildEnvironment = minimalEnvironment(environment, {
     GLACIAL_BUILD_IDENTITY_JSON: serializeBuildIdentity(identity),
   }, ["GLACIAL_BUILD_IDENTITY_JSON", "GLACIAL_BACKEND_STAGE_AUTHORITY_JSON", "GLACIAL_WINDOWS_RELEASE_ID",
-    "CARGO_HOME", "CARGO_NET_OFFLINE",
+    "CARGO", "CARGO_HOME", "CARGO_NET_OFFLINE", "RUSTC", "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER",
+    "RC", "RC_x86_64_pc_windows_msvc", "CC", "CC_x86_64_pc_windows_msvc", "AR", "AR_x86_64_pc_windows_msvc",
+    "GLACIAL_RELEASE_CARGO_AUTHORITY_JSON",
     "GLACIAL_WINDOWS_SIGN_BROKER_PORT", "GLACIAL_WINDOWS_SIGN_BROKER_TOKEN"]);
   runCommand(process.execPath, [GLIB_VERIFIER], {
     cwd: REPOSITORY,
-    env: minimalEnvironment(environment),
+    env: buildEnvironment,
     timeoutMs: 300_000,
     includeFailureOutput: true,
   });

@@ -19,6 +19,7 @@ import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path
 import { spawnSync } from "node:child_process";
 import { request as httpRequest } from "node:http";
 import { fileURLToPath } from "node:url";
+import { assertAuthenticatedReleaseTool } from "../release/release-authority.mjs";
 
 export const DEFAULT_SIGNER_SUBJECT = "CN=Icefields Development";
 export const SIGNING_SCRIPT_PATH = fileURLToPath(import.meta.url);
@@ -263,8 +264,9 @@ function commandFailure(command, result, options = {}) {
 }
 
 export function runCommand(command, args, options = {}) {
-  if (!isAbsolute(command)) throw new Error(`Refusing to launch a non-absolute executable: ${command}`);
-  const result = spawnSync(command, args, {
+  const executable = typeof command === "string" ? command : assertAuthenticatedReleaseTool(command);
+  if (!isAbsolute(executable)) throw new Error(`Refusing to launch a non-absolute executable: ${executable}`);
+  const result = spawnSync(executable, args, {
     cwd: options.cwd,
     env: options.env,
     encoding: "utf8",
@@ -273,8 +275,8 @@ export function runCommand(command, args, options = {}) {
     windowsHide: false,
     shell: false,
   });
-  if (result.error) throw new Error(`${basename(command)} could not be started: ${result.error.code ?? "unknown error"}.`);
-  if (result.status !== 0) throw commandFailure(command, result, options);
+  if (result.error) throw new Error(`${basename(executable)} could not be started: ${result.error.code ?? "unknown error"}.`);
+  if (result.status !== 0) throw commandFailure(executable, result, options);
   return result;
 }
 

@@ -8,6 +8,7 @@ import {
   DESKTOP_BUILD_ROOT,
   assertSafePath,
   ensureSafeDirectory,
+  loadSigningConfig,
   minimalEnvironment,
   privacySafePath,
   resolveToolExecutable,
@@ -26,6 +27,12 @@ import {
   assertWindowsReleasePythonIdentity,
 } from "./release-contract.mjs";
 import { assertReleaseInputTree, releaseInputTreeReceipt } from "./release-input-provenance.mjs";
+import {
+  assertAuthenticatedReleaseTool,
+  authenticateReleaseTools,
+  loadReleaseAuthority,
+  releaseToolEnvironment,
+} from "./release-authority.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const repository = resolve(dirname(scriptPath), "..", "..");
@@ -40,6 +47,7 @@ const testFiles = [
   "scripts/release/release-contract.test.mjs",
   "scripts/release/python-artifact-integrity.test.mjs",
   "scripts/release/release-input-provenance.test.mjs",
+  "scripts/release/release-authority.test.mjs",
   "scripts/release/validate-clean-environment.test.mjs",
   "scripts/release/validate-python-runtime-inventory.test.mjs",
   "scripts/release/validate-production-dependencies.test.mjs",
@@ -211,11 +219,12 @@ function mergeWheelData(checkout, environmentRoot, sitePackages) {
 }
 
 export function inspectReleasePython(python, environment = minimalEnvironment(process.env)) {
-  if (!isAbsolute(python) || !existsSync(python) || !lstatSync(python).isFile() || lstatSync(python).isSymbolicLink()) {
-    fail(`--python must identify a real absolute executable file: ${privacySafePath(python)}`);
+  const selectedPython = typeof python === "string" ? python : assertAuthenticatedReleaseTool(python);
+  if (!isAbsolute(selectedPython) || !existsSync(selectedPython) || !lstatSync(selectedPython).isFile() || lstatSync(selectedPython).isSymbolicLink()) {
+    fail(`--python must identify a real absolute executable file: ${privacySafePath(selectedPython)}`);
   }
-  const canonicalPython = realpathSync.native(python);
-  const identity = runJson(canonicalPython, [
+  const canonicalPython = realpathSync.native(selectedPython);
+  const identity = runJson(typeof python === "string" ? canonicalPython : python, [
     "-c",
     "import json, platform, struct, sys; print(json.dumps({'executable': sys.executable, 'prefix': sys.prefix, 'base_prefix': sys.base_prefix, 'implementation': sys.implementation.name, 'version': platform.python_version(), 'platform': sys.platform, 'bits': struct.calcsize('P') * 8, 'machine': platform.machine()}))",
   ], { env: environment, redactions: [canonicalPython] });
@@ -377,7 +386,7 @@ export function verifyPreparedInputsByReconstruction({ checkout, preparedInputs,
   }
 }
 
-async function runCleanCheckout({ checkout, python, git, cargo, tar, environment, commit, primarySource, profile }) {
+async function runCleanCheckout({ checkout, python, git, cargo, tar, tools, authority, environment, commit, primarySource, profile }) {
   const frontend = join(checkout, frontendRelative);
   const isolatedRoot = join(checkout, ".desktop-build");
   ensureSafeDirectory(checkout, isolatedRoot);
@@ -437,6 +446,12 @@ async function runCleanCheckout({ checkout, python, git, cargo, tar, environment
   const preparedInputs = {
     schemaVersion: 1,
     source: primarySource,
+    releaseAuthority: profile ? {
+      schemaVersion: authority.schemaVersion,
+      authorityId: authority.authorityId,
+      digest: authority.digest,
+      source: authority.source,
+    } : null,
     node: { root: join(frontend, "node_modules"), receipt: nodeReceipt },
     buildPython: { root: build.root, receipt: build.receipt },
     runtimePython: { root: runtime.root, receipt: runtime.receipt },
@@ -542,17 +557,29 @@ export async function validateCleanEnvironment(argv = process.argv.slice(2)) {
     PYTHONNOUSERSITE: "1",
     PYTHONDONTWRITEBYTECODE: "1",
   });
-  const pythonIdentity = inspectReleasePython(options.python, hostEnvironment);
-  const git = resolveToolExecutable("git.exe", process.env, { forbiddenRoot: repository });
-  const cargo = resolveToolExecutable("cargo.exe", process.env, { forbiddenRoot: repository });
-  const tar = resolveToolExecutable("tar.exe", process.env, { forbiddenRoot: repository });
+  let authority = null;
+  let tools = null;
+  if (options.profile) {
+    const signingConfig = loadSigningConfig(process.env);
+    authority = loadReleaseAuthority(process.env, {
+      repository,
+      expectedThumbprint: process.env.GLACIAL_WINDOWS_RELEASE_AUTHORITY_EXPECTED_THUMBPRINT,
+      forbiddenThumbprint: signingConfig.expectedThumbprint,
+    });
+    tools = authenticateReleaseTools(authority, { node: process.execPath, python: options.python });
+  }
+  const python = tools?.python ?? options.python;
+  const git = tools?.git ?? resolveToolExecutable("git.exe", process.env, { forbiddenRoot: repository });
+  const cargo = tools?.cargo ?? resolveToolExecutable("cargo.exe", process.env, { forbiddenRoot: repository });
+  const tar = tools?.tar ?? resolveToolExecutable("tar.exe", process.env, { forbiddenRoot: repository });
+  const pythonIdentity = inspectReleasePython(python, hostEnvironment);
   const primaryBefore = gitState(git, repository, hostEnvironment);
   assertCleanState(primaryBefore, "Primary repository");
   const commit = primaryBefore.head;
   let primarySource = null;
   if (options.profile) {
     const releaseModule = await import(pathToFileURL(join(repository, "scripts", "desktop", "Build-SignedWindowsRelease.mjs")).href);
-    primarySource = releaseModule.verifyReleaseSource(git);
+    primarySource = releaseModule.verifyReleaseSource(git, authority);
   }
   const checkout = assertSafePath(repository, join(repository, "dist"));
   if (existsSync(checkout)) fail(`Disposable gate checkout already exists: ${privacySafePath(checkout)}`);
@@ -562,7 +589,7 @@ export async function validateCleanEnvironment(argv = process.argv.slice(2)) {
   try {
     run(git, ["worktree", "add", "--detach", checkout, commit], { cwd: repository, env: hostEnvironment, redactions: [checkout] });
     worktreeRegistered = true;
-    const environment = minimalEnvironment(process.env, {
+    let environment = minimalEnvironment(process.env, {
       CARGO_HOME: join(checkout, ".desktop-build", "c"),
       CARGO_TARGET_DIR: join(checkout, ".desktop-build", "t"),
       NPM_CONFIG_CACHE: join(checkout, ".desktop-build", "n"),
@@ -575,12 +602,15 @@ export async function validateCleanEnvironment(argv = process.argv.slice(2)) {
       PYTHONNOUSERSITE: "1",
       PYTHONDONTWRITEBYTECODE: "1",
     });
+    if (tools) environment = releaseToolEnvironment(environment, tools);
     summary = await runCleanCheckout({
       checkout,
-      python: pythonIdentity.executable,
+      python,
       git,
       cargo,
       tar,
+      tools,
+      authority,
       environment,
       commit,
       primarySource,

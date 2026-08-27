@@ -28,7 +28,6 @@ import {
   privacySafePath,
   removeSafeTree,
   resolvePrivacySafePath,
-  resolveToolExecutable,
   runCommand,
   sanitizeDiagnosticText,
   sha256,
@@ -47,6 +46,13 @@ import { assertWindowsReleasePythonIdentity } from "../release/release-contract.
 import { backendStageReceipt, writeBackendStageReceipt } from "./backend-stage-integrity.mjs";
 import { assertReleaseInputTree, releaseInputTreeReceipt } from "../release/release-input-provenance.mjs";
 import { PINNED_PNPM, verifyPreparedInputsByReconstruction } from "../release/validate-clean-environment.mjs";
+import {
+  assertAuthenticatedReleaseTool,
+  authenticateReleaseTools,
+  canonicalRepositoryIdentity,
+  loadReleaseAuthority,
+  releaseToolEnvironment,
+} from "../release/release-authority.mjs";
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const SIGNING_BROKER = resolve(dirname(SCRIPT_PATH), "windows-signing-broker.mjs");
@@ -236,7 +242,17 @@ export async function runAfterSignerPreflight({ profile, preflight, runTrustedSt
   return state;
 }
 
-export function verifyReleaseSource(gitPath, preparedSource = null) {
+export function assertAuthorizedSourceIdentity({ commit, originMain, originUrl }, authority) {
+  if (!authority?.source) throw new Error("Independent signed source authorization is required.");
+  const repositoryIdentity = canonicalRepositoryIdentity(originUrl);
+  if (repositoryIdentity !== authority.source.repository) throw new Error("The release checkout is not the independently authorized repository.");
+  if (commit !== authority.source.commit) throw new Error(`HEAD ${commit} is not the independently authorized release commit.`);
+  if (commit !== originMain) throw new Error(`HEAD ${commit} does not match origin/main ${originMain}.`);
+  return repositoryIdentity;
+}
+
+export function verifyReleaseSource(gitPath, authority, preparedSource = null) {
+  if (!authority?.source) throw new Error("Independent signed source authorization is required.");
   const environment = minimalEnvironment(process.env);
   const root = resolve(runText(gitPath, ["rev-parse", "--show-toplevel"], { cwd: REPOSITORY, env: environment }));
   if (root.toLowerCase() !== REPOSITORY.toLowerCase()) throw new Error(`Repository root mismatch: ${root}`);
@@ -253,8 +269,11 @@ export function verifyReleaseSource(gitPath, preparedSource = null) {
     runText(gitPath, ["rev-parse", "origin/main"], { cwd: REPOSITORY, env: environment }),
     "git-commit",
   );
-  if (commit !== originMain) throw new Error(`HEAD ${commit} does not match origin/main ${originMain}.`);
-  if (preparedSource && (commit !== preparedSource.commit || originMain !== preparedSource.originMain || preparedSource.branch !== "main")) {
+  const originUrl = runText(gitPath, ["remote", "get-url", "origin"], { cwd: REPOSITORY, env: environment });
+  const repositoryIdentity = assertAuthorizedSourceIdentity({ commit, originMain, originUrl }, authority);
+  if (preparedSource && (commit !== preparedSource.commit || originMain !== preparedSource.originMain
+      || preparedSource.branch !== "main" || preparedSource.repositoryIdentity !== repositoryIdentity
+      || preparedSource.authorityDigest !== authority.digest)) {
     throw new Error("Disposable release source identity differs from the primary authenticated source.");
   }
 
@@ -272,11 +291,11 @@ export function verifyReleaseSource(gitPath, preparedSource = null) {
   if (readFileSync(join(REPOSITORY, "backend", "app", "version.py"), "utf8").trim() !== 'GLACIAL_VERSION = "0.9.12"') throw new Error("Backend version constant does not identify 0.9.12.");
   if (!readFileSync(join(REPOSITORY, "backend", "app", "changelog.py"), "utf8").includes('"version": "0.9.12"')) throw new Error("Backend release metadata does not identify 0.9.12.");
   validateProductionDependencies(packageJson, pnpmLock, pnpmWorkspace);
-  return { root, branch, commit, originMain, version: "0.9.12", versions, status: "" };
+  return { root, branch, commit, originMain, repositoryIdentity, authorityDigest: authority.digest, authorityId: authority.authorityId, version: "0.9.12", versions, status: "" };
 }
 
 export function assertSameReleaseSource(before, after) {
-  for (const field of ["root", "branch", "commit", "originMain", "version", "status"]) {
+  for (const field of ["root", "branch", "commit", "originMain", "repositoryIdentity", "authorityDigest", "authorityId", "version", "status"]) {
     if (before[field] !== after[field]) throw new Error(`Release source changed during the build (${field}).`);
   }
   if (JSON.stringify(before.versions) !== JSON.stringify(after.versions)) throw new Error("Release metadata changed during the build.");
@@ -524,6 +543,12 @@ function writeReleaseMetadata({ workRoot, source, releaseProfile, buildIdentity,
     commit: source.commit,
     branch: source.branch,
     originMain: source.originMain,
+    sourceAuthority: {
+      authorityId: source.authorityId,
+      authoritySha256: source.authorityDigest,
+      repository: source.repositoryIdentity,
+      authorizedCommit: source.commit,
+    },
     buildIdentity,
     headMatchedOriginMain: true,
     workingTreeCleanBeforeBuild: true,
@@ -613,8 +638,16 @@ export function assertPreparedReleaseInputs(preparedInputs) {
   if (!preparedInputs || preparedInputs.schemaVersion !== 1) throw new Error("Signed release construction requires disposable authenticated inputs.");
   if (!preparedInputs.source || preparedInputs.source.branch !== "main"
       || resolve(join(preparedInputs.source.root ?? "", "dist")).toLowerCase() !== REPOSITORY.toLowerCase()
-      || preparedInputs.source.commit !== preparedInputs.source.originMain) {
+      || preparedInputs.source.commit !== preparedInputs.source.originMain
+      || preparedInputs.source.repositoryIdentity !== "github.com/bolizen/glacial"
+      || !/^[0-9a-f]{64}$/.test(String(preparedInputs.source.authorityDigest ?? ""))) {
     throw new Error("Signed release construction requires the authenticated primary source and its exact detached disposable checkout.");
+  }
+  if (!preparedInputs.releaseAuthority || preparedInputs.releaseAuthority.schemaVersion !== 1
+      || preparedInputs.releaseAuthority.digest !== preparedInputs.source.authorityDigest
+      || preparedInputs.releaseAuthority.source?.commit !== preparedInputs.source.commit
+      || preparedInputs.releaseAuthority.source?.repository !== preparedInputs.source.repositoryIdentity) {
+    throw new Error("Prepared inputs do not bind the independent release authority.");
   }
   const expected = {
     node: join(FRONTEND, "node_modules"),
@@ -656,18 +689,29 @@ export function assertPreparedReleaseInputs(preparedInputs) {
 export async function buildSignedRelease(releaseProfile, suppliedInputs = null) {
   if (process.platform !== "win32") throw new Error("The signed Windows release workflow must run on Windows.");
   const preparedInputs = assertPreparedReleaseInputs(suppliedInputs);
-  const gitPath = resolveToolExecutable("git.exe", process.env, { forbiddenRoot: REPOSITORY });
-  const rustcPath = resolveToolExecutable("rustc.exe", process.env, { forbiddenRoot: REPOSITORY });
-  const cargoPath = resolveToolExecutable("cargo.exe", process.env, { forbiddenRoot: REPOSITORY });
-  const tarPath = resolveToolExecutable("tar.exe", process.env, { forbiddenRoot: REPOSITORY });
+  const authorityConfig = loadSigningConfig(process.env);
+  const authority = loadReleaseAuthority(process.env, {
+    repository: REPOSITORY,
+    expectedThumbprint: process.env.GLACIAL_WINDOWS_RELEASE_AUTHORITY_EXPECTED_THUMBPRINT,
+    forbiddenThumbprint: authorityConfig.expectedThumbprint,
+  });
+  if (authority.digest !== preparedInputs.releaseAuthority.digest || authority.authorityId !== preparedInputs.releaseAuthority.authorityId) {
+    throw new Error("The release authority changed between preparation and signed construction.");
+  }
+  const tools = authenticateReleaseTools(authority, { node: process.execPath });
+  const gitPath = tools.git;
+  const rustcPath = tools.rustc;
+  const cargoPath = tools.cargo;
+  const tarPath = tools.tar;
   const pnpm = { command: process.execPath, prefixArgs: [preparedInputs.pnpmTool.cli] };
-  const source = verifyReleaseSource(gitPath, preparedInputs.source);
+  const source = verifyReleaseSource(gitPath, authority, preparedInputs.source);
+  const toolEnvironment = (extras = {}) => releaseToolEnvironment(minimalEnvironment(process.env, extras), tools);
   verifyPreparedInputsByReconstruction({
     checkout: REPOSITORY,
     preparedInputs,
     tar: tarPath,
     cargo: cargoPath,
-    environment: minimalEnvironment(process.env, {
+    environment: toolEnvironment({
       NPM_CONFIG_GLOBALCONFIG: "NUL",
       NPM_CONFIG_REGISTRY: "https://registry.npmjs.org/",
       NPM_CONFIG_USERCONFIG: join(DESKTOP_BUILD_ROOT, "u"),
@@ -728,7 +772,7 @@ export async function buildSignedRelease(releaseProfile, suppliedInputs = null) 
           assertReleaseInputTree(preparedInputs.node.root, preparedInputs.node.receipt);
           assertReleaseInputTree(preparedInputs.cargo.root, preparedInputs.cargo.receipt);
           const broker = await startSigningBroker(releaseEnvironment);
-          const buildEnvironment = signingBrokerEnvironment(releaseEnvironment, releaseId, broker.port, broker.token, releaseEnvironment.GLACIAL_BUILD_IDENTITY_JSON, JSON.stringify(state.backendStageAuthority), preparedInputs.cargo.root);
+          const buildEnvironment = releaseToolEnvironment(signingBrokerEnvironment(releaseEnvironment, releaseId, broker.port, broker.token, releaseEnvironment.GLACIAL_BUILD_IDENTITY_JSON, JSON.stringify(state.backendStageAuthority), preparedInputs.cargo.root), tools);
           await runBrokeredTauriBuild(
             () => runVisible(process.execPath, tauriBuildArguments(pnpm, overlayPath), {
               cwd: FRONTEND,
@@ -737,6 +781,12 @@ export async function buildSignedRelease(releaseProfile, suppliedInputs = null) 
             }),
             broker.stop,
           );
+          assertAuthenticatedReleaseTool(tools.cargo);
+          assertAuthenticatedReleaseTool(tools.rustc);
+          assertAuthenticatedReleaseTool(tools.linker);
+          assertAuthenticatedReleaseTool(tools.resourceCompiler);
+          assertAuthenticatedReleaseTool(tools.cCompiler);
+          assertAuthenticatedReleaseTool(tools.librarian);
           assertReleaseInputTree(preparedInputs.node.root, preparedInputs.node.receipt);
           assertReleaseInputTree(preparedInputs.cargo.root, preparedInputs.cargo.receipt);
         } },
@@ -762,7 +812,7 @@ export async function buildSignedRelease(releaseProfile, suppliedInputs = null) 
           verifySignature(state.installerDestination, config, { expectFirstParty: true, expectedCanonicalSubject: signerIdentity.expectedCanonicalSubject });
         } },
         { name: "write-metadata", run: () => { state.metadata = writeReleaseMetadata({ workRoot, source, releaseProfile, buildIdentity: state.buildIdentity, signerIdentity, installer: state.installerDestination, backendSigningRecords: state.backendSigningRecords, signingEvents: state.signingEvents, buildStartedUtc, applicationSha256: state.applicationSha256, installerApplicationEvidence: state.installerApplicationEvidence, inputProvenance: preparedInputs.provenance }); } },
-        { name: "publish", run: () => publishCandidate({ workRoot, finalRoot, sourceBefore: source, integrityVerifier: (root) => verifyPublishedHashes(root, join(root, basename(state.metadata.manifestPath)), join(root, basename(state.metadata.sumsPath))), sourceVerifier: () => verifyReleaseSource(gitPath, preparedInputs.source) }) },
+        { name: "publish", run: () => publishCandidate({ workRoot, finalRoot, sourceBefore: source, integrityVerifier: (root) => verifyPublishedHashes(root, join(root, basename(state.metadata.manifestPath)), join(root, basename(state.metadata.sumsPath))), sourceVerifier: () => verifyReleaseSource(gitPath, authority, preparedInputs.source) }) },
       ], state);
     },
   });

@@ -24,7 +24,8 @@ test("signed construction pins pnpm bytes and independently reconstructs prepare
   });
   const builder = readFileSync(join(repository, "scripts", "desktop", "Build-SignedWindowsRelease.mjs"), "utf8");
   assert.match(builder, /verifyPreparedInputsByReconstruction\(\{/);
-  assert.match(builder, /const source = verifyReleaseSource\(gitPath, preparedInputs\.source\);[\s\S]*verifyPreparedInputsByReconstruction\(\{[\s\S]*const started = new Date\(\);/);
+  assert.match(builder, /const source = verifyReleaseSource\(gitPath, authority, preparedInputs\.source\);[\s\S]*verifyPreparedInputsByReconstruction\(\{[\s\S]*const started = new Date\(\);/);
+  assert.match(builder, /runBrokeredTauriBuild\([\s\S]*assertAuthenticatedReleaseTool\(tools\.cargo\);[\s\S]*assertAuthenticatedReleaseTool\(tools\.rustc\);/);
 });
 
 test("clean gate requires one explicit Python executable", () => {
