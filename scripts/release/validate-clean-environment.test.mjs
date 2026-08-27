@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -8,8 +8,10 @@ import {
   PINNED_PNPM,
   compareInstalledGraph,
   parseCleanEnvironmentArguments,
+  prepareViteConfigScratch,
   removeDisposableTree,
 } from "./validate-clean-environment.mjs";
+import { assertReleaseInputTree, releaseInputTreeReceipt } from "./release-input-provenance.mjs";
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -31,6 +33,24 @@ test("clean gate requires one explicit Python executable", () => {
   assert.match(parseCleanEnvironmentArguments(["--python", "python.exe"]).python, /python\.exe$/i);
   assert.equal(parseCleanEnvironmentArguments(["--profile", "signed-preview", "--python", "python.exe"]).profile, "signed-preview");
   assert.throws(() => parseCleanEnvironmentArguments(["--profile", "development", "--python", "python.exe"]), /signed-preview or public-rc/);
+});
+
+test("Vite config scratch is authenticated without hiding executable leftovers", () => {
+  const fixture = join(repository, ".desktop-build", "g116-vite-scratch-test", "node_modules");
+  rmSync(dirname(fixture), { recursive: true, force: true });
+  try {
+    mkdirSync(join(fixture, "package"), { recursive: true });
+    writeFileSync(join(fixture, "package", "index.js"), "export default 'authenticated';\n");
+    const scratch = prepareViteConfigScratch(fixture);
+    const receipt = releaseInputTreeReceipt(fixture, "node-modules");
+    writeFileSync(join(scratch, "vite.config.timestamp-random.mjs"), "export default {};\n");
+    assert.throws(() => assertReleaseInputTree(fixture, receipt), /changed after authenticated reconstruction/);
+    assert.throws(() => prepareViteConfigScratch(fixture), /must be an empty normal directory/);
+    rmSync(join(scratch, "vite.config.timestamp-random.mjs"));
+    assertReleaseInputTree(fixture, receipt);
+  } finally {
+    rmSync(dirname(fixture), { recursive: true, force: true });
+  }
 });
 
 test("build graph validation rejects unexpected and mislabeled installed state", () => {

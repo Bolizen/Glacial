@@ -51,6 +51,22 @@ function fail(message) {
   throw new Error(message);
 }
 
+export function prepareViteConfigScratch(nodeModules) {
+  const root = resolve(nodeModules);
+  const scratch = join(root, ".vite-temp");
+  if (existsSync(scratch)) {
+    const metadata = lstatSync(scratch);
+    if (!metadata.isDirectory() || metadata.isSymbolicLink()
+        || realpathSync.native(scratch).toLowerCase() !== scratch.toLowerCase()
+        || readdirSync(scratch).length !== 0) {
+      fail("Vite config scratch must be an empty normal directory before authentication.");
+    }
+  } else {
+    ensureSafeDirectory(root, scratch);
+  }
+  return scratch;
+}
+
 export function parseCleanEnvironmentArguments(argv) {
   let python;
   let profile = null;
@@ -334,6 +350,7 @@ export function verifyPreparedInputsByReconstruction({ checkout, preparedInputs,
     ensureSafeDirectory(checkout, frontend);
     for (const name of ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"]) copyFileSync(join(checkout, "frontend", name), join(frontend, name));
     run(process.execPath, [pnpmCli, "install", "--frozen-lockfile", "--verify-store-integrity", "--store-dir", join(reconstruction, "pnpm-store"), "--cache-dir", join(reconstruction, "pnpm-cache")], { cwd: frontend, env: environment });
+    prepareViteConfigScratch(join(frontend, "node_modules"));
     const nodeReceipt = releaseInputTreeReceipt(join(frontend, "node_modules"), "node-modules");
     if (JSON.stringify(nodeReceipt) !== JSON.stringify(preparedInputs.node.receipt)) fail("Prepared node_modules differs from an independent frozen reconstruction.");
 
@@ -385,6 +402,7 @@ async function runCleanCheckout({ checkout, python, git, cargo, tar, environment
     "--cache-dir", join(checkout, ".desktop-build", "k"),
   ], { cwd: frontend, env: environment });
   if (sha256(pnpmLock) !== pnpmLockBefore) fail("Frozen pnpm provisioning modified pnpm-lock.yaml.");
+  prepareViteConfigScratch(join(frontend, "node_modules"));
   const nodeReceipt = releaseInputTreeReceipt(join(frontend, "node_modules"), "node-modules");
 
   run(cargo, ["fetch", "--locked", "--manifest-path", join(frontend, "src-tauri", "Cargo.toml"), "--target", "x86_64-pc-windows-msvc"], {
