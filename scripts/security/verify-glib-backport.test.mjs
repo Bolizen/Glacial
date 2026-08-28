@@ -60,6 +60,21 @@ test("hostile Cargo environment variables cannot redirect trusted resolution", (
   assert.equal(result.status, 0, result.stderr);
 }));
 
+test("serialized Cargo records cannot replace independently reloaded release authority", () => withFixture((root) => {
+  const result = verify(root, {
+    ...process.env,
+    CARGO: process.execPath,
+    GLACIAL_RELEASE_CARGO_AUTHORITY_JSON: JSON.stringify({ role: "cargo", path: process.execPath, sha256: "0".repeat(64) }),
+  });
+  assert.equal(result.status, 0, result.stderr);
+}));
+
+test("partial signed-release authority context fails before Cargo execution", () => withFixture((root) => {
+  const result = verify(root, { ...process.env, GLACIAL_RELEASE_PROFILE: "signed-preview" });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /signed-release authority context is incomplete/);
+}));
+
 test("user Cargo resolution configuration is rejected", () => withFixture((root) => {
   const userHome = join(root, "hostile-user-home");
   const config = join(userHome, ".cargo", "config.toml");

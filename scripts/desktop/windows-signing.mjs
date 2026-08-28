@@ -984,12 +984,24 @@ function consumeSigningAuthorization(file, authorization, options = {}) {
   if (!authorization || !AUTHENTIC_SIGNING_AUTHORIZATIONS.has(authorization) || consumedSigningPlans.has(authorization)) {
     throw new Error("Signing requires one unused authentic artifact authorization.");
   }
+  const target = validateSigningAuthorizationState(file, authorization, options);
+  consumedSigningPlans.add(authorization);
+  return target;
+}
+
+export function validateSigningAuthorizationState(file, authorization, options = {}) {
+  if (!authorization) throw new Error("Signing authorization is required.");
   const target = realpathSync.native(resolve(file));
   if (target.toLowerCase() !== resolve(authorization.path).toLowerCase()) throw new Error("Signing target is not the authorized artifact path.");
   if (sha256(target) !== authorization.beforeSha256) throw new Error("Signing target does not match its authorized pre-signing digest.");
   if ((authorization.releaseId ?? null) !== (options.releaseId ?? authorization.releaseId ?? null)) throw new Error("Signing authorization release context changed.");
   assertSameSigningObject(target, authorization, options);
-  consumedSigningPlans.add(authorization);
+  return target;
+}
+
+export function validateSignedAuthorizationState(file, authorization, signedSha256, options = {}) {
+  const target = realpathSync.native(resolve(file));
+  assertSameSigningObject(target, authorization, options, signedSha256);
   return target;
 }
 
@@ -1034,10 +1046,10 @@ export function signOne(file, config, options = {}) {
   }
   const signature = verifySignature(target, config, { expectFirstParty: true, runner, env: options.env });
   const signedSha256 = sha256(target);
-  assertSameSigningObject(target, options.authorization, trustedOptions, signedSha256);
+  validateSignedAuthorizationState(target, options.authorization, signedSha256, trustedOptions);
   const applicationCapture = captureSignedApplication(target, config, { ...trustedOptions, runner });
   if (applicationCapture && applicationCapture.sha256 !== signedSha256) throw new Error("The Glacial application capture does not match the signed bytes.");
-  assertSameSigningObject(target, options.authorization, trustedOptions, signedSha256);
+  validateSignedAuthorizationState(target, options.authorization, signedSha256, trustedOptions);
   if (!options.skipAudit) appendAuditRecord(config, { path: target, artifactRole: options.authorization.role, releaseId: options.authorization.releaseId, objectIdentity: options.authorization.objectIdentity, evidenceObjectIdentity: applicationCapture?.objectIdentity ?? null, beforeSha256, sha256: signedSha256, applicationCapturePath: applicationCapture?.path ?? null, signerThumbprint: signature.signerThumbprint, canonicalSubject: signature.canonicalSubject, timestampThumbprint: signature.timestampThumbprint, trustClassification: signature.trustClassification, signedUtc: new Date().toISOString() });
   return signature;
 }

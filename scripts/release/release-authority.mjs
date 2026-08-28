@@ -355,7 +355,6 @@ export function releaseToolEnvironment(source, tools) {
   environment.CC_x86_64_pc_windows_msvc = environment.CC;
   environment.AR = assertAuthenticatedReleaseTool(tools.librarian);
   environment.AR_x86_64_pc_windows_msvc = environment.AR;
-  environment.GLACIAL_RELEASE_CARGO_AUTHORITY_JSON = JSON.stringify(tools.cargo);
   const approvedDirectories = [...new Set([
     tools.cargo.path, tools.rustc.path, tools.linker.path, tools.resourceCompiler.path, tools.cCompiler.path, tools.librarian.path,
   ].map((path) => dirname(path)))];

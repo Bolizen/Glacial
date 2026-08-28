@@ -46,6 +46,8 @@ import {
   signingBrokerEnvironment,
   signingEnvironment,
   validateStructuredDigest,
+  validateSignedAuthorizationState,
+  validateSigningAuthorizationState,
 } from "./windows-signing.mjs";
 import {
   assertReleaseProfileTrust,
@@ -315,9 +317,12 @@ test("release-capable children reject Node injection and require the canonical c
   const broker = readFileSync(join(REPOSITORY, "scripts", "desktop", "windows-signing-broker.mjs"), "utf8");
   const tauri = readFileSync(join(REPOSITORY, "scripts", "desktop", "tauri-build.mjs"), "utf8");
   const coordinator = readFileSync(join(REPOSITORY, "scripts", "release", "validate-clean-environment.mjs"), "utf8");
+  const cargoVerifier = readFileSync(join(REPOSITORY, "scripts", "security", "verify-glib-backport.mjs"), "utf8");
   assert.match(broker, /assertReleaseCoordinatorParent\(config,/);
   assert.match(tauri, /assertReleaseCoordinatorParent\(config,/);
   assert.match(tauri, /releaseToolEnvironment\(minimalEnvironment\([\s\S]*, tools\)/);
+  assert.doesNotMatch(tauri, /GLACIAL_RELEASE_CARGO_AUTHORITY_JSON/);
+  assert.match(cargoVerifier, /loadReleaseAuthority\(process\.env, \{ repository: repoRoot \}\)[\s\S]*authenticateReleaseTools\(authority/);
   assert.match(coordinator, /CANONICAL_WORKER_ARGUMENT[\s\S]*runCommand\(process\.execPath, \[scriptPath, CANONICAL_WORKER_ARGUMENT/);
 });
 
@@ -589,6 +594,7 @@ test("Tauri signer authorization binds application and installer roles to canoni
   assert.throws(() => authorizeTauriSigningRequest(unrelated, config), /authorized Tauri release artifact set/);
   const authorization = exactSigningAuthorization(application, "application");
   writeFileSync(application, Buffer.concat([readFileSync(application), Buffer.from("substituted")]));
+  assert.throws(() => validateSigningAuthorizationState(application, authorization), /pre-signing digest/);
   assert.throws(() => signOne(application, { provider: "store" }, { authorization }), /authentic authority-derived signing configuration/);
 });
 
@@ -617,16 +623,8 @@ test("immutable signing plans bind release context and reject object substitutio
   assert.equal(Object.isFrozen(authorization), true);
   assert.equal(authorization.releaseId, RELEASE_ID);
   assert.equal(authorization.objectIdentity, "AA:AAAA");
-  const signature = { Status: "Valid", SignerThumbprint: THUMBPRINT, CanonicalSubject: "CN=ICEFIELDS DEVELOPMENT", TimestampThumbprint: "B".repeat(40), TrustValid: true, TrustClassification: "self-signed", ChainStatuses: [], ...SIGNATURE_VALIDITY };
-  const runner = (command, args, options = {}) => {
-    if (options.env?.GLACIAL_WINDOWS_HELPER_OPERATION === "canonical-subject") return { status: 0, stdout: '{"CanonicalSubject":"CN=ICEFIELDS DEVELOPMENT"}', stderr: "" };
-    if (options.env?.GLACIAL_WINDOWS_HELPER_OPERATION === "signature") return { status: 0, stdout: JSON.stringify(signature), stderr: "" };
-    return { status: 0, stdout: "", stderr: "" };
-  };
-  assert.throws(
-    () => signOne(target, { provider: "store", signToolPath: "signtool.exe", expectedSubject: "CN=Icefields Development", expectedThumbprint: THUMBPRINT, applicationTarget: null }, { authorization, objectInspector, runner }),
-    /authentic authority-derived signing configuration/,
-  );
+  assert.equal(validateSigningAuthorizationState(target, authorization, { releaseId: RELEASE_ID, objectInspector }), target);
+  assert.throws(() => validateSignedAuthorizationState(target, authorization, sha256(target), { objectInspector }), /filesystem object identity changed/);
 });
 
 test("direct sign-one, standalone broker, and Tauri wrapper reject invocation-only authority claims", () => {
@@ -686,20 +684,12 @@ test("signing rejects same-object byte mutation after the signed hash is capture
   let inspections = 0;
   const objectInspector = () => {
     inspections += 1;
-    if (inspections === 3) writeFileSync(target, Buffer.concat([readFileSync(target), Buffer.from("post-hash mutation")]));
+    if (inspections === 2) writeFileSync(target, Buffer.concat([readFileSync(target), Buffer.from("post-hash mutation")]));
     return { objectId: "AA:AAAA", linkCount: 1, size: readFileSync(target).length, reparsePoint: false };
   };
   const authorization = exactSigningAuthorization(target, "installer", { releaseId: RELEASE_ID, objectInspector });
-  const signature = { Status: "Valid", SignerThumbprint: THUMBPRINT, CanonicalSubject: "CN=ICEFIELDS DEVELOPMENT", TimestampThumbprint: "B".repeat(40), TrustValid: true, TrustClassification: "self-signed", ChainStatuses: [], ...SIGNATURE_VALIDITY };
-  const runner = (command, args, options = {}) => {
-    if (options.env?.GLACIAL_WINDOWS_HELPER_OPERATION === "canonical-subject") return { status: 0, stdout: '{"CanonicalSubject":"CN=ICEFIELDS DEVELOPMENT"}', stderr: "" };
-    if (options.env?.GLACIAL_WINDOWS_HELPER_OPERATION === "signature") return { status: 0, stdout: JSON.stringify(signature), stderr: "" };
-    return { status: 0, stdout: "", stderr: "" };
-  };
-  assert.throws(
-    () => signOne(target, { provider: "store", signToolPath: "signtool.exe", expectedSubject: "CN=Icefields Development", expectedThumbprint: THUMBPRINT, applicationTarget: null, releaseId: RELEASE_ID }, { authorization, objectInspector, runner }),
-    /authentic authority-derived signing configuration/,
-  );
+  const signedSha256 = sha256(target);
+  assert.throws(() => validateSignedAuthorizationState(target, authorization, signedSha256, { objectInspector }), /signed bytes changed/);
 });
 
 test("application capture validation rejects missing, duplicate, unrelated, and hash-mismatched events", () => {
@@ -1099,6 +1089,9 @@ test("repeat provisioning and exact CurrentUser removal guards are documented", 
   assert.match(docs, /Get-ExactIcefieldsCertificate "My"/);
   assert.match(docs, /Get-ExactIcefieldsCertificate "Root"/);
   assert.doesNotMatch(docs, /LocalMachine\\My|LocalMachine\\Root/);
+  assert.match(docs, /Only the controlled-host administrator may rotate the anchor/);
+  assert.match(docs, /out-of-band verification of the new public-key digest/);
+  assert.match(docs, /Installing the reviewed key at the protected fixed path is what authorizes the new authority/);
 });
 
 test("ordinary unsigned development plans require neither signing nor PowerShell", () => {
