@@ -5,12 +5,18 @@ import { fileURLToPath } from "node:url";
 import { assertReleaseProfileTrust } from "./Build-SignedWindowsRelease.mjs";
 import {
   DESKTOP_BUILD_ROOT,
+  REPOSITORY_ROOT,
   ensureSafeDirectory,
   loadSigningConfig,
   preflightSigningProvider,
   removeSafeTree,
   sanitizeDiagnosticText,
 } from "./windows-signing.mjs";
+import {
+  authenticateReleaseTools,
+  loadReleaseAuthority,
+  verifyAuthorizedReleaseCheckout,
+} from "../release/release-authority.mjs";
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const PROFILES = new Set(["signed-preview", "public-rc"]);
@@ -30,7 +36,16 @@ export async function runSignerPreflight(profile, options = {}) {
   let failure = null;
   try {
     ensureSafeDirectory(DESKTOP_BUILD_ROOT, sessionRoot, options.pathOptions);
-    const config = (options.loadConfig ?? loadSigningConfig)(options.environment ?? process.env);
+    const environment = options.environment ?? process.env;
+    let config;
+    if (options.loadConfig) {
+      config = options.loadConfig(environment);
+    } else {
+      const authority = loadReleaseAuthority(environment, { repository: REPOSITORY_ROOT });
+      const tools = authenticateReleaseTools(authority, { node: process.execPath });
+      verifyAuthorizedReleaseCheckout(authority, tools.git, REPOSITORY_ROOT);
+      config = loadSigningConfig(environment, { authority, tools, profile });
+    }
     const identity = await (options.preflight ?? preflightSigningProvider)(config, {
       probeParent: join(sessionRoot, "probe"),
       ...(options.preflightOptions ?? {}),

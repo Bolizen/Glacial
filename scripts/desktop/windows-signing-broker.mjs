@@ -1,11 +1,29 @@
 import { timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
-import { resolve } from "node:path";
-import { authorizeTauriSigningRequest, loadSigningConfig, sanitizeDiagnosticText, signOne } from "./windows-signing.mjs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { parseInjectedBuildIdentity } from "../release/build-identity.mjs";
+import {
+  authenticateReleaseTools,
+  loadReleaseAuthority,
+  verifyAuthorizedReleaseCheckout,
+} from "../release/release-authority.mjs";
+import { assertNoNodeRuntimeInjection, assertReleaseCoordinatorParent, authorizeTauriSigningRequest, loadSigningConfig, sanitizeDiagnosticText, signOne } from "./windows-signing.mjs";
 
+const repository = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+assertNoNodeRuntimeInjection(process.env);
 const token = String(process.env.GLACIAL_WINDOWS_SIGN_BROKER_TOKEN ?? "");
 if (!/^[0-9a-f]{64}$/.test(token)) throw new Error("Signing broker token is invalid.");
-const config = loadSigningConfig(process.env);
+const authority = loadReleaseAuthority(process.env, { repository });
+const tools = authenticateReleaseTools(authority, { node: process.execPath });
+verifyAuthorizedReleaseCheckout(authority, tools.git, repository);
+const identity = parseInjectedBuildIdentity(process.env);
+if (!identity || identity.sourceCommit !== authority.source.commit) throw new Error("Signing broker build identity is not authorized.");
+const profile = String(process.env.GLACIAL_RELEASE_PROFILE ?? "");
+if (identity.buildProfile !== profile) throw new Error("Signing broker release profile is inconsistent.");
+const config = loadSigningConfig(process.env, { authority, tools, profile });
+assertReleaseCoordinatorParent(config, resolve(repository, "..", "scripts", "release", "validate-clean-environment.mjs"));
+if (!String(config.releaseId ?? "").includes(`-${authority.source.commit.slice(0, 12)}-`)) throw new Error("Signing broker release id is not source-bound.");
 const usedRoles = new Set();
 let complete = false;
 

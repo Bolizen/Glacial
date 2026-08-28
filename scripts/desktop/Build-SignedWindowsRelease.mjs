@@ -48,6 +48,7 @@ import { assertReleaseInputTree, releaseInputTreeReceipt } from "../release/rele
 import { PINNED_PNPM, verifyPreparedInputsByReconstruction } from "../release/validate-clean-environment.mjs";
 import {
   assertAuthenticatedReleaseTool,
+  assertCurrentReleaseAuthority,
   authenticateReleaseTools,
   canonicalRepositoryIdentity,
   loadReleaseAuthority,
@@ -100,7 +101,7 @@ function runText(command, args, options = {}) {
   return String(runCommand(command, args, options).stdout ?? "").trim();
 }
 
-export function startSigningBroker(environment) {
+function startSigningBroker(environment) {
   const token = randomBytes(32).toString("hex");
   const child = fork(SIGNING_BROKER, [], { env: { ...environment, GLACIAL_WINDOWS_SIGN_BROKER_TOKEN: token }, stdio: ["ignore", "ignore", "pipe", "ipc"], windowsHide: true });
   return new Promise((resolveStart, rejectStart) => {
@@ -291,13 +292,23 @@ export function verifyReleaseSource(gitPath, authority, preparedSource = null) {
   if (readFileSync(join(REPOSITORY, "backend", "app", "version.py"), "utf8").trim() !== 'GLACIAL_VERSION = "0.9.12"') throw new Error("Backend version constant does not identify 0.9.12.");
   if (!readFileSync(join(REPOSITORY, "backend", "app", "changelog.py"), "utf8").includes('"version": "0.9.12"')) throw new Error("Backend release metadata does not identify 0.9.12.");
   validateProductionDependencies(packageJson, pnpmLock, pnpmWorkspace);
-  return { root, branch, commit, originMain, repositoryIdentity, authorityDigest: authority.digest, authorityId: authority.authorityId, version: "0.9.12", versions, status: "" };
+  return {
+    root, branch, commit, originMain, repositoryIdentity,
+    authorityDigest: authority.digest,
+    authorityId: authority.authorityId,
+    authorityIssuedAtUtc: authority.authorization.issuedAtUtc,
+    authorityExpiresAtUtc: authority.authorization.expiresAtUtc,
+    authorizedProfiles: authority.authorization.profiles,
+    authorizedSigningProvider: authority.signing.provider,
+    version: "0.9.12", versions, status: "",
+  };
 }
 
 export function assertSameReleaseSource(before, after) {
-  for (const field of ["root", "branch", "commit", "originMain", "repositoryIdentity", "authorityDigest", "authorityId", "version", "status"]) {
+  for (const field of ["root", "branch", "commit", "originMain", "repositoryIdentity", "authorityDigest", "authorityId", "authorityIssuedAtUtc", "authorityExpiresAtUtc", "authorizedSigningProvider", "version", "status"]) {
     if (before[field] !== after[field]) throw new Error(`Release source changed during the build (${field}).`);
   }
+  if (JSON.stringify(before.authorizedProfiles) !== JSON.stringify(after.authorizedProfiles)) throw new Error("Release source changed during the build (authorizedProfiles).");
   if (JSON.stringify(before.versions) !== JSON.stringify(after.versions)) throw new Error("Release metadata changed during the build.");
   return true;
 }
@@ -453,7 +464,7 @@ function requireSigningEventIdentity(event, config, expectedCanonicalSubject, la
       throw new Error(`Invalid signing evidence object identity for ${label}.`);
     }
     if (existsSync(eventPath)) {
-      const identity = inspectSigningObject(eventPath, options);
+      const identity = inspectSigningObject(eventPath, { ...options, powerShellTool: config.powerShellTool });
       if (identity.objectId !== expectedObjectIdentity) throw new Error(`The signed filesystem object identity changed before final evidence verification for ${label}.`);
       if (sha256(eventPath) !== event.sha256) throw new Error(`The signed bytes do not match the signing event for ${label}.`);
     }
@@ -475,7 +486,7 @@ export function requireApplicationCapture(events, config, expectedCanonicalSubje
 export function assertExpectedTauriRestoration(workingApplication, capturedApplication, options = {}) {
   if (!existsSync(workingApplication) || !existsSync(capturedApplication)) throw new Error("The Tauri application lifecycle evidence is incomplete.");
   if (sha256(workingApplication) === sha256(capturedApplication)) throw new Error("Tauri did not restore the expected unsigned working application.");
-  const signature = options.signature ?? inspectAuthenticode(workingApplication, options.runner, options.env);
+  const signature = options.signature ?? inspectAuthenticode(workingApplication, options.runner, options.env, options.powerShellTool);
   if (signature.status !== "NotSigned") throw new Error("The restored Tauri working application has an unexpected signature state.");
   return { path: resolve(workingApplication), sha256: sha256(workingApplication), status: signature.status };
 }
@@ -548,6 +559,10 @@ function writeReleaseMetadata({ workRoot, source, releaseProfile, buildIdentity,
       authoritySha256: source.authorityDigest,
       repository: source.repositoryIdentity,
       authorizedCommit: source.commit,
+      issuedAtUtc: source.authorityIssuedAtUtc,
+      expiresAtUtc: source.authorityExpiresAtUtc,
+      authorizedProfiles: source.authorizedProfiles,
+      signingProvider: source.authorizedSigningProvider,
     },
     buildIdentity,
     headMatchedOriginMain: true,
@@ -606,7 +621,7 @@ export async function runReleaseSteps(steps, state = {}) {
   return state;
 }
 
-export function publishCandidate({ workRoot, finalRoot, sourceBefore, sourceVerifier, integrityVerifier = () => {}, renamer = renameSync, pathOptions = {} }) {
+export function publishCandidate({ workRoot, finalRoot, sourceBefore, sourceVerifier, integrityVerifier = () => {}, releaseAuthority = null, releaseProfile = null, renamer = renameSync, pathOptions = {} }) {
   assertSafePath(DESKTOP_BUILD_ROOT, workRoot, pathOptions);
   assertSafePath(DESKTOP_BUILD_ROOT, finalRoot, pathOptions);
   if (existsSync(finalRoot)) throw new Error(`Refusing to overwrite an existing release candidate: ${finalRoot}`);
@@ -614,10 +629,12 @@ export function publishCandidate({ workRoot, finalRoot, sourceBefore, sourceVeri
   integrityVerifier(workRoot);
   const sourceAfter = sourceVerifier();
   assertSameReleaseSource(sourceBefore, sourceAfter);
+  if (releaseAuthority) assertCurrentReleaseAuthority(releaseAuthority, { profile: releaseProfile });
   if (existsSync(finalRoot)) throw new Error(`Refusing to overwrite an existing release candidate: ${finalRoot}`);
   renamer(workRoot, finalRoot);
   try {
     integrityVerifier(finalRoot);
+    if (releaseAuthority) assertCurrentReleaseAuthority(releaseAuthority, { profile: releaseProfile });
   } catch (error) {
     if (existsSync(finalRoot) && !existsSync(workRoot)) renamer(finalRoot, workRoot);
     throw error;
@@ -643,7 +660,7 @@ export function assertPreparedReleaseInputs(preparedInputs) {
       || !/^[0-9a-f]{64}$/.test(String(preparedInputs.source.authorityDigest ?? ""))) {
     throw new Error("Signed release construction requires the authenticated primary source and its exact detached disposable checkout.");
   }
-  if (!preparedInputs.releaseAuthority || preparedInputs.releaseAuthority.schemaVersion !== 1
+  if (!preparedInputs.releaseAuthority || preparedInputs.releaseAuthority.schemaVersion !== 2
       || preparedInputs.releaseAuthority.digest !== preparedInputs.source.authorityDigest
       || preparedInputs.releaseAuthority.source?.commit !== preparedInputs.source.commit
       || preparedInputs.releaseAuthority.source?.repository !== preparedInputs.source.repositoryIdentity) {
@@ -689,16 +706,15 @@ export function assertPreparedReleaseInputs(preparedInputs) {
 export async function buildSignedRelease(releaseProfile, suppliedInputs = null) {
   if (process.platform !== "win32") throw new Error("The signed Windows release workflow must run on Windows.");
   const preparedInputs = assertPreparedReleaseInputs(suppliedInputs);
-  const authorityConfig = loadSigningConfig(process.env);
   const authority = loadReleaseAuthority(process.env, {
     repository: REPOSITORY,
-    expectedThumbprint: process.env.GLACIAL_WINDOWS_RELEASE_AUTHORITY_EXPECTED_THUMBPRINT,
-    forbiddenThumbprint: authorityConfig.expectedThumbprint,
   });
+  assertCurrentReleaseAuthority(authority, { profile: releaseProfile });
   if (authority.digest !== preparedInputs.releaseAuthority.digest || authority.authorityId !== preparedInputs.releaseAuthority.authorityId) {
     throw new Error("The release authority changed between preparation and signed construction.");
   }
   const tools = authenticateReleaseTools(authority, { node: process.execPath });
+  loadSigningConfig(process.env, { authority, tools, profile: releaseProfile });
   const gitPath = tools.git;
   const rustcPath = tools.rustc;
   const cargoPath = tools.cargo;
@@ -728,12 +744,13 @@ export async function buildSignedRelease(releaseProfile, suppliedInputs = null) 
   if (existsSync(signingRoot) || existsSync(workRoot) || existsSync(finalRoot)) throw new Error(`Refusing to reuse release state: ${releaseId}`);
   ensureSafeDirectory(DESKTOP_BUILD_ROOT, signingRoot);
 
-  const releaseEnvironment = signingEnvironment(process.env, releaseId, randomBytes(32).toString("hex"));
+  const releaseEnvironment = signingEnvironment(process.env, releaseId, randomBytes(32).toString("hex"), authority.signing.providerEnvironmentNames);
+  releaseEnvironment.GLACIAL_RELEASE_PROFILE = releaseProfile;
   const tauriTemporaryRoot = join(signingRoot, "tauri-temp");
   ensureSafeDirectory(DESKTOP_BUILD_ROOT, tauriTemporaryRoot);
   releaseEnvironment.TEMP = tauriTemporaryRoot;
   releaseEnvironment.TMP = tauriTemporaryRoot;
-  const config = loadSigningConfig(releaseEnvironment);
+  const config = loadSigningConfig(releaseEnvironment, { authority, tools, profile: releaseProfile });
   const overlayPath = join(signingRoot, "tauri.signing.conf.json");
   const state = { source, releaseId, workRoot, finalRoot, releaseProfile };
   await runAfterSignerPreflight({
@@ -797,7 +814,7 @@ export async function buildSignedRelease(releaseProfile, suppliedInputs = null) 
           for (const path of [state.workingApplication, state.application]) if (!existsSync(path)) throw new Error(`Tauri application lifecycle evidence is missing: ${path}`);
           verifySignature(state.installer, config, { expectFirstParty: true, expectedCanonicalSubject: signerIdentity.expectedCanonicalSubject });
           verifySignature(state.application, config, { expectFirstParty: true, expectedCanonicalSubject: signerIdentity.expectedCanonicalSubject });
-          const restored = assertExpectedTauriRestoration(state.workingApplication, state.application);
+          const restored = assertExpectedTauriRestoration(state.workingApplication, state.application, { powerShellTool: config.powerShellTool });
           state.applicationSha256 = sha256(state.application);
           const allSigningEvents = parseAuditLog(config.auditLog, config.auditKey);
           state.signingEvents = tauriSigningEventsAfterBackend(allSigningEvents, state.backendSigningEventCount);
@@ -812,7 +829,7 @@ export async function buildSignedRelease(releaseProfile, suppliedInputs = null) 
           verifySignature(state.installerDestination, config, { expectFirstParty: true, expectedCanonicalSubject: signerIdentity.expectedCanonicalSubject });
         } },
         { name: "write-metadata", run: () => { state.metadata = writeReleaseMetadata({ workRoot, source, releaseProfile, buildIdentity: state.buildIdentity, signerIdentity, installer: state.installerDestination, backendSigningRecords: state.backendSigningRecords, signingEvents: state.signingEvents, buildStartedUtc, applicationSha256: state.applicationSha256, installerApplicationEvidence: state.installerApplicationEvidence, inputProvenance: preparedInputs.provenance }); } },
-        { name: "publish", run: () => publishCandidate({ workRoot, finalRoot, sourceBefore: source, integrityVerifier: (root) => verifyPublishedHashes(root, join(root, basename(state.metadata.manifestPath)), join(root, basename(state.metadata.sumsPath))), sourceVerifier: () => verifyReleaseSource(gitPath, authority, preparedInputs.source) }) },
+        { name: "publish", run: () => publishCandidate({ workRoot, finalRoot, sourceBefore: source, releaseAuthority: authority, releaseProfile, integrityVerifier: (root) => verifyPublishedHashes(root, join(root, basename(state.metadata.manifestPath)), join(root, basename(state.metadata.sumsPath))), sourceVerifier: () => verifyReleaseSource(gitPath, authority, preparedInputs.source) }) },
       ], state);
     },
   });

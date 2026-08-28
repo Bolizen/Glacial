@@ -15,6 +15,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   DESKTOP_BUILD_ROOT,
+  assertNoNodeRuntimeInjection,
   assertCertificateIdentity,
   assertSafePath,
   authorizeTauriSigningRequest,
@@ -73,7 +74,8 @@ import {
   verifyPublishedHashes,
 } from "./Build-SignedWindowsRelease.mjs";
 import { developmentPlan, runDevelopmentCommand } from "./desktop-development.mjs";
-import { parseBackendStageAuthority } from "./tauri-build.mjs";
+import { parseBackendStageAuthority, runTauriBuild } from "./tauri-build.mjs";
+import { buildIdentityForProfile, serializeBuildIdentity } from "../release/build-identity.mjs";
 
 const TEST_PATH = fileURLToPath(import.meta.url);
 const REPOSITORY = resolve(dirname(TEST_PATH), "..", "..");
@@ -153,7 +155,11 @@ function sourceState(overrides = {}) {
     originMain: "f".repeat(40),
     repositoryIdentity: "github.com/bolizen/glacial",
     authorityDigest: "1".repeat(64),
-    authorityId: "G118-test-authority",
+    authorityId: "G120-test-authority",
+    authorityIssuedAtUtc: "2026-08-27T00:00:00.000Z",
+    authorityExpiresAtUtc: "2026-09-05T00:00:00.000Z",
+    authorizedProfiles: ["signed-preview"],
+    authorizedSigningProvider: "store",
     version: "0.9.12",
     status: "",
     versions: { packageJson: "0.9.12", tauri: "0.9.12" },
@@ -262,7 +268,7 @@ test("command provider keeps the file as one direct argument and forwards only n
     AZURE_CLIENT_SECRET: "not-allowed",
     AWS_SECRET_ACCESS_KEY: "not-allowed-either",
   });
-  const releaseEnvironment = signingEnvironment(source, "Glacial-0.9.12-ffffffffffff-20260719T120000Z", AUDIT_KEY);
+  const releaseEnvironment = signingEnvironment(source, "Glacial-0.9.12-ffffffffffff-20260719T120000Z", AUDIT_KEY, ["AZURE_CLIENT_ID"]);
   assert.equal(releaseEnvironment.AZURE_CLIENT_ID, "allowed-value");
   assert.equal(releaseEnvironment.GLACIAL_WINDOWS_SIGN_AUDIT_KEY, AUDIT_KEY);
   assert.equal("AZURE_CLIENT_SECRET" in releaseEnvironment, false);
@@ -300,6 +306,19 @@ test("base child environment excludes unrelated credential variables", () => {
   assert.equal("GITHUB_TOKEN" in environment, false);
   assert.equal("CUSTOM_FLAG" in environment, false);
   assert.ok(environment.SYSTEMROOT || environment.SystemRoot || environment.WINDIR);
+});
+
+test("release-capable children reject Node injection and require the canonical coordinator boundary", () => {
+  assert.equal(assertNoNodeRuntimeInjection({}), true);
+  assert.throws(() => assertNoNodeRuntimeInjection({ NODE_OPTIONS: "--require attacker.js" }), /NODE_OPTIONS is forbidden/);
+  assert.throws(() => assertNoNodeRuntimeInjection({ node_path: "C:\\attacker" }), /NODE_PATH is forbidden/);
+  const broker = readFileSync(join(REPOSITORY, "scripts", "desktop", "windows-signing-broker.mjs"), "utf8");
+  const tauri = readFileSync(join(REPOSITORY, "scripts", "desktop", "tauri-build.mjs"), "utf8");
+  const coordinator = readFileSync(join(REPOSITORY, "scripts", "release", "validate-clean-environment.mjs"), "utf8");
+  assert.match(broker, /assertReleaseCoordinatorParent\(config,/);
+  assert.match(tauri, /assertReleaseCoordinatorParent\(config,/);
+  assert.match(tauri, /releaseToolEnvironment\(minimalEnvironment\([\s\S]*, tools\)/);
+  assert.match(coordinator, /CANONICAL_WORKER_ARGUMENT[\s\S]*runCommand\(process\.execPath, \[scriptPath, CANONICAL_WORKER_ARGUMENT/);
 });
 
 test("opt-in signing failure diagnostics are useful, bounded, and control-character sanitized", () => {
@@ -459,7 +478,7 @@ test("reparse-point output ancestors are rejected before mutation", () => {
   assert.throws(() => assertSafePath(root, target, { pathInspector }), /reparse point/);
 });
 
-test("private-key probe fails before builds and cleans disposable files on timestamp/signing failure", () => {
+test("private-key probe refuses signing without current release authority", () => {
   const probeParent = join(TEST_ROOT, "probe-parent");
   mkdirSync(probeParent, { recursive: true });
   const probeSource = join(TEST_ROOT, "probe-source.exe");
@@ -475,15 +494,15 @@ test("private-key probe fails before builds and cleans disposable files on times
     if (args[0] === "timestamp") { calls.push("timestamp"); throw new Error("timestamp service unavailable"); }
     throw new Error(`Unexpected probe command: ${command}`);
   };
-  assert.throws(() => preflightSigningProvider(config, { probeParent, probeSource, runner, pathInspector: false }), /timestamp service unavailable/);
-  assert.deepEqual(calls, ["sign", "timestamp"]);
+  assert.throws(() => preflightSigningProvider(config, { probeParent, probeSource, runner, pathInspector: false }), /authentic authority-derived signing configuration/);
+  assert.deepEqual(calls, []);
   assert.deepEqual(readFileSync(probeSource), minimalPe());
   assert.equal(existsSync(probeParent), true);
   assert.equal(readFileSync(probeSource).length, 256);
   assert.deepEqual(readdirSync(probeParent), []);
 });
 
-test("private-key probe signs, verifies, derives trust, and removes its disposable PE", () => {
+test("private-key probe cannot be used as an authority-free signing oracle", () => {
   const probeParent = join(TEST_ROOT, "successful-probe-parent");
   mkdirSync(probeParent, { recursive: true });
   const probeSource = join(TEST_ROOT, "successful-probe-source.exe");
@@ -500,14 +519,12 @@ test("private-key probe signs, verifies, derives trust, and removes its disposab
     if (["sign", "timestamp", "verify"].includes(args[0])) { calls.push(args[0]); if (args[0] === "sign") signed = true; return { status: 0, stdout: "", stderr: "" }; }
     throw new Error(`Unexpected probe command: ${command}`);
   };
-  const identity = preflightSigningProvider(config, { probeParent, probeSource, runner, pathInspector: false });
-  assert.equal(identity.signerThumbprint, THUMBPRINT);
-  assert.equal(identity.trustClassification, "self-signed");
-  assert.deepEqual(calls, ["sign", "timestamp", "verify"]);
+  assert.throws(() => preflightSigningProvider(config, { probeParent, probeSource, runner, pathInspector: false }), /authentic authority-derived signing configuration/);
+  assert.deepEqual(calls, []);
   assert.deepEqual(readdirSync(probeParent), []);
 });
 
-test("signed application capture survives Tauri restoration and remains installer evidence", () => {
+test("application signing cannot reach the provider without current release authority", () => {
   const workingApplication = join(TEST_ROOT, "tauri", "target", "release", "glacial.exe");
   const capture = join(TEST_ROOT, "signing", "application", "Glacial.exe");
   const auditLog = join(TEST_ROOT, "signing", "signing-events.jsonl");
@@ -535,28 +552,18 @@ test("signed application capture survives Tauri restoration and remains installe
     throw new Error(`Unexpected signing command: ${command}`);
   };
 
-  signOne(workingApplication, config, { runner, pathInspector: false, authorization: exactSigningAuthorization(workingApplication, "application", { releaseId: RELEASE_ID, pathInspector: false }) });
-  const capturedBytes = readFileSync(capture);
-  const [applicationEvent] = readFileSync(auditLog, "utf8").trim().split(/\r?\n/).map((line) => JSON.parse(line));
-  assert.notDeepEqual(capturedBytes, original);
-  assert.equal(applicationEvent.beforeSha256, createHash("sha256").update(original).digest("hex").toUpperCase());
-  assert.equal(applicationEvent.sha256, sha256(capture));
-  assert.equal(applicationEvent.applicationCapturePath, privacySafePath(capture));
-  assert.equal(applicationEvent.path, privacySafePath(workingApplication));
-
-  writeFileSync(workingApplication, original);
-  assert.equal(assertExpectedTauriRestoration(workingApplication, capture, { signature: { status: "NotSigned" } }).status, "NotSigned");
+  assert.throws(() => signOne(workingApplication, config, { runner, pathInspector: false, authorization: exactSigningAuthorization(workingApplication, "application", { releaseId: RELEASE_ID, pathInspector: false }) }), /authentic authority-derived signing configuration/);
+  assert.deepEqual(readFileSync(workingApplication), original);
+  assert.equal(existsSync(capture), false);
+  assert.equal(existsSync(auditLog), false);
   assert.equal(assertNsisApplicationSource(nsisScript, workingApplication), workingApplication);
-  assert.throws(() => signOne(workingApplication, config, { runner, pathInspector: false, authorization: exactSigningAuthorization(workingApplication, "application", { releaseId: RELEASE_ID, pathInspector: false }) }), /duplicate/);
   assert.equal(readFileSync(failedEvidence, "utf8"), "preserve failed build");
 
   const unrelated = join(TEST_ROOT, "unrelated.exe");
   writeFileSync(unrelated, minimalPe());
-  assert.throws(() => signOne(unrelated, config, { runner, pathInspector: false }), /authorization/);
-  assert.throws(() => signOne(unrelated, config, { runner, pathInspector: false, authorization: exactSigningAuthorization(workingApplication, "application", { releaseId: RELEASE_ID, pathInspector: false }) }), /authorized artifact path/);
-  assert.deepEqual(readFileSync(capture), capturedBytes);
-  const events = readFileSync(auditLog, "utf8").trim().split(/\r?\n/).map((line) => JSON.parse(line));
-  assert.equal(events.length, 1);
+  assert.throws(() => signOne(unrelated, config, { runner, pathInspector: false }), /authentic authority-derived signing configuration/);
+  assert.throws(() => signOne(unrelated, config, { runner, pathInspector: false, authorization: exactSigningAuthorization(workingApplication, "application", { releaseId: RELEASE_ID, pathInspector: false }) }), /authentic authority-derived signing configuration/);
+  assert.equal(existsSync(capture), false);
 });
 
 test("Tauri signer authorization binds application and installer roles to canonical paths and digests", () => {
@@ -582,7 +589,7 @@ test("Tauri signer authorization binds application and installer roles to canoni
   assert.throws(() => authorizeTauriSigningRequest(unrelated, config), /authorized Tauri release artifact set/);
   const authorization = exactSigningAuthorization(application, "application");
   writeFileSync(application, Buffer.concat([readFileSync(application), Buffer.from("substituted")]));
-  assert.throws(() => signOne(application, { provider: "store" }, { authorization }), /pre-signing digest/);
+  assert.throws(() => signOne(application, { provider: "store" }, { authorization }), /authentic authority-derived signing configuration/);
 });
 
 test("Tauri signer rejects a pre-authorized hardlink alias", () => {
@@ -618,8 +625,58 @@ test("immutable signing plans bind release context and reject object substitutio
   };
   assert.throws(
     () => signOne(target, { provider: "store", signToolPath: "signtool.exe", expectedSubject: "CN=Icefields Development", expectedThumbprint: THUMBPRINT, applicationTarget: null }, { authorization, objectInspector, runner }),
-    /filesystem object identity changed/,
+    /authentic authority-derived signing configuration/,
   );
+});
+
+test("direct sign-one, standalone broker, and Tauri wrapper reject invocation-only authority claims", () => {
+  const target = join(TEST_ROOT, "direct-entrypoints", "glacial.exe");
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, minimalPe());
+  const direct = spawnSync(process.execPath, [join(REPOSITORY, "scripts", "desktop", "windows-signing.mjs"), "sign-one", target], {
+    cwd: REPOSITORY,
+    env: minimalEnvironment(storeEnvironment()),
+    encoding: "utf8",
+    shell: false,
+  });
+  assert.notEqual(direct.status, 0);
+  assert.match(direct.stderr, /Direct release-role signing is disabled/);
+
+  const directVerification = spawnSync(process.execPath, [join(REPOSITORY, "scripts", "desktop", "windows-signing.mjs"), "verify-one", target], {
+    cwd: REPOSITORY,
+    env: minimalEnvironment(storeEnvironment()),
+    encoding: "utf8",
+    shell: false,
+  });
+  assert.notEqual(directVerification.status, 0);
+  assert.match(directVerification.stderr, /release authority manifest must be an absolute path/);
+
+  const broker = spawnSync(process.execPath, [join(REPOSITORY, "scripts", "desktop", "windows-signing-broker.mjs")], {
+    cwd: REPOSITORY,
+    env: minimalEnvironment(storeEnvironment({ GLACIAL_WINDOWS_SIGN_BROKER_TOKEN: "a".repeat(64) }), {}, ["GLACIAL_WINDOWS_SIGN_BROKER_TOKEN"]),
+    encoding: "utf8",
+    shell: false,
+    timeout: 10_000,
+  });
+  assert.notEqual(broker.status, 0);
+  assert.match(broker.stderr, /release authority manifest must be an absolute path/);
+
+  const identity = buildIdentityForProfile({
+    profile: "signed-preview",
+    sourceCommit: "f".repeat(40),
+    signerIdentity: { canonicalSubject: "CN=ICEFIELDS DEVELOPMENT", signerThumbprint: THUMBPRINT, trustClassification: "self-signed" },
+  });
+  const tauriEnvironment = {
+    ...process.env,
+    GLACIAL_BUILD_IDENTITY_JSON: serializeBuildIdentity(identity),
+    GLACIAL_WINDOWS_RELEASE_ID: RELEASE_ID,
+    GLACIAL_WINDOWS_SIGN_BROKER_TOKEN: "b".repeat(64),
+    GLACIAL_WINDOWS_SIGN_BROKER_PORT: "12345",
+    GLACIAL_BACKEND_STAGE_AUTHORITY_JSON: '{"schemaVersion":1,"runtime":[]}',
+    GLACIAL_RELEASE_PROFILE: "signed-preview",
+  };
+  assert.throws(() => runTauriBuild([], tauriEnvironment), /release authority manifest must be an absolute path/);
+  assert.deepEqual(readFileSync(target), minimalPe());
 });
 
 test("signing rejects same-object byte mutation after the signed hash is captured", () => {
@@ -641,7 +698,7 @@ test("signing rejects same-object byte mutation after the signed hash is capture
   };
   assert.throws(
     () => signOne(target, { provider: "store", signToolPath: "signtool.exe", expectedSubject: "CN=Icefields Development", expectedThumbprint: THUMBPRINT, applicationTarget: null, releaseId: RELEASE_ID }, { authorization, objectInspector, runner }),
-    /signed bytes changed before signing evidence was committed/,
+    /authentic authority-derived signing configuration/,
   );
 });
 
@@ -743,6 +800,9 @@ test("release source revalidation rejects every mutable provenance field", () =>
     { repositoryIdentity: "github.com/attacker/glacial" },
     { authorityDigest: "2".repeat(64) },
     { authorityId: "substituted-authority" },
+    { authorityExpiresAtUtc: "2026-09-06T00:00:00.000Z" },
+    { authorizedProfiles: ["public-rc"] },
+    { authorizedSigningProvider: "command" },
     { status: " M file" },
     { version: "0.9.2" },
     { versions: { packageJson: "0.9.12", tauri: "0.9.4" } },
@@ -982,6 +1042,24 @@ test("candidate publication rejects mutation during the atomic rename boundary",
     },
     pathOptions: { pathInspector: false },
   }), /candidate integrity changed/);
+});
+
+test("candidate publication rejects an unauthenticated or stale authority before rename", () => {
+  const workRoot = join(TEST_ROOT, "authority-release-work", "candidate");
+  const finalRoot = join(TEST_ROOT, "authority-release-candidates", "candidate");
+  mkdirSync(workRoot, { recursive: true });
+  let renamed = false;
+  assert.throws(() => publishCandidate({
+    workRoot,
+    finalRoot,
+    sourceBefore: sourceState(),
+    sourceVerifier: sourceState,
+    releaseAuthority: { authorization: { profiles: ["signed-preview"] } },
+    releaseProfile: "signed-preview",
+    renamer: () => { renamed = true; },
+    pathOptions: { pathInspector: false },
+  }), /authentic machine-anchored release authority/);
+  assert.equal(renamed, false);
 });
 
 test("actual release-step executor stops before publication after any failed step", async () => {

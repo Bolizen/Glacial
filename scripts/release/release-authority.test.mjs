@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createHash, generateKeyPairSync, sign } from "node:crypto";
+import { createHash, generateKeyPairSync, sign, X509Certificate } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
@@ -13,7 +13,12 @@ import {
   canonicalRepositoryIdentity,
   loadReleaseAuthority,
   parseReleaseAuthority,
+  REQUIRED_RELEASE_TOOL_ROLES,
+  revalidateReleaseTool,
   releaseToolEnvironment,
+  TRUSTED_RELEASE_AUTHORITY_PUBLIC_KEY_PATH,
+  validateReleaseAuthorityBundle,
+  validateReleaseAuthorityScope,
   verifyDetachedReleaseAuthoritySignature,
 } from "./release-authority.mjs";
 import { runCommand } from "../desktop/windows-signing.mjs";
@@ -21,6 +26,7 @@ import { assertAuthorizedSourceIdentity } from "../desktop/Build-SignedWindowsRe
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const testRoot = join(repository, ".desktop-build", "release-authority-tests");
+const ARTIFACT_CERTIFICATE = new X509Certificate(Buffer.from("MIICwTCCAamgAwIBAgIJALsbm4mXf6qaMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMTFUljZWZpZWxkcyBEZXZlbG9wbWVudDAeFw0yNjA4MjYxNzI3NDNaFw0zMTA4MjcxNzI3NDNaMCAxHjAcBgNVBAMTFUljZWZpZWxkcyBEZXZlbG9wbWVudDCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBALogi/FVDefTZ9RmI8IZAN3iVAWhg1FEIIEZ1Ab2YaviMgwnwFBO+NvViU0Rd4lGSYZ2FvfvA00XzD6/NcmnIhiop4Ak59pAm893d3juTcels/pJnBfdJij8CL+7UH+BAPa1J0tZQgOpKcSNRoD2qt0wFF4YIcXaW+0WW9WQdil0+kHsLWp6MgiKIc6xzHGAqelQLcbBLeer6zhsmxzuLvwuizhqp8rGpK7EokJluLQqsLrSwBaUA4tvcgI5LnUU4HOywUqAm8ZzbE4X/LyiilyAlGqKRIkFA4YuoC/Qio0R9I0EGJQeaCyFYFEcREglzhI+INHUCXhBkRHDGfCMfTECAwEAATANBgkqhkiG9w0BAQsFAAOCAQEAYjEfXLsfsYSv0VoNOYGDg5BtJ+WXbm9owsHrArIrgOuZhhl8tFjr0Zq4iS8WqQwfcqfxRKd8TA+QaPyOEds2VqmTA2e6cdds3UA8IfAmuXfY8GnFBbSbpwcHAQYgaZ5K2F8y/3vF0tScj8DF6o7FvE3plMGSnoUv4xGpzEy30C96EtabiDwdeTSJRwqPXHc8quZVek31EgCO1WSFI+fVZQ+oaaPStj8XS9M9h2CvEwEmqM+FJF6paHmVFxEkUJPxUXxoJ8RXZUnSu/HLUsDmmCZC3pMgqcWyic41beuF7Hp9D6X6t/Z7BaOA3hvhPH1uw5iKmxoBzinVZhwtBwRCQw==", "base64"));
 
 function sha256(path) {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
@@ -28,11 +34,22 @@ function sha256(path) {
 
 function manifest(overrides = {}) {
   const tool = { path: process.execPath, sha256: sha256(process.execPath) };
+  const artifactSpki = ARTIFACT_CERTIFICATE.publicKey.export({ type: "spki", format: "der" });
   return {
-    schemaVersion: 1,
-    authorityId: "G118-test-authority",
+    schemaVersion: 2,
+    authorityId: "G120-test-authority",
+    authorization: { issuedAtUtc: "2026-08-27T00:00:00.000Z", expiresAtUtc: "2026-09-05T00:00:00.000Z", profiles: ["signed-preview"] },
     source: { repository: "https://github.com/Bolizen/Glacial.git", commit: "a".repeat(40) },
-    tools: Object.fromEntries(["node", "python", "git", "tar", "cargo", "rustc", "linker", "resourceCompiler", "cCompiler", "librarian"].map((role) => [role, tool])),
+    tools: Object.fromEntries(REQUIRED_RELEASE_TOOL_ROLES.map((role) => [role, tool])),
+    signing: {
+      provider: "store",
+      expectedSubject: "CN=Icefields Development",
+      expectedThumbprint: ARTIFACT_CERTIFICATE.fingerprint,
+      artifactSignerSpkiSha256: createHash("sha256").update(artifactSpki).digest("hex"),
+      timestampUrl: "https://timestamp.digicert.com/",
+      commandArgs: [],
+      providerEnvironmentNames: [],
+    },
     ...overrides,
   };
 }
@@ -60,7 +77,7 @@ test("authority parser binds exactly one intended repository, commit, and comple
   const authority = parseReleaseAuthority(Buffer.from(JSON.stringify(manifest())));
   assert.equal(authority.source.repository, "github.com/bolizen/glacial");
   assert.equal(authority.source.commit, "a".repeat(40));
-  assert.deepEqual(Object.keys(authority.tools), ["node", "python", "git", "tar", "cargo", "rustc", "linker", "resourceCompiler", "cCompiler", "librarian"]);
+  assert.deepEqual(Object.keys(authority.tools), REQUIRED_RELEASE_TOOL_ROLES);
   for (const repositoryUrl of [
     "https://github.com/Bolizen/Glacial.git",
     "git@github.com:Bolizen/Glacial.git",
@@ -83,17 +100,42 @@ test("production authority inputs fail closed when missing or stored inside the 
   assert.throws(() => loadReleaseAuthority({
     GLACIAL_WINDOWS_RELEASE_AUTHORITY_PATH: local,
     GLACIAL_WINDOWS_RELEASE_AUTHORITY_SIGNATURE_PATH: local,
-    GLACIAL_WINDOWS_RELEASE_AUTHORITY_CERTIFICATE_PATH: local,
+    GLACIAL_WINDOWS_ARTIFACT_SIGNER_CERTIFICATE_PATH: local,
   }, { repository, expectedThumbprint: "A".repeat(40) }), /must be outside the repository/);
 });
 
-test("source authority identity must be distinct from the artifact signer", () => {
-  const outsideRepository = resolve(repository, "..", "missing-authority");
-  assert.throws(() => loadReleaseAuthority({
-    GLACIAL_WINDOWS_RELEASE_AUTHORITY_PATH: outsideRepository,
-    GLACIAL_WINDOWS_RELEASE_AUTHORITY_SIGNATURE_PATH: outsideRepository,
-    GLACIAL_WINDOWS_RELEASE_AUTHORITY_CERTIFICATE_PATH: outsideRepository,
-  }, { repository, expectedThumbprint: "A".repeat(40), forbiddenThumbprint: "A".repeat(40) }), /must be independent/);
+test("replacement authority key is rejected even with a self-consistent caller bundle", () => {
+  const trusted = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const attacker = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const legitimateBytes = Buffer.from(JSON.stringify(manifest()));
+  const legitimateSignature = sign("sha256", legitimateBytes, trusted.privateKey);
+  assert.equal(validateReleaseAuthorityBundle({
+    manifestBytes: legitimateBytes,
+    signatureBytes: legitimateSignature,
+    trustedPublicKey: trusted.publicKey,
+    artifactCertificate: ARTIFACT_CERTIFICATE,
+    now: new Date("2026-08-28T00:00:00.000Z"),
+  }).authorityId, "G120-test-authority");
+  const attackerBytes = Buffer.from(JSON.stringify(manifest({ authorityId: "attacker-authority" })));
+  const attackerSignature = sign("sha256", attackerBytes, attacker.privateKey);
+  assert.throws(() => validateReleaseAuthorityBundle({
+    manifestBytes: attackerBytes,
+    signatureBytes: attackerSignature,
+    trustedPublicKey: trusted.publicKey,
+    artifactCertificate: ARTIFACT_CERTIFICATE,
+    now: new Date("2026-08-28T00:00:00.000Z"),
+  }), /signature is invalid/);
+  assert.equal(TRUSTED_RELEASE_AUTHORITY_PUBLIC_KEY_PATH, "C:\\Program Files\\Icefields\\Glacial Release Policy\\release-authority-public-key.pem");
+});
+
+test("signed release scope rejects stale, future, overlong, and wrong-profile authorization", () => {
+  const authority = parseReleaseAuthority(Buffer.from(JSON.stringify(manifest())));
+  assert.equal(validateReleaseAuthorityScope(authority, { now: new Date("2026-08-28T00:00:00.000Z"), profile: "signed-preview" }), authority);
+  assert.throws(() => validateReleaseAuthorityScope(authority, { now: new Date("2026-09-05T00:00:00.000Z") }), /expired/);
+  assert.throws(() => validateReleaseAuthorityScope(authority, { now: new Date("2026-08-01T00:00:00.000Z") }), /not yet valid/);
+  assert.throws(() => validateReleaseAuthorityScope(authority, { now: new Date("2026-08-28T00:00:00.000Z"), profile: "public-rc" }), /not authorized/);
+  const overlong = manifest({ authorization: { issuedAtUtc: "2026-08-01T00:00:00.000Z", expiresAtUtc: "2026-09-01T00:00:00.000Z", profiles: ["signed-preview"] } });
+  assert.throws(() => parseReleaseAuthority(Buffer.from(JSON.stringify(overlong))), /no longer than fourteen days/);
 });
 
 test("source authority rejects the artifact signer's public key even under another certificate identity", () => {
@@ -121,19 +163,42 @@ test("authenticated tools ignore earlier PATH entries and fail on byte or object
   writeFileSync(join(fakeBin, "git.exe"), "fake git");
   const record = { role: "git", path: approved, sha256: sha256(approved) };
   let tool = authenticateReleaseTool(record);
-  const environmentTools = Object.fromEntries(["cargo", "rustc", "linker", "resourceCompiler", "cCompiler", "librarian"]
-    .map((role) => [role, authenticateReleaseTool({ role, path: process.execPath, sha256: sha256(process.execPath) })]));
-  const environment = releaseToolEnvironment({ PATH: `${fakeBin};${process.env.PATH}` }, environmentTools);
-  assert.equal(assertAuthenticatedReleaseTool(tool), approved);
-  assert.equal(environment.PATH.split(";")[0], dirname(process.execPath));
+  assert.equal(revalidateReleaseTool(tool), approved);
 
   writeFileSync(approved, "same version but modified bytes");
-  assert.throws(() => assertAuthenticatedReleaseTool(tool), /digest does not match/);
+  assert.throws(() => revalidateReleaseTool(tool), /digest does not match/);
   writeFileSync(approved, "approved tool bytes");
   tool = authenticateReleaseTool(record);
   renameSync(approved, displaced);
   writeFileSync(approved, "approved tool bytes");
-  assert.throws(() => assertAuthenticatedReleaseTool(tool), /filesystem identity changed/);
+  assert.throws(() => revalidateReleaseTool(tool), /filesystem identity changed/);
+});
+
+test("PowerShell, SignTool, and command-provider substitutions fail the signed tool boundary", () => {
+  for (const role of ["powerShell", "signTool", "signingProvider"]) {
+    const approved = join(testRoot, `${role}.exe`);
+    const replacement = join(testRoot, `${role}.replacement.exe`);
+    writeFileSync(approved, `${role} approved bytes`);
+    const record = { role, path: approved, sha256: sha256(approved) };
+    const tool = authenticateReleaseTool(record);
+    writeFileSync(approved, `${role} substituted bytes`);
+    assert.throws(() => revalidateReleaseTool(tool), new RegExp(`tool ${role} digest does not match`));
+    writeFileSync(approved, `${role} approved bytes`);
+    const restored = authenticateReleaseTool(record);
+    renameSync(approved, replacement);
+    writeFileSync(approved, `${role} approved bytes`);
+    assert.throws(() => revalidateReleaseTool(restored), new RegExp(`tool ${role} filesystem identity changed`));
+  }
+  const combined = ["powerShell", "signTool", "signingProvider"].map((role) => {
+    const path = join(testRoot, `combined-${role}.exe`);
+    writeFileSync(path, `${role} combined approved bytes`);
+    return { role, path, tool: authenticateReleaseTool({ role, path, sha256: sha256(path) }) };
+  });
+  for (const item of combined) {
+    renameSync(item.path, `${item.path}.original`);
+    writeFileSync(item.path, `${item.role} combined approved bytes`);
+  }
+  for (const item of combined) assert.throws(() => revalidateReleaseTool(item.tool), /filesystem identity changed/);
 });
 
 test("copied rustup proxies are rejected without relying on a sibling rustup executable", { skip: process.platform !== "win32" }, () => {
@@ -144,15 +209,8 @@ test("copied rustup proxies are rejected without relying on a sibling rustup exe
   assert.throws(() => authenticateReleaseTool({ role: "cargo", path: copied, sha256: sha256(copied) }), /not a rustup proxy/);
 });
 
-test("legitimate approved Node toolset executes through the shared pre-launch boundary", () => {
+test("parsed authority data cannot mint executable tool capabilities", () => {
   const authority = parseReleaseAuthority(Buffer.from(JSON.stringify(manifest())));
-  const tools = authenticateReleaseTools(authority, { node: process.execPath, python: process.execPath });
-  const fakeBin = join(testRoot, "hostile-path");
-  mkdirSync(fakeBin);
-  for (const role of ["git", "tar", "cargo", "rustc"]) writeFileSync(join(fakeBin, `${role}.exe`), `fake ${role}`);
-  const environment = releaseToolEnvironment({ ...process.env, PATH: `${fakeBin};${process.env.PATH}` }, tools);
-  for (const role of ["git", "tar", "cargo", "rustc"]) {
-    const result = runCommand(tools[role], ["-e", `process.stdout.write('${role}')`], { env: environment });
-    assert.equal(result.stdout, role);
-  }
+  assert.throws(() => authenticateReleaseTools(authority, { node: process.execPath, python: process.execPath }), /authentic machine-anchored release authority/);
+  assert.throws(() => releaseToolEnvironment(process.env, { cargo: authenticateReleaseTool({ role: "cargo", path: process.execPath, sha256: sha256(process.execPath) }) }), /authenticated release tool/);
 });

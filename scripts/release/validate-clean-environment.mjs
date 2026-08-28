@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   DESKTOP_BUILD_ROOT,
   assertSafePath,
+  assertNoNodeRuntimeInjection,
   ensureSafeDirectory,
   loadSigningConfig,
   minimalEnvironment,
@@ -29,6 +30,7 @@ import {
 import { assertReleaseInputTree, releaseInputTreeReceipt } from "./release-input-provenance.mjs";
 import {
   assertAuthenticatedReleaseTool,
+  assertCurrentReleaseAuthority,
   authenticateReleaseTools,
   loadReleaseAuthority,
   releaseToolEnvironment,
@@ -37,6 +39,7 @@ import {
 const scriptPath = fileURLToPath(import.meta.url);
 const repository = resolve(dirname(scriptPath), "..", "..");
 const frontendRelative = "frontend";
+const CANONICAL_WORKER_ARGUMENT = "--glacial-canonical-release-worker";
 export const PINNED_PNPM = Object.freeze({
   version: "11.16.0",
   url: "https://registry.npmjs.org/pnpm/-/pnpm-11.16.0.tgz",
@@ -450,7 +453,9 @@ async function runCleanCheckout({ checkout, python, git, cargo, tar, tools, auth
       schemaVersion: authority.schemaVersion,
       authorityId: authority.authorityId,
       digest: authority.digest,
+      authorization: authority.authorization,
       source: authority.source,
+      signing: authority.signing,
     } : null,
     node: { root: join(frontend, "node_modules"), receipt: nodeReceipt },
     buildPython: { root: build.root, receipt: build.receipt },
@@ -493,14 +498,17 @@ async function runCleanCheckout({ checkout, python, git, cargo, tar, tools, auth
     ensureSafeDirectory(DESKTOP_BUILD_ROOT, dirname(destination));
     let published = false;
     try {
+      assertCurrentReleaseAuthority(authority, { profile });
       cpSync(built.releaseCandidate, staging, { recursive: true, errorOnExist: true, force: false });
       assertReleaseInputTree(staging, built.candidateReceipt);
       module.verifyPublishedHashes(staging, join(staging, "release-candidate-manifest.json"), join(staging, "SHA256SUMS.txt"));
+      assertCurrentReleaseAuthority(authority, { profile });
       if (existsSync(destination)) fail("Primary release candidate destination appeared during verified copy.");
       renameSync(staging, destination);
       published = true;
       assertReleaseInputTree(destination, built.candidateReceipt);
       module.verifyPublishedHashes(destination, join(destination, "release-candidate-manifest.json"), join(destination, "SHA256SUMS.txt"));
+      assertCurrentReleaseAuthority(authority, { profile });
     } catch (error) {
       if (published && existsSync(destination) && !existsSync(staging)) renameSync(destination, staging);
       throw error;
@@ -549,6 +557,7 @@ async function runCleanCheckout({ checkout, python, git, cargo, tar, tools, auth
 }
 
 export async function validateCleanEnvironment(argv = process.argv.slice(2)) {
+  assertNoNodeRuntimeInjection(process.env);
   const options = parseCleanEnvironmentArguments(argv);
   const hostEnvironment = minimalEnvironment(process.env, {
     PIP_DISABLE_PIP_VERSION_CHECK: "1",
@@ -560,13 +569,11 @@ export async function validateCleanEnvironment(argv = process.argv.slice(2)) {
   let authority = null;
   let tools = null;
   if (options.profile) {
-    const signingConfig = loadSigningConfig(process.env);
     authority = loadReleaseAuthority(process.env, {
       repository,
-      expectedThumbprint: process.env.GLACIAL_WINDOWS_RELEASE_AUTHORITY_EXPECTED_THUMBPRINT,
-      forbiddenThumbprint: signingConfig.expectedThumbprint,
     });
     tools = authenticateReleaseTools(authority, { node: process.execPath, python: options.python });
+    loadSigningConfig(process.env, { authority, tools, profile: options.profile });
   }
   const python = tools?.python ?? options.python;
   const git = tools?.git ?? resolveToolExecutable("git.exe", process.env, { forbiddenRoot: repository });
@@ -651,6 +658,32 @@ export async function validateCleanEnvironment(argv = process.argv.slice(2)) {
   return result;
 }
 
+async function main() {
+  const argv = process.argv.slice(2);
+  const workerCount = argv.filter((argument) => argument === CANONICAL_WORKER_ARGUMENT).length;
+  if (workerCount > 1) fail("The canonical release-worker marker may be provided only once.");
+  const worker = workerCount === 1;
+  const cleanArguments = argv.filter((argument) => argument !== CANONICAL_WORKER_ARGUMENT);
+  const options = parseCleanEnvironmentArguments(cleanArguments);
+  if (options.profile && !worker) {
+    assertNoNodeRuntimeInjection(process.env);
+    const environment = { ...process.env };
+    for (const name of Object.keys(environment)) {
+      if (new Set(["NODE_OPTIONS", "NODE_PATH"]).has(name.toUpperCase())) delete environment[name];
+    }
+    const result = runCommand(process.execPath, [scriptPath, CANONICAL_WORKER_ARGUMENT, ...cleanArguments], {
+      cwd: repository,
+      env: environment,
+      timeoutMs: 3_600_000,
+      includeFailureOutput: true,
+    });
+    if (result.stdout) process.stdout.write(sanitizeDiagnosticText(result.stdout));
+    if (result.stderr) process.stderr.write(sanitizeDiagnosticText(result.stderr));
+    return;
+  }
+  await validateCleanEnvironment(cleanArguments);
+}
+
 if (process.argv[1] && resolve(process.argv[1]) === resolve(scriptPath)) {
-  validateCleanEnvironment().catch((error) => { process.stderr.write(`${sanitizeDiagnosticText(error.message)}\n`); process.exitCode = 1; });
+  main().catch((error) => { process.stderr.write(`${sanitizeDiagnosticText(error.message)}\n`); process.exitCode = 1; });
 }

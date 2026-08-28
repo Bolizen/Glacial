@@ -19,12 +19,14 @@ import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path
 import { spawnSync } from "node:child_process";
 import { request as httpRequest } from "node:http";
 import { fileURLToPath } from "node:url";
-import { assertAuthenticatedReleaseTool } from "../release/release-authority.mjs";
+import { assertAuthenticatedReleaseTool, assertCurrentReleaseAuthority } from "../release/release-authority.mjs";
 
 export const DEFAULT_SIGNER_SUBJECT = "CN=Icefields Development";
 export const SIGNING_SCRIPT_PATH = fileURLToPath(import.meta.url);
 export const REPOSITORY_ROOT = resolve(dirname(SIGNING_SCRIPT_PATH), "..", "..");
 export const DESKTOP_BUILD_ROOT = resolve(REPOSITORY_ROOT, ".desktop-build");
+const AUTHENTIC_RELEASE_SIGNING_CONFIGS = new WeakSet();
+const AUTHENTIC_SIGNING_AUTHORIZATIONS = new WeakSet();
 
 const BASE_ENVIRONMENT_NAMES = [
   "APPDATA",
@@ -47,6 +49,9 @@ const BASE_ENVIRONMENT_NAMES = [
 ];
 
 const INTERNAL_ENVIRONMENT_NAMES = [
+  "GLACIAL_BUILD_IDENTITY_JSON",
+  "GLACIAL_RELEASE_PROFILE",
+  "GLACIAL_WINDOWS_ARTIFACT_SIGNER_CERTIFICATE_PATH",
   "GLACIAL_WINDOWS_CERTIFICATE_THUMBPRINT",
   "GLACIAL_WINDOWS_EXPECTED_SUBJECT",
   "GLACIAL_WINDOWS_EXPECTED_THUMBPRINT",
@@ -59,6 +64,8 @@ const INTERNAL_ENVIRONMENT_NAMES = [
   "GLACIAL_WINDOWS_SIGN_COMMAND_ARGS",
   "GLACIAL_WINDOWS_SIGN_COMMAND_ENV",
   "GLACIAL_WINDOWS_TIMESTAMP_URL",
+  "GLACIAL_WINDOWS_RELEASE_AUTHORITY_PATH",
+  "GLACIAL_WINDOWS_RELEASE_AUTHORITY_SIGNATURE_PATH",
 ];
 
 // This is the only PowerShell command text used by the signing pipeline. Dynamic
@@ -167,6 +174,13 @@ export const WINDOWS_SIGNING_POWERSHELL_HELPER_COMMAND = [
   "    }",
   "    [pscustomobject]@{ Safe = $true } | ConvertTo-Json -Compress",
   "  }",
+  "  'process-info' {",
+  "    $processId = [int]$payload.processId",
+  "    if ($processId -le 0) { throw 'Process id is invalid.' }",
+  "    $process = Get-CimInstance -ClassName Win32_Process -Filter (\"ProcessId = $processId\")",
+  "    if (-not $process) { throw 'Process was not found.' }",
+  "    [pscustomobject]@{ ProcessId = [int]$process.ProcessId; ExecutablePath = [string]$process.ExecutablePath; CommandLine = [string]$process.CommandLine } | ConvertTo-Json -Compress",
+  "  }",
   "  default { throw 'Unknown signing-helper operation.' }",
   "}",
 ].join("\n");
@@ -186,6 +200,15 @@ export function minimalEnvironment(source = process.env, extras = {}, allowedNam
     if (value !== undefined && value !== null) result[name] = String(value);
   }
   return result;
+}
+
+export function assertNoNodeRuntimeInjection(environment = process.env) {
+  for (const name of ["NODE_OPTIONS", "NODE_PATH"]) {
+    if (getEnvironmentValue(environment, name) != null) {
+      throw new Error(`${name} is forbidden for the signed-release coordinator and its children.`);
+    }
+  }
+  return true;
 }
 
 export function privacySafePath(value) {
@@ -367,42 +390,103 @@ function validateSigningAuditKey(value) {
 
 export function loadSigningConfig(env = process.env, options = {}) {
   const dryRun = options.dryRun === true;
-  const provider = String(env.GLACIAL_WINDOWS_SIGNING_PROVIDER ?? "").toLowerCase();
+  if (!dryRun && !new Set(["signed-preview", "public-rc"]).has(options.profile)) {
+    throw new Error("An authorized signed-release profile is required.");
+  }
+  const authority = dryRun ? null : assertCurrentReleaseAuthority(options.authority, { profile: options.profile });
+  const authorizedSigning = authority?.signing ?? null;
+  const tools = options.tools ?? null;
+  if (!dryRun && (!tools?.powerShell || !tools?.signTool || !tools?.signingProvider)) {
+    throw new Error("Authenticated PowerShell, SignTool, and signing-provider tools are required.");
+  }
+  if (!dryRun) {
+    for (const role of ["powerShell", "signTool", "signingProvider"]) {
+      const expected = authority.tools[role];
+      const supplied = tools[role];
+      if (supplied.role !== role || resolve(supplied.path).toLowerCase() !== resolve(expected.path).toLowerCase()
+          || supplied.sha256 !== expected.sha256) throw new Error(`Authenticated ${role} does not match the release authority.`);
+    }
+  }
+  const provider = authorizedSigning?.provider ?? String(env.GLACIAL_WINDOWS_SIGNING_PROVIDER ?? "").toLowerCase();
   if (provider !== "store" && provider !== "command") throw new Error("GLACIAL_WINDOWS_SIGNING_PROVIDER must be store or command.");
-  if (!/^(1|true)$/i.test(String(env.GLACIAL_WINDOWS_REQUIRE_TIMESTAMP ?? ""))) {
+  if (dryRun && !/^(1|true)$/i.test(String(env.GLACIAL_WINDOWS_REQUIRE_TIMESTAMP ?? ""))) {
     throw new Error("GLACIAL_WINDOWS_REQUIRE_TIMESTAMP must be 1 for signed releases.");
   }
-  const expectedSubject = String(env.GLACIAL_WINDOWS_EXPECTED_SUBJECT ?? DEFAULT_SIGNER_SUBJECT).trim();
+  const expectedSubject = String(authorizedSigning?.expectedSubject ?? env.GLACIAL_WINDOWS_EXPECTED_SUBJECT ?? DEFAULT_SIGNER_SUBJECT).trim();
   if (!expectedSubject) throw new Error("GLACIAL_WINDOWS_EXPECTED_SUBJECT must not be empty.");
-  const signToolPath = requireAbsoluteFile(env.GLACIAL_WINDOWS_SIGNTOOL_PATH, "GLACIAL_WINDOWS_SIGNTOOL_PATH", dryRun);
-  const timestampUrl = parseTimestampUrl(env.GLACIAL_WINDOWS_TIMESTAMP_URL);
+  const signToolPath = dryRun
+    ? requireAbsoluteFile(env.GLACIAL_WINDOWS_SIGNTOOL_PATH, "GLACIAL_WINDOWS_SIGNTOOL_PATH", true)
+    : assertAuthenticatedReleaseTool(tools.signTool);
+  const powerShellPath = dryRun ? null : assertAuthenticatedReleaseTool(tools.powerShell);
+  const timestampUrl = authorizedSigning?.timestampUrl ?? parseTimestampUrl(env.GLACIAL_WINDOWS_TIMESTAMP_URL);
   const releaseId = validateReleaseId(env.GLACIAL_WINDOWS_RELEASE_ID);
   const auditLog = releaseId ? resolve(DESKTOP_BUILD_ROOT, "signing", releaseId, "signing-events.jsonl") : null;
   const auditKey = releaseId ? validateSigningAuditKey(env.GLACIAL_WINDOWS_SIGN_AUDIT_KEY) : null;
   const applicationTarget = releaseId ? resolve(REPOSITORY_ROOT, "frontend", "src-tauri", "target", "release", "glacial.exe") : null;
   const applicationCapture = releaseId ? resolve(DESKTOP_BUILD_ROOT, "signing", releaseId, "application", "Glacial.exe") : null;
-  const releaseState = { releaseId, auditLog, auditKey, applicationTarget, applicationCapture };
+  const releaseState = {
+    releaseId, auditLog, auditKey, applicationTarget, applicationCapture,
+    releaseAuthority: authority,
+    authorityDigest: authority?.digest ?? null,
+    releaseProfile: dryRun ? null : options.profile,
+    nodeTool: tools?.node ?? null,
+    powerShellTool: tools?.powerShell ?? null,
+    powerShellPath,
+    signToolTool: tools?.signTool ?? null,
+    signingProviderTool: tools?.signingProvider ?? null,
+  };
 
   if (provider === "store") {
-    const thumbprint = normalizeThumbprint(env.GLACIAL_WINDOWS_CERTIFICATE_THUMBPRINT);
-    return { provider, expectedSubject, expectedThumbprint: thumbprint, certificateThumbprint: thumbprint, signToolPath, timestampUrl, requireTimestamp: true, ...releaseState };
+    const thumbprint = authorizedSigning?.expectedThumbprint ?? normalizeThumbprint(env.GLACIAL_WINDOWS_CERTIFICATE_THUMBPRINT);
+    return finalizeSigningConfig({ provider, expectedSubject, expectedThumbprint: thumbprint, certificateThumbprint: thumbprint, signToolPath, timestampUrl, requireTimestamp: true, ...releaseState }, dryRun);
   }
-  const command = requireAbsoluteFile(env.GLACIAL_WINDOWS_SIGN_COMMAND, "GLACIAL_WINDOWS_SIGN_COMMAND", dryRun);
-  const providerEnvironmentNames = parseEnvironmentNames(env.GLACIAL_WINDOWS_SIGN_COMMAND_ENV);
+  const command = dryRun
+    ? requireAbsoluteFile(env.GLACIAL_WINDOWS_SIGN_COMMAND, "GLACIAL_WINDOWS_SIGN_COMMAND", true)
+    : assertAuthenticatedReleaseTool(tools.signingProvider);
+  const providerEnvironmentNames = authorizedSigning?.providerEnvironmentNames ?? parseEnvironmentNames(env.GLACIAL_WINDOWS_SIGN_COMMAND_ENV);
   const providerEnvironment = minimalEnvironment(env, {}, providerEnvironmentNames);
-  return {
+  return finalizeSigningConfig({
     provider,
     expectedSubject,
-    expectedThumbprint: normalizeThumbprint(env.GLACIAL_WINDOWS_EXPECTED_THUMBPRINT, "GLACIAL_WINDOWS_EXPECTED_THUMBPRINT"),
+    expectedThumbprint: authorizedSigning?.expectedThumbprint ?? normalizeThumbprint(env.GLACIAL_WINDOWS_EXPECTED_THUMBPRINT, "GLACIAL_WINDOWS_EXPECTED_THUMBPRINT"),
     signToolPath,
     timestampUrl,
     requireTimestamp: true,
     command,
-    commandArgs: parseCommandArguments(env.GLACIAL_WINDOWS_SIGN_COMMAND_ARGS),
+    commandArgs: authorizedSigning?.commandArgs ?? parseCommandArguments(env.GLACIAL_WINDOWS_SIGN_COMMAND_ARGS),
     providerEnvironmentNames,
-    providerEnvironment,
+    providerEnvironment: Object.freeze(providerEnvironment),
     ...releaseState,
-  };
+  }, dryRun);
+}
+
+function finalizeSigningConfig(config, dryRun) {
+  const result = Object.freeze(config);
+  if (!dryRun) AUTHENTIC_RELEASE_SIGNING_CONFIGS.add(result);
+  return result;
+}
+
+function assertReleaseSigningConfig(config) {
+  if (!config || !AUTHENTIC_RELEASE_SIGNING_CONFIGS.has(config)) {
+    throw new Error("An authentic authority-derived signing configuration is required.");
+  }
+  const authority = assertCurrentReleaseAuthority(config.releaseAuthority, { profile: config.releaseProfile });
+  for (const role of ["node", "powerShell", "signTool", "signingProvider"]) {
+    const tool = config[`${role}Tool`];
+    if (assertAuthenticatedReleaseTool(tool).toLowerCase() !== resolve(authority.tools[role].path).toLowerCase()
+        || tool.sha256 !== authority.tools[role].sha256) {
+      throw new Error(`Signing configuration ${role} no longer matches its release authority.`);
+    }
+  }
+  const signing = authority.signing;
+  if (config.provider !== signing.provider || config.expectedSubject !== signing.expectedSubject
+      || config.expectedThumbprint !== signing.expectedThumbprint || config.timestampUrl !== signing.timestampUrl
+      || (config.provider === "command" && (config.command !== config.signingProviderTool.path
+        || JSON.stringify(config.commandArgs) !== JSON.stringify(signing.commandArgs)
+        || JSON.stringify(config.providerEnvironmentNames) !== JSON.stringify(signing.providerEnvironmentNames)))) {
+    throw new Error("Signing configuration no longer matches its release authority.");
+  }
+  return authority;
 }
 
 function systemExecutable(relativePath, env = process.env) {
@@ -462,9 +546,11 @@ export function resolvePnpmInvocation(env = process.env, options = {}) {
   return { command, prefixArgs: [pnpmCli] };
 }
 
-export function createPowerShellInvocation(operation, payload, env = process.env) {
+export function createPowerShellInvocation(operation, payload, env = process.env, powerShellTool = null) {
   return {
-    command: systemExecutable("System32/WindowsPowerShell/v1.0/powershell.exe", env),
+    command: powerShellTool
+      ? assertAuthenticatedReleaseTool(powerShellTool)
+      : systemExecutable("System32/WindowsPowerShell/v1.0/powershell.exe", env),
     args: ["-NoProfile", "-NonInteractive", "-Command", WINDOWS_SIGNING_POWERSHELL_HELPER_COMMAND],
     env: minimalEnvironment(env, {
       GLACIAL_WINDOWS_HELPER_OPERATION: operation,
@@ -473,16 +559,16 @@ export function createPowerShellInvocation(operation, payload, env = process.env
   };
 }
 
-function invokeWindowsHelper(operation, payload, runner = runCommand, env = process.env) {
-  const invocation = createPowerShellInvocation(operation, payload, env);
+function invokeWindowsHelper(operation, payload, runner = runCommand, env = process.env, powerShellTool = null) {
+  const invocation = createPowerShellInvocation(operation, payload, env, powerShellTool);
   const result = runner(invocation.command, invocation.args, { env: invocation.env, timeoutMs: 30_000 });
   const output = String(result.stdout ?? "").trim();
   if (!output) throw new Error(`Windows signing helper returned no ${operation} result.`);
   try { return JSON.parse(output); } catch { throw new Error(`Windows signing helper returned malformed ${operation} data.`); }
 }
 
-export function canonicalizeDistinguishedName(subject, runner = runCommand, env = process.env) {
-  const result = invokeWindowsHelper("canonical-subject", { subject }, runner, env);
+export function canonicalizeDistinguishedName(subject, runner = runCommand, env = process.env, powerShellTool = null) {
+  const result = invokeWindowsHelper("canonical-subject", { subject }, runner, env, powerShellTool);
   const canonical = String(result.CanonicalSubject ?? "").trim().toUpperCase();
   if (!canonical) throw new Error("Could not canonicalize the expected certificate subject.");
   return canonical;
@@ -662,8 +748,8 @@ export function listPortableExecutables(root) {
   return walkFiles(resolvedRoot).filter((path) => isPortableExecutable(readFileSync(path)));
 }
 
-export function inspectAuthenticode(file, runner = runCommand, env = process.env) {
-  const value = invokeWindowsHelper("signature", { path: resolve(file) }, runner, env);
+export function inspectAuthenticode(file, runner = runCommand, env = process.env, powerShellTool = null) {
+  const value = invokeWindowsHelper("signature", { path: resolve(file) }, runner, env, powerShellTool);
   return {
     status: value.Status,
     statusMessage: value.StatusMessage,
@@ -680,16 +766,18 @@ export function inspectAuthenticode(file, runner = runCommand, env = process.env
 }
 
 function verifyWithSignTool(file, config, runner = runCommand) {
-  runner(config.signToolPath, ["verify", "/pa", "/all", "/tw", resolve(file)], { env: minimalEnvironment(process.env), includeFailureOutput: true });
+  const signToolPath = config.signToolTool ? assertAuthenticatedReleaseTool(config.signToolTool) : config.signToolPath;
+  runner(signToolPath, ["verify", "/pa", "/all", "/tw", resolve(file)], { env: minimalEnvironment(process.env), includeFailureOutput: true });
 }
 
 export function verifySignature(file, config, options = {}) {
   const runner = options.runner ?? runCommand;
-  const signature = options.signature ?? inspectAuthenticode(file, runner, options.env);
+  assertReleaseSigningConfig(config);
+  const signature = options.signature ?? inspectAuthenticode(file, runner, options.env, config.powerShellTool);
   if (signature.status !== "Valid") throw new Error(`Authenticode verification failed for ${basename(file)}.`);
   verifyWithSignTool(file, config, runner);
   if (options.expectFirstParty) {
-    const expectedCanonical = options.expectedCanonicalSubject ?? canonicalizeDistinguishedName(config.expectedSubject, runner, options.env);
+    const expectedCanonical = options.expectedCanonicalSubject ?? canonicalizeDistinguishedName(config.expectedSubject, runner, options.env, config.powerShellTool);
     if (signature.signerThumbprint !== config.expectedThumbprint) throw new Error(`The signer thumbprint for ${basename(file)} is unexpected.`);
     if (String(signature.canonicalSubject ?? "").toUpperCase() !== expectedCanonical) throw new Error(`The signer subject for ${basename(file)} is not an exact canonical match.`);
     if (!signature.timestampThumbprint) throw new Error(`The first-party signature for ${basename(file)} is not timestamped.`);
@@ -703,6 +791,28 @@ export function verifySignature(file, config, options = {}) {
     if (!signature.trustValid || !["self-signed", "publicly-trusted"].includes(signature.trustClassification)) throw new Error(`The signer chain for ${basename(file)} is invalid, private, or ambiguous.`);
   }
   return signature;
+}
+
+function escapedRegularExpression(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+export function assertReleaseCoordinatorParent(config, expectedScript, runner = runCommand) {
+  assertReleaseSigningConfig(config);
+  const processInfo = invokeWindowsHelper("process-info", { processId: process.ppid }, runner, process.env, config.powerShellTool);
+  const expectedNode = assertAuthenticatedReleaseTool(config.nodeTool);
+  const actualExecutable = resolve(String(processInfo.ExecutablePath ?? ""));
+  if (actualExecutable.toLowerCase() !== resolve(expectedNode).toLowerCase()) {
+    throw new Error("The signed-release child process was not launched by the authenticated Node runtime.");
+  }
+  const nodePattern = escapedRegularExpression(resolve(expectedNode));
+  const scriptPattern = escapedRegularExpression(resolve(expectedScript));
+  const commandLine = String(processInfo.CommandLine ?? "");
+  const canonicalPrefix = new RegExp(`^(?:\"${nodePattern}\"|${nodePattern})\\s+(?:\"${scriptPattern}\"|${scriptPattern})(?:\\s|$)`, "i");
+  if (!canonicalPrefix.test(commandLine)) {
+    throw new Error("The signed-release child process was not launched by the canonical release coordinator.");
+  }
+  return Object.freeze({ processId: Number(processInfo.ProcessId), executablePath: actualExecutable, commandLine });
 }
 
 export function signingAuditRecord(record) {
@@ -795,7 +905,7 @@ export function inspectSigningObject(file, options = {}) {
   const target = realpathSync.native(resolve(file));
   if (options.objectInspector) return normalizeObjectIdentity(options.objectInspector(target));
   if (process.platform === "win32" && options.pathInspector !== false) {
-    const value = invokeWindowsHelper("file-identity", { path: target }, options.runner, options.env);
+    const value = invokeWindowsHelper("file-identity", { path: target }, options.runner, options.env, options.powerShellTool);
     const objectId = `${Number(value.VolumeSerialNumber).toString(16)}:${Number(value.FileIndexHigh).toString(16).padStart(8, "0")}${Number(value.FileIndexLow).toString(16).padStart(8, "0")}`;
     return normalizeObjectIdentity({
       objectId,
@@ -847,16 +957,23 @@ export function captureSignedApplication(file, config, options = {}) {
 const consumedSigningPlans = new WeakSet();
 
 export function exactSigningAuthorization(file, role, options = {}) {
+  const authority = options.config?.releaseAuthority ?? null;
+  if (authority) assertReleaseSigningConfig(options.config);
   const target = realpathSync.native(resolve(file));
-  const identity = inspectSigningObject(target, options);
-  return Object.freeze({
+  const identity = inspectSigningObject(target, { ...options, powerShellTool: options.config?.powerShellTool ?? options.powerShellTool });
+  const authorization = Object.freeze({
     schemaVersion: 1,
     role: String(role),
     path: target,
     beforeSha256: sha256(target),
     objectIdentity: identity.objectId,
     releaseId: options.releaseId ?? null,
+    authorityId: authority?.authorityId ?? null,
+    authorityDigest: authority?.digest ?? null,
+    authorityExpiresAtUtc: authority?.authorization.expiresAtUtc ?? null,
   });
+  if (authority) AUTHENTIC_SIGNING_AUTHORIZATIONS.add(authorization);
+  return authorization;
 }
 
 export function defaultTauriNsisPluginRoot() {
@@ -864,7 +981,9 @@ export function defaultTauriNsisPluginRoot() {
 }
 
 function consumeSigningAuthorization(file, authorization, options = {}) {
-  if (!authorization || consumedSigningPlans.has(authorization)) throw new Error("Signing requires one unused artifact authorization.");
+  if (!authorization || !AUTHENTIC_SIGNING_AUTHORIZATIONS.has(authorization) || consumedSigningPlans.has(authorization)) {
+    throw new Error("Signing requires one unused authentic artifact authorization.");
+  }
   const target = realpathSync.native(resolve(file));
   if (target.toLowerCase() !== resolve(authorization.path).toLowerCase()) throw new Error("Signing target is not the authorized artifact path.");
   if (sha256(target) !== authorization.beforeSha256) throw new Error("Signing target does not match its authorized pre-signing digest.");
@@ -890,38 +1009,46 @@ export function authorizeTauriSigningRequest(file, config, env = process.env, op
   else if (resolve(dirname(target)).toLowerCase() === additionalPluginRoot.toLowerCase() && basename(target).toLowerCase() === "nsis_tauri_utils.dll") role = "nsis-plugin:nsis_tauri_utils.dll";
   else if (resolve(dirname(target)).toLowerCase() === temporaryRoot.toLowerCase() && /^nst[0-9a-f]+\.tmp$/i.test(basename(target))) role = "nsis-uninstaller";
   if (!role) throw new Error("Signing target is not a member of the authorized Tauri release artifact set.");
-  return exactSigningAuthorization(target, role, { ...options, releaseId: config.releaseId ?? null });
+  return exactSigningAuthorization(target, role, { ...options, config, releaseId: config.releaseId ?? null });
 }
 
 export function signOne(file, config, options = {}) {
-  const target = consumeSigningAuthorization(file, options.authorization, { ...options, releaseId: config.releaseId ?? options.authorization?.releaseId ?? null });
+  const authority = assertReleaseSigningConfig(config);
+  const trustedOptions = { ...options, powerShellTool: config.powerShellTool, releaseId: config.releaseId ?? options.authorization?.releaseId ?? null };
+  const target = consumeSigningAuthorization(file, options.authorization, trustedOptions);
+  if (options.authorization?.authorityId !== authority.authorityId
+      || options.authorization?.authorityDigest !== authority.digest
+      || options.authorization?.authorityExpiresAtUtc !== authority.authorization.expiresAtUtc) {
+    throw new Error("Signing authorization is not derived from the current release authority.");
+  }
   if (!isPortableExecutable(readFileSync(target))) throw new Error(`Refusing to Authenticode-sign a non-PE file: ${basename(target)}`);
   if (samePath(target, config.applicationTarget) && config.applicationCapture && existsSync(config.applicationCapture)) throw new Error("Refusing a duplicate Glacial application capture.");
   const beforeSha256 = sha256(target);
   const runner = options.runner ?? runCommand;
   if (config.provider === "store") {
     const commandOptions = { env: minimalEnvironment(process.env), timeoutMs: 120_000, includeFailureOutput: true };
-    runner(config.signToolPath, buildStoreSignArgs(config, target), commandOptions);
-    runner(config.signToolPath, buildTimestampArgs(config, target), commandOptions);
+    runner(assertAuthenticatedReleaseTool(config.signToolTool), buildStoreSignArgs(config, target), commandOptions);
+    runner(assertAuthenticatedReleaseTool(config.signToolTool), buildTimestampArgs(config, target), commandOptions);
   } else {
-    runner(config.command, buildCommandSignArgs(config, target), { env: config.providerEnvironment, timeoutMs: 120_000 });
+    runner(assertAuthenticatedReleaseTool(config.signingProviderTool), buildCommandSignArgs(config, target), { env: config.providerEnvironment, timeoutMs: 120_000 });
   }
   const signature = verifySignature(target, config, { expectFirstParty: true, runner, env: options.env });
   const signedSha256 = sha256(target);
-  assertSameSigningObject(target, options.authorization, options, signedSha256);
-  const applicationCapture = captureSignedApplication(target, config, { ...options, runner });
+  assertSameSigningObject(target, options.authorization, trustedOptions, signedSha256);
+  const applicationCapture = captureSignedApplication(target, config, { ...trustedOptions, runner });
   if (applicationCapture && applicationCapture.sha256 !== signedSha256) throw new Error("The Glacial application capture does not match the signed bytes.");
-  assertSameSigningObject(target, options.authorization, options, signedSha256);
-  appendAuditRecord(config, { path: target, artifactRole: options.authorization.role, releaseId: options.authorization.releaseId, objectIdentity: options.authorization.objectIdentity, evidenceObjectIdentity: applicationCapture?.objectIdentity ?? null, beforeSha256, sha256: signedSha256, applicationCapturePath: applicationCapture?.path ?? null, signerThumbprint: signature.signerThumbprint, canonicalSubject: signature.canonicalSubject, timestampThumbprint: signature.timestampThumbprint, trustClassification: signature.trustClassification, signedUtc: new Date().toISOString() });
+  assertSameSigningObject(target, options.authorization, trustedOptions, signedSha256);
+  if (!options.skipAudit) appendAuditRecord(config, { path: target, artifactRole: options.authorization.role, releaseId: options.authorization.releaseId, objectIdentity: options.authorization.objectIdentity, evidenceObjectIdentity: applicationCapture?.objectIdentity ?? null, beforeSha256, sha256: signedSha256, applicationCapturePath: applicationCapture?.path ?? null, signerThumbprint: signature.signerThumbprint, canonicalSubject: signature.canonicalSubject, timestampThumbprint: signature.timestampThumbprint, trustClassification: signature.trustClassification, signedUtc: new Date().toISOString() });
   return signature;
 }
 
 export function preflightSigningProvider(config, options = {}) {
+  assertReleaseSigningConfig(config);
   const runner = options.runner ?? runCommand;
-  const expectedCanonical = canonicalizeDistinguishedName(config.expectedSubject, runner, options.env);
+  const expectedCanonical = canonicalizeDistinguishedName(config.expectedSubject, runner, options.env, config.powerShellTool);
   let storeCertificate = null;
   if (config.provider === "store") {
-    const result = invokeWindowsHelper("certificate", { thumbprint: config.certificateThumbprint, expectedSubject: config.expectedSubject }, runner, options.env);
+    const result = invokeWindowsHelper("certificate", { thumbprint: config.certificateThumbprint, expectedSubject: config.expectedSubject }, runner, options.env, config.powerShellTool);
     storeCertificate = assertCertificateIdentity(result.Candidates, config, expectedCanonical);
   }
   const probeParent = options.probeParent ?? resolve(DESKTOP_BUILD_ROOT, "signing-preflight");
@@ -932,9 +1059,9 @@ export function preflightSigningProvider(config, options = {}) {
   try {
     const source = options.probeSource ?? systemExecutable("System32/where.exe", options.env ?? process.env);
     createUnsignedProbeCopy(source, probe);
-    const initialSignature = inspectAuthenticode(probe, runner, options.env);
+    const initialSignature = inspectAuthenticode(probe, runner, options.env, config.powerShellTool);
     if (initialSignature.status !== "NotSigned") throw new Error("The disposable signing probe is not unsigned.");
-    const signature = signOne(probe, { ...config, auditLog: null }, { ...options, runner, env: options.env, authorization: exactSigningAuthorization(probe, "preflight-probe", { ...options, releaseId: config.releaseId ?? null }) });
+    const signature = signOne(probe, config, { ...options, skipAudit: true, runner, env: options.env, authorization: exactSigningAuthorization(probe, "preflight-probe", { ...options, config, releaseId: config.releaseId ?? null }) });
     if (signature.canonicalSubject.toUpperCase() !== expectedCanonical) throw new Error("The private-key probe used an unexpected signer subject.");
     return {
       expectedCanonicalSubject: expectedCanonical,
@@ -963,13 +1090,13 @@ export function planBackendSigning(entries) {
 export function signBackendTree(root, config, options = {}) {
   const runner = options.runner ?? runCommand;
   const resolvedRoot = resolve(root);
-  const entries = listPortableExecutables(resolvedRoot).map((path) => ({ path, relativePath: relative(resolvedRoot, path).replaceAll("\\", "/"), embeddedSignature: hasEmbeddedAuthenticode(readFileSync(path)), beforeSha256: sha256(path), signature: inspectAuthenticode(path, runner, options.env) }));
+  const entries = listPortableExecutables(resolvedRoot).map((path) => ({ path, relativePath: relative(resolvedRoot, path).replaceAll("\\", "/"), embeddedSignature: hasEmbeddedAuthenticode(readFileSync(path)), beforeSha256: sha256(path), signature: inspectAuthenticode(path, runner, options.env, config.powerShellTool) }));
   const plan = planBackendSigning(entries);
   if (!plan.some((entry) => entry.relativePath.toLowerCase() === "glacial-backend.exe")) throw new Error("The PyInstaller payload does not contain glacial-backend.exe.");
   const records = [];
   for (const entry of plan) {
     if (entry.action === "sign-first-party") {
-      const signature = signOne(entry.path, config, { ...options, runner, env: options.env, authorization: exactSigningAuthorization(entry.path, `backend:${entry.relativePath}`, { ...options, releaseId: config.releaseId ?? null }) });
+      const signature = signOne(entry.path, config, { ...options, runner, env: options.env, authorization: exactSigningAuthorization(entry.path, `backend:${entry.relativePath}`, { ...options, config, releaseId: config.releaseId ?? null }) });
       records.push({ ...entry, signature, afterSha256: sha256(entry.path), classification: "first-party" });
     } else {
       const signature = verifySignature(entry.path, config, { runner, env: options.env });
@@ -1001,8 +1128,10 @@ export function verifyPayloadTree(root, config, options = {}) {
   return records;
 }
 
-export function signingEnvironment(source, releaseId, auditKey) {
-  const providerNames = parseEnvironmentNames(source.GLACIAL_WINDOWS_SIGN_COMMAND_ENV);
+export function signingEnvironment(source, releaseId, auditKey, providerNames = []) {
+  if (!Array.isArray(providerNames) || providerNames.some((name) => typeof name !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name))) {
+    throw new Error("Authorized signing-provider environment names are invalid.");
+  }
   return minimalEnvironment(source, { GLACIAL_WINDOWS_RELEASE_ID: releaseId, GLACIAL_WINDOWS_SIGN_AUDIT_KEY: validateSigningAuditKey(auditKey) }, [...INTERNAL_ENVIRONMENT_NAMES, ...providerNames]);
 }
 
@@ -1015,7 +1144,8 @@ export function signingBrokerEnvironment(source, releaseId, port, token, buildId
     GLACIAL_BACKEND_STAGE_AUTHORITY_JSON: backendStageAuthority,
     CARGO_HOME: cargoHome,
     CARGO_NET_OFFLINE: "true",
-  }, ["GLACIAL_WINDOWS_RELEASE_ID"]);
+  }, ["GLACIAL_WINDOWS_RELEASE_ID", "GLACIAL_RELEASE_PROFILE", "GLACIAL_WINDOWS_ARTIFACT_SIGNER_CERTIFICATE_PATH",
+    "GLACIAL_WINDOWS_RELEASE_AUTHORITY_PATH", "GLACIAL_WINDOWS_RELEASE_AUTHORITY_SIGNATURE_PATH"]);
 }
 
 export function requestBrokerSignature(file, env = process.env) {
@@ -1042,8 +1172,13 @@ async function main() {
   const [command, argument] = process.argv.slice(2);
   if (command === "dry-run") { printDryRun(loadSigningConfig(process.env, { dryRun: true })); return; }
   if (command === "sign-request" && argument) { await requestBrokerSignature(argument); return; }
-  const config = loadSigningConfig();
-  if (command === "sign-one" && argument) { signOne(argument, config, { authorization: authorizeTauriSigningRequest(argument, config) }); return; }
+  if (command === "sign-one" && argument) throw new Error("Direct release-role signing is disabled; use the authenticated release coordinator.");
+  const { authenticateReleaseTools, loadReleaseAuthority, verifyAuthorizedReleaseCheckout } = await import("../release/release-authority.mjs");
+  const authority = loadReleaseAuthority(process.env, { repository: REPOSITORY_ROOT });
+  const tools = authenticateReleaseTools(authority, { node: process.execPath });
+  verifyAuthorizedReleaseCheckout(authority, tools.git, REPOSITORY_ROOT);
+  const profile = String(process.env.GLACIAL_RELEASE_PROFILE ?? "");
+  const config = loadSigningConfig(process.env, { authority, tools, profile });
   if (command === "verify-one" && argument) { process.stdout.write(`${JSON.stringify(verifySignature(argument, config, { expectFirstParty: true }), null, 2)}\n`); return; }
   if (command === "verify-tree" && argument) { process.stdout.write(`${JSON.stringify(verifyPayloadTree(argument, config, { requiredFirstParty: process.argv.slice(4) }), null, 2)}\n`); return; }
   throw new Error("Usage: windows-signing.mjs dry-run | sign-one <PE> | verify-one <PE> | verify-tree <directory> [required first-party paths...]");

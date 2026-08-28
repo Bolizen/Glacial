@@ -9,12 +9,22 @@ import {
   serializeBuildIdentity,
 } from "../release/build-identity.mjs";
 import {
+  assertNoNodeRuntimeInjection,
+  assertReleaseCoordinatorParent,
+  loadSigningConfig,
   minimalEnvironment,
   resolveToolExecutable,
   runCommand,
   sanitizeDiagnosticText,
   validateStructuredDigest,
 } from "./windows-signing.mjs";
+import {
+  assertAuthenticatedReleaseTool,
+  authenticateReleaseTools,
+  loadReleaseAuthority,
+  releaseToolEnvironment,
+  verifyAuthorizedReleaseCheckout,
+} from "../release/release-authority.mjs";
 import { verifyBackendStageReceipt } from "./backend-stage-integrity.mjs";
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
@@ -62,6 +72,7 @@ export function resolveProductionBuildIdentity(environment = process.env) {
 }
 
 export function runTauriBuild(args = process.argv.slice(2), environment = process.env) {
+  assertNoNodeRuntimeInjection(environment);
   if (!existsSync(TAURI_CLI) || !readFileSync(TAURI_CLI, "utf8").includes("run")) {
     throw new Error("The locked Tauri CLI is unavailable.");
   }
@@ -69,6 +80,14 @@ export function runTauriBuild(args = process.argv.slice(2), environment = proces
   if (!new Set(["signed-preview", "public-rc"]).has(identity.buildProfile)) {
     throw new Error("Direct internal Tauri packaging is disabled; only the authenticated signed-release coordinator may package an application.");
   }
+  const authority = loadReleaseAuthority(environment, { repository: REPOSITORY });
+  const tools = authenticateReleaseTools(authority, { node: process.execPath });
+  verifyAuthorizedReleaseCheckout(authority, tools.git, REPOSITORY);
+  if (identity.sourceCommit !== authority.source.commit) throw new Error("The Tauri build identity is not authorized for this source commit.");
+  const profile = String(environment.GLACIAL_RELEASE_PROFILE ?? "");
+  if (profile !== identity.buildProfile) throw new Error("The Tauri release profile is inconsistent.");
+  const config = loadSigningConfig(environment, { authority, tools, profile });
+  assertReleaseCoordinatorParent(config, resolve(REPOSITORY, "..", "scripts", "release", "validate-clean-environment.mjs"));
   if (!/^Glacial-0\.9\.12-[0-9a-f]{12}-\d{8}T\d{6}Z$/.test(String(environment.GLACIAL_WINDOWS_RELEASE_ID ?? ""))
       || !/^[0-9a-f]{64}$/.test(String(environment.GLACIAL_WINDOWS_SIGN_BROKER_TOKEN ?? ""))
       || !Number.isInteger(Number(environment.GLACIAL_WINDOWS_SIGN_BROKER_PORT))) {
@@ -82,20 +101,19 @@ export function runTauriBuild(args = process.argv.slice(2), environment = proces
   };
   const stageAuthority = parseBackendStageAuthority(environment);
   verifyBackendStageReceipt(receiptOptions, stageAuthority);
-  const buildEnvironment = minimalEnvironment(environment, {
+  const buildEnvironment = releaseToolEnvironment(minimalEnvironment(environment, {
     GLACIAL_BUILD_IDENTITY_JSON: serializeBuildIdentity(identity),
   }, ["GLACIAL_BUILD_IDENTITY_JSON", "GLACIAL_BACKEND_STAGE_AUTHORITY_JSON", "GLACIAL_WINDOWS_RELEASE_ID",
-    "CARGO", "CARGO_HOME", "CARGO_NET_OFFLINE", "RUSTC", "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER",
-    "RC", "RC_x86_64_pc_windows_msvc", "CC", "CC_x86_64_pc_windows_msvc", "AR", "AR_x86_64_pc_windows_msvc",
-    "GLACIAL_RELEASE_CARGO_AUTHORITY_JSON",
-    "GLACIAL_WINDOWS_SIGN_BROKER_PORT", "GLACIAL_WINDOWS_SIGN_BROKER_TOKEN"]);
-  runCommand(process.execPath, [GLIB_VERIFIER], {
+    "CARGO_HOME", "CARGO_NET_OFFLINE", "CARGO_TARGET_DIR",
+    "GLACIAL_WINDOWS_SIGN_BROKER_PORT", "GLACIAL_WINDOWS_SIGN_BROKER_TOKEN"]), tools);
+  const nodePath = assertAuthenticatedReleaseTool(tools.node);
+  runCommand(nodePath, [GLIB_VERIFIER], {
     cwd: REPOSITORY,
     env: buildEnvironment,
     timeoutMs: 300_000,
     includeFailureOutput: true,
   });
-  const result = runCommand(process.execPath, [TAURI_CLI, "build", ...args], {
+  const result = runCommand(nodePath, [TAURI_CLI, "build", ...args], {
     cwd: FRONTEND,
     env: buildEnvironment,
     timeoutMs: 900_000,
