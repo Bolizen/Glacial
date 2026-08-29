@@ -10,8 +10,7 @@ import {
 } from "../release/build-identity.mjs";
 import {
   assertNoNodeRuntimeInjection,
-  assertReleaseCoordinatorParent,
-  loadSigningConfig,
+  assertCanonicalReleaseChildProcess,
   minimalEnvironment,
   resolveToolExecutable,
   runCommand,
@@ -86,8 +85,7 @@ export function runTauriBuild(args = process.argv.slice(2), environment = proces
   if (identity.sourceCommit !== authority.source.commit) throw new Error("The Tauri build identity is not authorized for this source commit.");
   const profile = String(environment.GLACIAL_RELEASE_PROFILE ?? "");
   if (profile !== identity.buildProfile) throw new Error("The Tauri release profile is inconsistent.");
-  const config = loadSigningConfig(environment, { authority, tools, profile });
-  assertReleaseCoordinatorParent(config, resolve(REPOSITORY, "..", "scripts", "release", "validate-clean-environment.mjs"));
+  assertCanonicalReleaseChildProcess(environment, { authority, tools, profile });
   if (!/^Glacial-0\.9\.12-[0-9a-f]{12}-\d{8}T\d{6}Z$/.test(String(environment.GLACIAL_WINDOWS_RELEASE_ID ?? ""))
       || !/^[0-9a-f]{64}$/.test(String(environment.GLACIAL_WINDOWS_SIGN_BROKER_TOKEN ?? ""))
       || !Number.isInteger(Number(environment.GLACIAL_WINDOWS_SIGN_BROKER_PORT))) {

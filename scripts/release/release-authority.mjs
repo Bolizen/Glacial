@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { constants as cryptoConstants, createHash, createPublicKey, verify, X509Certificate } from "node:crypto";
 import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 export const GLACIAL_REPOSITORY_IDENTITY = "github.com/bolizen/glacial";
 export const TRUSTED_RELEASE_AUTHORITY_PUBLIC_KEY_PATH = "C:\\Program Files\\Icefields\\Glacial Release Policy\\release-authority-public-key.pem";
@@ -295,6 +295,69 @@ function filesystemIdentity(path) {
   return Object.freeze({ dev: String(metadata.dev), ino: String(metadata.ino), size: String(metadata.size) });
 }
 
+function inspectCanonicalSourceFile(path, label) {
+  const target = resolve(path);
+  let metadata;
+  try { metadata = lstatSync(target, { bigint: true }); } catch { fail(`${label} is missing.`); }
+  if (!metadata.isFile() || metadata.isSymbolicLink()) fail(`${label} must be a normal file.`);
+  if (metadata.nlink !== 1n) fail(`${label} must have exactly one filesystem link.`);
+  const canonical = realpathSync.native(target);
+  if (normalizedPath(canonical) !== normalizedPath(target)) fail(`${label} must not be redirected.`);
+  return Object.freeze({ path: target, sha256: sha256Bytes(readFileSync(target)), identity: filesystemIdentity(target) });
+}
+
+function authenticatedGitPath(gitTool, repository, argument) {
+  const value = runAuthenticatedGit(gitTool, repository, ["rev-parse", argument]);
+  const target = isAbsolute(value) ? value : resolve(repository, value);
+  return realpathSync.native(target);
+}
+
+export function verifyCanonicalReleaseCheckoutRelationship(authority, gitTool, releaseRepository) {
+  const releaseRoot = realpathSync.native(resolve(releaseRepository));
+  const primaryRoot = realpathSync.native(resolve(releaseRoot, ".."));
+  verifyAuthorizedReleaseCheckout(authority, gitTool, primaryRoot);
+  verifyAuthorizedReleaseCheckout(authority, gitTool, releaseRoot);
+
+  const primaryCommonDirectory = authenticatedGitPath(gitTool, primaryRoot, "--git-common-dir");
+  const releaseCommonDirectory = authenticatedGitPath(gitTool, releaseRoot, "--git-common-dir");
+  const primaryGitDirectory = authenticatedGitPath(gitTool, primaryRoot, "--git-dir");
+  const releaseGitDirectory = authenticatedGitPath(gitTool, releaseRoot, "--git-dir");
+
+  const coordinatorRelativePath = join("scripts", "release", "validate-clean-environment.mjs");
+  const coordinatorScript = inspectCanonicalSourceFile(join(primaryRoot, coordinatorRelativePath), "the canonical release coordinator script");
+  const authorizedCoordinatorScript = inspectCanonicalSourceFile(join(releaseRoot, coordinatorRelativePath), "the authorized release coordinator script");
+  return validateCanonicalReleaseCheckoutObservation({
+    primaryRepository: primaryRoot,
+    releaseRepository: releaseRoot,
+    gitCommonDirectory: primaryCommonDirectory,
+    releaseCommonDirectory,
+    primaryGitDirectory,
+    releaseGitDirectory,
+    coordinatorScript,
+    authorizedCoordinatorScript,
+  });
+}
+
+export function validateCanonicalReleaseCheckoutObservation(observation) {
+  if (basename(resolve(observation?.releaseRepository ?? "")).toLowerCase() !== "dist"
+      || normalizedPath(resolve(observation.releaseRepository, "..")) !== normalizedPath(observation.primaryRepository)) {
+    fail("the signed release checkout must be the canonical dist worktree.");
+  }
+  if (normalizedPath(observation.primaryRepository) === normalizedPath(observation.releaseRepository)
+      || normalizedPath(observation.gitCommonDirectory) !== normalizedPath(observation.releaseCommonDirectory)
+      || normalizedPath(observation.gitCommonDirectory) !== normalizedPath(observation.primaryGitDirectory)
+      || normalizedPath(observation.gitCommonDirectory) === normalizedPath(observation.releaseGitDirectory)) {
+    fail("the signed release checkout does not have the canonical primary/worktree Git relationship.");
+  }
+  if (normalizedPath(resolve(observation.primaryRepository, ".git")) !== normalizedPath(observation.gitCommonDirectory)) {
+    fail("the signed release checkout is not attached to the authorized primary repository.");
+  }
+  if (observation.coordinatorScript?.sha256 !== observation.authorizedCoordinatorScript?.sha256) {
+    fail("the canonical release coordinator does not match the exact authorized checkout.");
+  }
+  return Object.freeze(observation);
+}
+
 function assertDirectRustTool(tool) {
   if (!["cargo", "rustc"].includes(tool.role)) return;
   const environment = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.toUpperCase().startsWith("RUSTUP_")));
@@ -334,13 +397,28 @@ export function revalidateReleaseTool(tool) {
   return tool.path;
 }
 
+export function assertExecutingNodeTool(tool) {
+  if (tool?.role !== "node") fail("the executing runtime must use the signed Node tool role.");
+  const approved = revalidateReleaseTool(tool);
+  const executing = realpathSync.native(process.execPath);
+  if (normalizedPath(executing) !== normalizedPath(approved)) fail("the executing Node runtime is not the signed Node tool.");
+  if (JSON.stringify(filesystemIdentity(executing)) !== JSON.stringify(tool.identity)) {
+    fail("the executing Node runtime filesystem identity does not match the signed Node tool.");
+  }
+  return approved;
+}
+
 export function authenticateReleaseTools(authority, expectedPaths = {}) {
   assertCurrentReleaseAuthority(authority);
+  if (!Object.hasOwn(expectedPaths, "node") || normalizedPath(expectedPaths.node) !== normalizedPath(process.execPath)) {
+    fail("security-sensitive Node processes must bind process.execPath to the signed Node tool.");
+  }
   const tools = Object.fromEntries(REQUIRED_RELEASE_TOOL_ROLES.map((role) => [
     role,
     inspectReleaseTool(authority.tools[role], expectedPaths[role] ?? null),
   ]));
   for (const tool of Object.values(tools)) AUTHENTIC_RELEASE_TOOLS.add(tool);
+  assertExecutingNodeTool(tools.node);
   return Object.freeze(tools);
 }
 

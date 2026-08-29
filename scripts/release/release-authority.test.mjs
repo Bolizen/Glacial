@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import {
   assertAuthenticatedReleaseTool,
   assertDistinctAuthorityPublicKeys,
+  assertExecutingNodeTool,
   authenticateReleaseTool,
   authenticateReleaseTools,
   canonicalRepositoryIdentity,
@@ -18,10 +19,12 @@ import {
   releaseToolEnvironment,
   TRUSTED_RELEASE_AUTHORITY_PUBLIC_KEY_PATH,
   validateReleaseAuthorityBundle,
+  validateCanonicalReleaseCheckoutObservation,
   validateReleaseAuthorityScope,
   verifyDetachedReleaseAuthoritySignature,
 } from "./release-authority.mjs";
 import { runCommand } from "../desktop/windows-signing.mjs";
+import * as windowsSigning from "../desktop/windows-signing.mjs";
 import { assertAuthorizedSourceIdentity } from "../desktop/Build-SignedWindowsRelease.mjs";
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -213,4 +216,63 @@ test("parsed authority data cannot mint executable tool capabilities", () => {
   const authority = parseReleaseAuthority(Buffer.from(JSON.stringify(manifest())));
   assert.throws(() => authenticateReleaseTools(authority, { node: process.execPath, python: process.execPath }), /authentic machine-anchored release authority/);
   assert.throws(() => releaseToolEnvironment(process.env, { cargo: authenticateReleaseTool({ role: "cargo", path: process.execPath, sha256: sha256(process.execPath) }) }), /authenticated release tool/);
+});
+
+test("a legitimate current test authority and signer cannot use the external product-signing import chain", () => {
+  const trusted = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const manifestBytes = Buffer.from(JSON.stringify(manifest()));
+  const authority = validateReleaseAuthorityBundle({
+    manifestBytes,
+    signatureBytes: sign("sha256", manifestBytes, trusted.privateKey),
+    trustedPublicKey: trusted.publicKey,
+    artifactCertificate: ARTIFACT_CERTIFICATE,
+    now: new Date("2026-08-28T00:00:00.000Z"),
+  });
+  assert.equal(validateReleaseAuthorityScope(authority, { now: new Date("2026-08-28T00:00:00.000Z"), profile: "signed-preview" }), authority);
+  let signerCalls = 0;
+  const signer = () => { signerCalls += 1; };
+  assert.throws(() => windowsSigning.loadSigningConfig({
+    GLACIAL_WINDOWS_RELEASE_ID: "Glacial-0.9.12-aaaaaaaaaaaa-20260828T000000Z",
+    GLACIAL_WINDOWS_SIGN_AUDIT_KEY: "9".repeat(64),
+  }, { authority, profile: "signed-preview", signer }), /private to an authenticated release signing session/);
+  for (const name of ["exactSigningAuthorization", "signOne", "signBackendTree", "authorizeTauriSigningRequest"]) {
+    assert.equal(windowsSigning[name], undefined);
+  }
+  assert.equal(signerCalls, 0);
+});
+
+test("an approved Node record for a different executable cannot authorize the executing runtime", () => {
+  const approvedNode = join(testRoot, "approved-node.exe");
+  copyFileSync(process.execPath, approvedNode);
+  const tool = authenticateReleaseTool({ role: "node", path: approvedNode, sha256: sha256(approvedNode) });
+  assert.throws(() => assertExecutingNodeTool(tool), /executing Node runtime is not the signed Node tool/);
+});
+
+test("canonical coordinator checkout observations reject sibling and alternate Git relationships", () => {
+  const primaryRepository = resolve("Z:\\approved-glacial");
+  const releaseRepository = join(primaryRepository, "dist");
+  const gitCommonDirectory = join(primaryRepository, ".git");
+  const observation = {
+    primaryRepository,
+    releaseRepository,
+    gitCommonDirectory,
+    releaseCommonDirectory: gitCommonDirectory,
+    primaryGitDirectory: gitCommonDirectory,
+    releaseGitDirectory: join(gitCommonDirectory, "worktrees", "dist"),
+    coordinatorScript: { sha256: "a".repeat(64) },
+    authorizedCoordinatorScript: { sha256: "a".repeat(64) },
+  };
+  assert.equal(validateCanonicalReleaseCheckoutObservation(observation), observation);
+  assert.throws(() => validateCanonicalReleaseCheckoutObservation({
+    ...observation,
+    releaseRepository: resolve("Z:\\sibling-glacial\\dist"),
+  }), /canonical dist worktree/);
+  assert.throws(() => validateCanonicalReleaseCheckoutObservation({
+    ...observation,
+    releaseCommonDirectory: resolve("Z:\\sibling-glacial\\.git"),
+  }), /primary\/worktree Git relationship/);
+  assert.throws(() => validateCanonicalReleaseCheckoutObservation({
+    ...observation,
+    authorizedCoordinatorScript: { sha256: "b".repeat(64) },
+  }), /exact authorized checkout/);
 });

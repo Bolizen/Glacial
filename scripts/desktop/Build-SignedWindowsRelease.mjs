@@ -12,8 +12,8 @@ import {
 } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fork } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
+import { createServer } from "node:http";
 import {
   DESKTOP_BUILD_ROOT,
   assertSafePath,
@@ -23,7 +23,7 @@ import {
   inspectSigningObject,
   loadSigningConfig,
   minimalEnvironment,
-  preflightSigningProvider,
+  openCanonicalReleaseSigningSession,
   parseSigningAuditRecord,
   privacySafePath,
   removeSafeTree,
@@ -31,9 +31,9 @@ import {
   runCommand,
   sanitizeDiagnosticText,
   sha256,
-  signBackendTree,
   signingBrokerEnvironment,
   signingEnvironment,
+  validateAuthorizedSigningEnvironment,
   validateStructuredDigest,
   verifySignature,
 } from "./windows-signing.mjs";
@@ -56,7 +56,6 @@ import {
 } from "../release/release-authority.mjs";
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
-const SIGNING_BROKER = resolve(dirname(SCRIPT_PATH), "windows-signing-broker.mjs");
 const REPOSITORY = resolve(dirname(SCRIPT_PATH), "..", "..");
 const FRONTEND = join(REPOSITORY, "frontend");
 const PYINSTALLER_ROOT = join(DESKTOP_BUILD_ROOT, "pyinstaller");
@@ -101,22 +100,49 @@ function runText(command, args, options = {}) {
   return String(runCommand(command, args, options).stdout ?? "").trim();
 }
 
-function startSigningBroker(environment) {
+export function startSigningBroker(signingSession) {
   const token = randomBytes(32).toString("hex");
-  const child = fork(SIGNING_BROKER, [], { env: { ...environment, GLACIAL_WINDOWS_SIGN_BROKER_TOKEN: token }, stdio: ["ignore", "ignore", "pipe", "ipc"], windowsHide: true });
+  let complete = false;
+  function authorized(header) {
+    const supplied = Buffer.from(String(header ?? "").replace(/^Bearer /, ""), "utf8");
+    const expected = Buffer.from(token, "utf8");
+    return supplied.length === expected.length && timingSafeEqual(supplied, expected);
+  }
+  const server = createServer((request, response) => {
+    if (request.method !== "POST" || request.url !== "/sign" || !authorized(request.headers.authorization)) {
+      response.writeHead(403); response.end("Signing request is unauthorized."); return;
+    }
+    let body = "";
+    request.setEncoding("utf8");
+    request.on("data", (chunk) => { body += chunk; if (body.length > 4096) request.destroy(); });
+    request.on("end", () => {
+      try {
+        const payload = JSON.parse(body);
+        const signature = signingSession.signTauriArtifact(resolve(String(payload.path ?? "")), {
+          clientPort: request.socket.remotePort,
+          serverPort: request.socket.localPort,
+        });
+        if (signature.artifactRole === "installer") complete = true;
+        response.writeHead(200); response.end("signed");
+      } catch (error) { response.writeHead(400); response.end(sanitizeDiagnosticText(error.message)); }
+    });
+  });
   return new Promise((resolveStart, rejectStart) => {
     const fail = (error) => rejectStart(new Error(`Signing broker failed to start: ${sanitizeDiagnosticText(error.message)}`));
-    child.once("error", fail);
-    child.once("exit", (code) => { if (code !== null) fail(new Error(`exit ${code}`)); });
-    child.on("message", (message) => {
-      if (message?.type !== "ready") return;
-      child.removeListener("error", fail);
+    server.once("error", fail);
+    server.listen(0, "127.0.0.1", () => {
+      server.removeListener("error", fail);
+      const address = server.address();
+      if (!address || typeof address === "string") { fail(new Error("Signing broker failed to bind loopback.")); return; }
       resolveStart({
-        port: message.port,
+        port: address.port,
         token,
         stop: () => new Promise((resolveStop, rejectStop) => {
-          child.once("exit", (code) => code === 0 ? resolveStop() : rejectStop(new Error("Signing broker closed before the authorized artifact set was complete.")));
-          child.send({ type: "close" });
+          server.close((error) => {
+            if (error) rejectStop(error);
+            else if (!complete) rejectStop(new Error("Signing broker closed before the authorized artifact set was complete."));
+            else resolveStop();
+          });
         }),
       });
     });
@@ -714,7 +740,7 @@ export async function buildSignedRelease(releaseProfile, suppliedInputs = null) 
     throw new Error("The release authority changed between preparation and signed construction.");
   }
   const tools = authenticateReleaseTools(authority, { node: process.execPath });
-  loadSigningConfig(process.env, { authority, tools, profile: releaseProfile });
+  validateAuthorizedSigningEnvironment(process.env, { authority, tools, profile: releaseProfile });
   const gitPath = tools.git;
   const rustcPath = tools.rustc;
   const cargoPath = tools.cargo;
@@ -750,12 +776,18 @@ export async function buildSignedRelease(releaseProfile, suppliedInputs = null) 
   ensureSafeDirectory(DESKTOP_BUILD_ROOT, tauriTemporaryRoot);
   releaseEnvironment.TEMP = tauriTemporaryRoot;
   releaseEnvironment.TMP = tauriTemporaryRoot;
-  const config = loadSigningConfig(releaseEnvironment, { authority, tools, profile: releaseProfile });
+  const signingSession = openCanonicalReleaseSigningSession(releaseEnvironment, {
+    authority,
+    tools,
+    profile: releaseProfile,
+    preparedNode: preparedInputs.node,
+  });
+  const { config } = signingSession;
   const overlayPath = join(signingRoot, "tauri.signing.conf.json");
   const state = { source, releaseId, workRoot, finalRoot, releaseProfile };
   await runAfterSignerPreflight({
     profile: releaseProfile,
-    preflight: () => preflightSigningProvider(config, { probeParent: join(signingRoot, "probe") }),
+    preflight: () => signingSession.preflight(),
     state,
     runTrustedSteps: async () => {
       const { signerIdentity } = state;
@@ -775,7 +807,7 @@ export async function buildSignedRelease(releaseProfile, suppliedInputs = null) 
           for (const input of [preparedInputs.buildPython, preparedInputs.runtimePython]) assertReleaseInputTree(input.root, input.receipt);
         } },
         { name: "sign-backend", run: () => {
-          state.backendSigningRecords = signBackendTree(PYINSTALLER_PAYLOAD, config);
+          state.backendSigningRecords = signingSession.signBackendTree();
           state.backendSigningEventCount = parseAuditLog(config.auditLog, config.auditKey).length;
         } },
         { name: "stage-backend", run: () => { state.backendStageAuthority = stageSignedBackend(rustcPath, source); } },
@@ -788,7 +820,7 @@ export async function buildSignedRelease(releaseProfile, suppliedInputs = null) 
         { name: "tauri-build", run: async () => {
           assertReleaseInputTree(preparedInputs.node.root, preparedInputs.node.receipt);
           assertReleaseInputTree(preparedInputs.cargo.root, preparedInputs.cargo.receipt);
-          const broker = await startSigningBroker(releaseEnvironment);
+          const broker = await startSigningBroker(signingSession);
           const buildEnvironment = releaseToolEnvironment(signingBrokerEnvironment(releaseEnvironment, releaseId, broker.port, broker.token, releaseEnvironment.GLACIAL_BUILD_IDENTITY_JSON, JSON.stringify(state.backendStageAuthority), preparedInputs.cargo.root), tools);
           await runBrokeredTauriBuild(
             () => runVisible(process.execPath, tauriBuildArguments(pnpm, overlayPath), {

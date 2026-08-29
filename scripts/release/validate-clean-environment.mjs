@@ -9,13 +9,13 @@ import {
   assertSafePath,
   assertNoNodeRuntimeInjection,
   ensureSafeDirectory,
-  loadSigningConfig,
   minimalEnvironment,
   privacySafePath,
   resolveToolExecutable,
   runCommand,
   sanitizeDiagnosticText,
   sha256,
+  validateAuthorizedSigningEnvironment,
   validateStructuredDigest,
 } from "../desktop/windows-signing.mjs";
 import {
@@ -573,7 +573,7 @@ export async function validateCleanEnvironment(argv = process.argv.slice(2)) {
       repository,
     });
     tools = authenticateReleaseTools(authority, { node: process.execPath, python: options.python });
-    loadSigningConfig(process.env, { authority, tools, profile: options.profile });
+    validateAuthorizedSigningEnvironment(process.env, { authority, tools, profile: options.profile });
   }
   const python = tools?.python ?? options.python;
   const git = tools?.git ?? resolveToolExecutable("git.exe", process.env, { forbiddenRoot: repository });

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { parseSignerPreflightArguments, runSignerPreflight } from "./Signer-Preflight.mjs";
+import { parseSignerPreflightArguments, runSignerPreflightWithMocks } from "./Signer-Preflight.mjs";
 
 const PUBLIC_IDENTITY = {
   canonicalSubject: "CN=ICEFIELDS DEVELOPMENT",
@@ -25,8 +25,12 @@ test("signer preflight accepts only exact supported profile arguments", () => {
   assert.throws(() => parseSignerPreflightArguments(["--dry-run"]), /requires/);
 });
 
+test("programmatic signer preflight exposes only the explicit mock boundary", async () => {
+  await assert.rejects(() => runSignerPreflightWithMocks("signed-preview"), /test-only/);
+});
+
 test("public signer preflight reports bounded observed evidence", async () => {
-  const result = await runSignerPreflight("public-rc", {
+  const result = await runSignerPreflightWithMocks("public-rc", {
     loadConfig: () => CONFIG,
     preflight: async () => PUBLIC_IDENTITY,
     pathOptions: { pathInspector: false },
@@ -40,10 +44,9 @@ test("public signer preflight reports bounded observed evidence", async () => {
 });
 
 test("public RC rejects self-signed trust before product construction", async () => {
-  await assert.rejects(() => runSignerPreflight("public-rc", {
+  await assert.rejects(() => runSignerPreflightWithMocks("public-rc", {
     loadConfig: () => CONFIG,
     preflight: async () => ({ ...PUBLIC_IDENTITY, trustClassification: "self-signed" }),
     pathOptions: { pathInspector: false },
   }), /publicly-trusted/);
 });
-

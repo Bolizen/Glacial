@@ -19,7 +19,14 @@ import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path
 import { spawnSync } from "node:child_process";
 import { request as httpRequest } from "node:http";
 import { fileURLToPath } from "node:url";
-import { assertAuthenticatedReleaseTool, assertCurrentReleaseAuthority } from "../release/release-authority.mjs";
+import {
+  assertAuthenticatedReleaseTool,
+  assertCurrentReleaseAuthority,
+  assertExecutingNodeTool,
+  verifyAuthorizedReleaseCheckout,
+  verifyCanonicalReleaseCheckoutRelationship,
+} from "../release/release-authority.mjs";
+import { assertReleaseInputTree } from "../release/release-input-provenance.mjs";
 
 export const DEFAULT_SIGNER_SUBJECT = "CN=Icefields Development";
 export const SIGNING_SCRIPT_PATH = fileURLToPath(import.meta.url);
@@ -27,6 +34,8 @@ export const REPOSITORY_ROOT = resolve(dirname(SIGNING_SCRIPT_PATH), "..", "..")
 export const DESKTOP_BUILD_ROOT = resolve(REPOSITORY_ROOT, ".desktop-build");
 const AUTHENTIC_RELEASE_SIGNING_CONFIGS = new WeakSet();
 const AUTHENTIC_SIGNING_AUTHORIZATIONS = new WeakSet();
+const AUTHENTIC_CANONICAL_RELEASE_CONTEXTS = new WeakSet();
+const AUTHENTIC_SIGNING_SESSIONS = new WeakMap();
 
 const BASE_ENVIRONMENT_NAMES = [
   "APPDATA",
@@ -179,7 +188,15 @@ export const WINDOWS_SIGNING_POWERSHELL_HELPER_COMMAND = [
   "    if ($processId -le 0) { throw 'Process id is invalid.' }",
   "    $process = Get-CimInstance -ClassName Win32_Process -Filter (\"ProcessId = $processId\")",
   "    if (-not $process) { throw 'Process was not found.' }",
-  "    [pscustomobject]@{ ProcessId = [int]$process.ProcessId; ExecutablePath = [string]$process.ExecutablePath; CommandLine = [string]$process.CommandLine } | ConvertTo-Json -Compress",
+  "    [pscustomobject]@{ ProcessId = [int]$process.ProcessId; ParentProcessId = [int]$process.ParentProcessId; ExecutablePath = [string]$process.ExecutablePath; CommandLine = [string]$process.CommandLine; CreationDate = [string]$process.CreationDate } | ConvertTo-Json -Compress",
+  "  }",
+  "  'tcp-owner' {",
+  "    $clientPort = [int]$payload.clientPort",
+  "    $serverPort = [int]$payload.serverPort",
+  "    if ($clientPort -lt 1 -or $clientPort -gt 65535 -or $serverPort -lt 1 -or $serverPort -gt 65535) { throw 'TCP endpoint is invalid.' }",
+  "    $owners = @(Get-NetTCPConnection -State Established | Where-Object { [int]$_.LocalPort -eq $clientPort -and [int]$_.RemotePort -eq $serverPort } | Select-Object -ExpandProperty OwningProcess -Unique)",
+  "    if ($owners.Count -ne 1 -or [int]$owners[0] -le 0) { throw 'TCP client process identity is ambiguous.' }",
+  "    [pscustomobject]@{ ProcessId = [int]$owners[0] } | ConvertTo-Json -Compress",
   "  }",
   "  default { throw 'Unknown signing-helper operation.' }",
   "}",
@@ -388,7 +405,7 @@ function validateSigningAuditKey(value) {
   return key.toLowerCase();
 }
 
-export function loadSigningConfig(env = process.env, options = {}) {
+function loadSigningConfigInternal(env = process.env, options = {}) {
   const dryRun = options.dryRun === true;
   if (!dryRun && !new Set(["signed-preview", "public-rc"]).has(options.profile)) {
     throw new Error("An authorized signed-release profile is required.");
@@ -400,6 +417,7 @@ export function loadSigningConfig(env = process.env, options = {}) {
     throw new Error("Authenticated PowerShell, SignTool, and signing-provider tools are required.");
   }
   if (!dryRun) {
+    assertExecutingNodeTool(tools.node);
     for (const role of ["powerShell", "signTool", "signingProvider"]) {
       const expected = authority.tools[role];
       const supplied = tools[role];
@@ -434,6 +452,7 @@ export function loadSigningConfig(env = process.env, options = {}) {
     powerShellPath,
     signToolTool: tools?.signTool ?? null,
     signingProviderTool: tools?.signingProvider ?? null,
+    releaseContext: options.releaseContext ?? null,
   };
 
   if (provider === "store") {
@@ -460,6 +479,23 @@ export function loadSigningConfig(env = process.env, options = {}) {
   }, dryRun);
 }
 
+export function loadSigningConfig(env = process.env, options = {}) {
+  if (options.dryRun !== true) {
+    throw new Error("Production signing configuration is private to an authenticated release signing session.");
+  }
+  return loadSigningConfigInternal(env, { dryRun: true });
+}
+
+export function validateAuthorizedSigningEnvironment(env = process.env, options = {}) {
+  const config = loadSigningConfigInternal(env, options);
+  return Object.freeze({
+    provider: config.provider,
+    expectedSubject: config.expectedSubject,
+    expectedThumbprint: config.expectedThumbprint,
+    timestampUrl: config.timestampUrl,
+  });
+}
+
 function finalizeSigningConfig(config, dryRun) {
   const result = Object.freeze(config);
   if (!dryRun) AUTHENTIC_RELEASE_SIGNING_CONFIGS.add(result);
@@ -471,6 +507,7 @@ function assertReleaseSigningConfig(config) {
     throw new Error("An authentic authority-derived signing configuration is required.");
   }
   const authority = assertCurrentReleaseAuthority(config.releaseAuthority, { profile: config.releaseProfile });
+  assertExecutingNodeTool(config.nodeTool);
   for (const role of ["node", "powerShell", "signTool", "signingProvider"]) {
     const tool = config[`${role}Tool`];
     if (assertAuthenticatedReleaseTool(tool).toLowerCase() !== resolve(authority.tools[role].path).toLowerCase()
@@ -797,22 +834,281 @@ function escapedRegularExpression(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-export function assertReleaseCoordinatorParent(config, expectedScript, runner = runCommand) {
-  assertReleaseSigningConfig(config);
-  const processInfo = invokeWindowsHelper("process-info", { processId: process.ppid }, runner, process.env, config.powerShellTool);
-  const expectedNode = assertAuthenticatedReleaseTool(config.nodeTool);
+function processCommandTail(processInfo, expectedNode, expectedScript, label) {
+  if (!Number.isInteger(Number(processInfo?.ProcessId)) || Number(processInfo.ProcessId) < 1
+      || typeof processInfo.CreationDate !== "string" || !processInfo.CreationDate) {
+    throw new Error(`${label} process identity is incomplete.`);
+  }
   const actualExecutable = resolve(String(processInfo.ExecutablePath ?? ""));
   if (actualExecutable.toLowerCase() !== resolve(expectedNode).toLowerCase()) {
-    throw new Error("The signed-release child process was not launched by the authenticated Node runtime.");
+    throw new Error(`${label} is not running the signed Node executable.`);
   }
   const nodePattern = escapedRegularExpression(resolve(expectedNode));
   const scriptPattern = escapedRegularExpression(resolve(expectedScript));
   const commandLine = String(processInfo.CommandLine ?? "");
-  const canonicalPrefix = new RegExp(`^(?:\"${nodePattern}\"|${nodePattern})\\s+(?:\"${scriptPattern}\"|${scriptPattern})(?:\\s|$)`, "i");
-  if (!canonicalPrefix.test(commandLine)) {
-    throw new Error("The signed-release child process was not launched by the canonical release coordinator.");
+  const prefix = new RegExp(`^(?:\"${nodePattern}\"|${nodePattern})\\s+(?:\"${scriptPattern}\"|${scriptPattern})(?=\\s|$)`, "i");
+  const match = commandLine.match(prefix);
+  if (!match) throw new Error(`${label} is not running the exact authorized script.`);
+  return commandLine.slice(match[0].length).trim();
+}
+
+function requireCanonicalWorkerArgument(commandTail) {
+  const matches = commandTail.match(/(?:^|\s)--glacial-canonical-release-worker(?=\s|$)/g) ?? [];
+  if (matches.length !== 1) throw new Error("The release coordinator process is not the canonical release worker.");
+}
+
+export function validateCanonicalReleaseProcessObservation(observation, expected) {
+  const mode = String(expected?.mode ?? "");
+  const currentTail = processCommandTail(observation?.current, expected.nodePath, expected.currentScript, "The security-sensitive Node process");
+  if (mode === "coordinator") {
+    requireCanonicalWorkerArgument(currentTail);
+    return Object.freeze({ currentProcessId: Number(observation.current.ProcessId), coordinatorProcessId: Number(observation.current.ProcessId) });
   }
-  return Object.freeze({ processId: Number(processInfo.ProcessId), executablePath: actualExecutable, commandLine });
+  if (mode !== "child") throw new Error("The release process observation mode is invalid.");
+  if (Number(observation.current.ParentProcessId) !== Number(observation.parent?.ProcessId)) {
+    throw new Error("The security-sensitive child is not directly attached to the observed coordinator process.");
+  }
+  const parentTail = processCommandTail(observation.parent, expected.nodePath, expected.coordinatorScript, "The release coordinator");
+  requireCanonicalWorkerArgument(parentTail);
+  return Object.freeze({ currentProcessId: Number(observation.current.ProcessId), coordinatorProcessId: Number(observation.parent.ProcessId) });
+}
+
+export function validateTauriSigningRequesterObservation(processChain, expected) {
+  if (!Array.isArray(processChain) || processChain.length !== 4) {
+    throw new Error("The Tauri signing requester process chain is not the exact authorized topology.");
+  }
+  for (let index = 0; index < processChain.length - 1; index += 1) {
+    if (Number(processChain[index].ParentProcessId) !== Number(processChain[index + 1].ProcessId)) {
+      throw new Error("The Tauri signing requester process ancestry changed.");
+    }
+  }
+  const requesterTail = processCommandTail(processChain[0], expected.nodePath, expected.signingScript, "The Tauri signing requester");
+  const filePattern = escapedRegularExpression(resolve(expected.file));
+  if (!new RegExp(`^sign-request\\s+(?:\"${filePattern}\"|${filePattern})$`, "i").test(requesterTail)) {
+    throw new Error("The Tauri signing requester is not bound to the requested artifact.");
+  }
+  const tauriCliTail = processCommandTail(processChain[1], expected.nodePath, expected.tauriCliScript, "The prepared Tauri CLI");
+  if (!/^build(?:\s|$)/i.test(tauriCliTail)) {
+    throw new Error("The prepared Tauri CLI is not running the authorized build command.");
+  }
+  processCommandTail(processChain[2], expected.nodePath, expected.tauriScript, "The authenticated Tauri wrapper");
+  const coordinator = processChain[3];
+  if (Number(coordinator.ProcessId) !== Number(expected.coordinatorProcessId)) {
+    throw new Error("The Tauri signing requester is not attached to the authorized coordinator process.");
+  }
+  requireCanonicalWorkerArgument(processCommandTail(coordinator, expected.nodePath, expected.coordinatorScript, "The release coordinator"));
+  return true;
+}
+
+function assertTauriSigningRequester(context, config, file, connection) {
+  const clientPort = Number(connection?.clientPort);
+  const serverPort = Number(connection?.serverPort);
+  if (!Number.isInteger(clientPort) || !Number.isInteger(serverPort)) {
+    throw new Error("The Tauri signing requester connection identity is missing.");
+  }
+  const owner = invokeWindowsHelper("tcp-owner", { clientPort, serverPort }, runCommand, process.env, config.powerShellTool);
+  const processChain = [];
+  let processId = Number(owner.ProcessId);
+  for (let depth = 0; depth < 24; depth += 1) {
+    const processInfo = invokeWindowsHelper("process-info", { processId }, runCommand, process.env, config.powerShellTool);
+    processChain.push(processInfo);
+    if (processId === context.coordinatorProcessId) break;
+    processId = Number(processInfo.ParentProcessId);
+    if (!Number.isInteger(processId) || processId < 1) break;
+  }
+  validateTauriSigningRequesterObservation(processChain, {
+    nodePath: assertExecutingNodeTool(config.nodeTool),
+    signingScript: SIGNING_SCRIPT_PATH,
+    tauriCliScript: revalidatePreparedToolFile(context.tauriCli, "The prepared Tauri CLI"),
+    tauriScript: resolve(REPOSITORY_ROOT, "scripts", "desktop", "tauri-build.mjs"),
+    coordinatorScript: context.relationship.coordinatorScript.path,
+    coordinatorProcessId: context.coordinatorProcessId,
+    file,
+  });
+  return true;
+}
+
+function sameFilesystemIdentity(actual, expected) {
+  return String(actual.dev) === String(expected.dev)
+    && String(actual.ino) === String(expected.ino)
+    && String(actual.size) === String(expected.size);
+}
+
+function revalidateCanonicalSourceFile(record, label) {
+  const target = resolve(record?.path ?? "");
+  const metadata = lstatSync(target, { bigint: true });
+  if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1n
+      || realpathSync.native(target).toLowerCase() !== target.toLowerCase()
+      || sha256(target).toLowerCase() !== String(record?.sha256 ?? "").toLowerCase()
+      || !sameFilesystemIdentity({ dev: metadata.dev, ino: metadata.ino, size: metadata.size }, record.identity)) {
+    throw new Error(`${label} changed after canonical release authorization.`);
+  }
+  return target;
+}
+
+function capturePreparedToolFile(preparedInput, target, label) {
+  const preparedRoot = resolve(preparedInput?.root ?? "");
+  const expectedRoot = resolve(REPOSITORY_ROOT, "frontend", "node_modules");
+  if (preparedRoot.toLowerCase() !== expectedRoot.toLowerCase()) {
+    throw new Error(`${label} is not from the fixed prepared release input root.`);
+  }
+  assertReleaseInputTree(preparedRoot, preparedInput?.receipt);
+  const resolvedTarget = pathComponents(preparedRoot, target).resolvedTarget;
+  const metadata = lstatSync(resolvedTarget, { bigint: true });
+  if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error(`${label} is not a regular prepared file.`);
+  const canonicalTarget = realpathSync.native(resolvedTarget);
+  pathComponents(preparedRoot, canonicalTarget);
+  return Object.freeze({
+    path: resolvedTarget,
+    canonicalPath: canonicalTarget,
+    sha256: sha256(resolvedTarget),
+    identity: Object.freeze({ dev: String(metadata.dev), ino: String(metadata.ino), size: String(metadata.size) }),
+  });
+}
+
+function revalidatePreparedToolFile(record, label) {
+  const target = resolve(record?.path ?? "");
+  const metadata = lstatSync(target, { bigint: true });
+  if (!metadata.isFile() || metadata.isSymbolicLink()
+      || realpathSync.native(target).toLowerCase() !== String(record?.canonicalPath ?? "").toLowerCase()
+      || sha256(target).toLowerCase() !== String(record?.sha256 ?? "").toLowerCase()
+      || !sameFilesystemIdentity({ dev: metadata.dev, ino: metadata.ino, size: metadata.size }, record.identity)) {
+    throw new Error(`${label} changed after prepared release input authorization.`);
+  }
+  return target;
+}
+
+function canonicalReleaseContext(environment, options, mode, currentScript) {
+  if (process.platform !== "win32") throw new Error("Canonical Windows release authority requires Windows process identity.");
+  assertNoNodeRuntimeInjection(process.env);
+  const authority = assertCurrentReleaseAuthority(options.authority, { profile: options.profile });
+  const nodePath = assertExecutingNodeTool(options.tools?.node);
+  const relationship = verifyCanonicalReleaseCheckoutRelationship(authority, options.tools?.git, REPOSITORY_ROOT);
+  const releaseId = validateReleaseId(environment.GLACIAL_WINDOWS_RELEASE_ID);
+  if (!releaseId || !releaseId.includes(`-${authority.source.commit.slice(0, 12)}-`)) {
+    throw new Error("Product signing requires a canonical source-bound release context.");
+  }
+  revalidateCanonicalSourceFile(relationship.coordinatorScript, "The canonical release coordinator script");
+  revalidateCanonicalSourceFile(relationship.authorizedCoordinatorScript, "The authorized release coordinator script");
+  const tauriCli = mode === "coordinator"
+    ? capturePreparedToolFile(options.preparedNode, resolve(REPOSITORY_ROOT, "frontend", "node_modules", "@tauri-apps", "cli", "tauri.js"), "The prepared Tauri CLI")
+    : null;
+
+  const current = invokeWindowsHelper("process-info", { processId: process.pid }, runCommand, process.env, options.tools.powerShell);
+  if (Number(current.ProcessId) !== process.pid) throw new Error("The current security-sensitive process identity changed.");
+  let parent = null;
+  if (mode === "child") {
+    parent = invokeWindowsHelper("process-info", { processId: process.ppid }, runCommand, process.env, options.tools.powerShell);
+    if (Number(parent.ProcessId) !== process.ppid) throw new Error("The coordinator parent process identity changed.");
+  }
+  const observation = validateCanonicalReleaseProcessObservation({ current, parent }, {
+    mode,
+    nodePath,
+    currentScript,
+    coordinatorScript: relationship.coordinatorScript.path,
+  });
+  const context = Object.freeze({
+    schemaVersion: 1,
+    releaseId,
+    releaseProfile: options.profile,
+    authorityId: authority.authorityId,
+    authorityDigest: authority.digest,
+    authorityExpiresAtUtc: authority.authorization.expiresAtUtc,
+    sourceCommit: authority.source.commit,
+    coordinatorProcessId: observation.coordinatorProcessId,
+    currentProcessId: observation.currentProcessId,
+    relationship,
+    tauriCli,
+  });
+  AUTHENTIC_CANONICAL_RELEASE_CONTEXTS.add(context);
+  return context;
+}
+
+function assertCanonicalReleaseContext(context, config) {
+  if (!context || !AUTHENTIC_CANONICAL_RELEASE_CONTEXTS.has(context) || context.currentProcessId !== process.pid
+      || context.releaseId !== config.releaseId || context.releaseProfile !== config.releaseProfile
+      || context.authorityId !== config.releaseAuthority.authorityId || context.authorityDigest !== config.releaseAuthority.digest
+      || context.sourceCommit !== config.releaseAuthority.source.commit) {
+    throw new Error("An authentic canonical release context is required for product signing.");
+  }
+  assertCurrentReleaseAuthority(config.releaseAuthority, { profile: context.releaseProfile });
+  assertExecutingNodeTool(config.nodeTool);
+  revalidateCanonicalSourceFile(context.relationship.coordinatorScript, "The canonical release coordinator script");
+  revalidateCanonicalSourceFile(context.relationship.authorizedCoordinatorScript, "The authorized release coordinator script");
+  if (context.tauriCli) revalidatePreparedToolFile(context.tauriCli, "The prepared Tauri CLI");
+  return context;
+}
+
+function assertSigningSession(session, expectedKind = null) {
+  const state = AUTHENTIC_SIGNING_SESSIONS.get(session);
+  if (!state || (expectedKind && state.kind !== expectedKind)) throw new Error("An authentic private signing session is required.");
+  assertReleaseSigningConfig(state.config);
+  if (state.kind === "product") assertCanonicalReleaseContext(state.context, state.config);
+  return state;
+}
+
+export function openCanonicalReleaseSigningSession(environment = process.env, options = {}) {
+  const context = canonicalReleaseContext(environment, options, "coordinator", resolve(REPOSITORY_ROOT, "..", "scripts", "release", "validate-clean-environment.mjs"));
+  const config = loadSigningConfigInternal(environment, { ...options, releaseContext: context });
+  const usedTauriRoles = new Set();
+  let tauriComplete = false;
+  function consumeTauriRole(role) {
+    if (tauriComplete || usedTauriRoles.has(role)) throw new Error("Signing request has unexpected role cardinality.");
+    if (role === "installer") {
+      const required = ["application", "nsis-uninstaller", "nsis-plugin:nsisdl.dll", "nsis-plugin:startmenu.dll", "nsis-plugin:system.dll", "nsis-plugin:nsdialogs.dll", "nsis-plugin:nsis_tauri_utils.dll"];
+      if (required.some((item) => !usedTauriRoles.has(item))) throw new Error("Installer signing request arrived before the authorized artifact set was complete.");
+      tauriComplete = true;
+    }
+    usedTauriRoles.add(role);
+  }
+  let session;
+  session = Object.freeze({
+    config,
+    preflight: () => preflightSigningProvider(session, { probeParent: resolve(DESKTOP_BUILD_ROOT, "signing", context.releaseId, "probe") }),
+    signBackendTree: () => signBackendTree(session, resolve(DESKTOP_BUILD_ROOT, "pyinstaller", "dist", "glacial-backend")),
+    signTauriArtifact: (file, connection) => {
+      assertTauriSigningRequester(context, config, file, connection);
+      const authorization = authorizeTauriSigningRequest(session, file, environment);
+      consumeTauriRole(authorization.role);
+      return Object.freeze({ ...signOne(session, file, { authorization }), artifactRole: authorization.role });
+    },
+  });
+  AUTHENTIC_SIGNING_SESSIONS.set(session, Object.freeze({ kind: "product", context, config }));
+  return session;
+}
+
+export function assertCanonicalReleaseChildProcess(environment = process.env, options = {}) {
+  return canonicalReleaseContext(
+    environment,
+    options,
+    "child",
+    resolve(REPOSITORY_ROOT, "scripts", "desktop", "tauri-build.mjs"),
+  );
+}
+
+export function runAuthorizedSignerPreflight(environment = process.env, options = {}) {
+  if (process.platform !== "win32") throw new Error("Windows signer preflight requires Windows process identity.");
+  assertNoNodeRuntimeInjection(process.env);
+  const authority = assertCurrentReleaseAuthority(options.authority, { profile: options.profile });
+  const nodePath = assertExecutingNodeTool(options.tools?.node);
+  verifyAuthorizedReleaseCheckout(authority, options.tools?.git, REPOSITORY_ROOT);
+  if (validateReleaseId(environment.GLACIAL_WINDOWS_RELEASE_ID) !== null) {
+    throw new Error("Standalone signer preflight cannot carry a product release context.");
+  }
+  const script = resolve(REPOSITORY_ROOT, "scripts", "desktop", "Signer-Preflight.mjs");
+  const current = invokeWindowsHelper("process-info", { processId: process.pid }, runCommand, process.env, options.tools.powerShell);
+  const tail = processCommandTail(current, nodePath, script, "The signer-preflight process");
+  if (tail !== `--glacial-authorized-signer-preflight-worker --profile ${options.profile}`) {
+    throw new Error("Signer preflight is not running the exact authorized command.");
+  }
+  const config = loadSigningConfigInternal(environment, options);
+  let session;
+  session = Object.freeze({ config });
+  AUTHENTIC_SIGNING_SESSIONS.set(session, Object.freeze({ kind: "preflight", context: null, config }));
+  return Object.freeze({
+    config,
+    identity: preflightSigningProvider(session, { probeParent: options.probeParent }),
+  });
 }
 
 export function signingAuditRecord(record) {
@@ -956,23 +1252,26 @@ export function captureSignedApplication(file, config, options = {}) {
 
 const consumedSigningPlans = new WeakSet();
 
-export function exactSigningAuthorization(file, role, options = {}) {
-  const authority = options.config?.releaseAuthority ?? null;
-  if (authority) assertReleaseSigningConfig(options.config);
+function exactSigningAuthorization(session, file, role, options = {}) {
+  const state = assertSigningSession(session);
+  const { config } = state;
+  const authority = config.releaseAuthority;
+  if (state.kind === "product") assertCanonicalReleaseContext(state.context, config);
+  if (state.kind === "preflight" && role !== "preflight-probe") throw new Error("Standalone preflight cannot authorize a product artifact role.");
   const target = realpathSync.native(resolve(file));
-  const identity = inspectSigningObject(target, { ...options, powerShellTool: options.config?.powerShellTool ?? options.powerShellTool });
+  const identity = inspectSigningObject(target, { ...options, powerShellTool: config.powerShellTool });
   const authorization = Object.freeze({
     schemaVersion: 1,
     role: String(role),
     path: target,
     beforeSha256: sha256(target),
     objectIdentity: identity.objectId,
-    releaseId: options.releaseId ?? null,
-    authorityId: authority?.authorityId ?? null,
-    authorityDigest: authority?.digest ?? null,
-    authorityExpiresAtUtc: authority?.authorization.expiresAtUtc ?? null,
+    releaseId: state.context?.releaseId ?? null,
+    authorityId: authority.authorityId,
+    authorityDigest: authority.digest,
+    authorityExpiresAtUtc: authority.authorization.expiresAtUtc,
   });
-  if (authority) AUTHENTIC_SIGNING_AUTHORIZATIONS.add(authorization);
+  AUTHENTIC_SIGNING_AUTHORIZATIONS.add(authorization);
   return authorization;
 }
 
@@ -1005,7 +1304,7 @@ export function validateSignedAuthorizationState(file, authorization, signedSha2
   return target;
 }
 
-export function authorizeTauriSigningRequest(file, config, env = process.env, options = {}) {
+export function classifyTauriSigningTarget(file, config, env = process.env) {
   const target = realpathSync.native(resolve(file));
   const lower = target.toLowerCase();
   const application = resolve(config.applicationTarget).toLowerCase();
@@ -1021,12 +1320,24 @@ export function authorizeTauriSigningRequest(file, config, env = process.env, op
   else if (resolve(dirname(target)).toLowerCase() === additionalPluginRoot.toLowerCase() && basename(target).toLowerCase() === "nsis_tauri_utils.dll") role = "nsis-plugin:nsis_tauri_utils.dll";
   else if (resolve(dirname(target)).toLowerCase() === temporaryRoot.toLowerCase() && /^nst[0-9a-f]+\.tmp$/i.test(basename(target))) role = "nsis-uninstaller";
   if (!role) throw new Error("Signing target is not a member of the authorized Tauri release artifact set.");
-  return exactSigningAuthorization(target, role, { ...options, config, releaseId: config.releaseId ?? null });
+  return Object.freeze({ path: target, role });
 }
 
-export function signOne(file, config, options = {}) {
+function authorizeTauriSigningRequest(session, file, env = process.env, options = {}) {
+  const { config } = assertSigningSession(session, "product");
+  const target = classifyTauriSigningTarget(file, config, env);
+  return exactSigningAuthorization(session, target.path, target.role, options);
+}
+
+function signOne(session, file, options = {}) {
+  const state = assertSigningSession(session);
+  const { config } = state;
   const authority = assertReleaseSigningConfig(config);
-  const trustedOptions = { ...options, powerShellTool: config.powerShellTool, releaseId: config.releaseId ?? options.authorization?.releaseId ?? null };
+  if (state.kind === "product") assertCanonicalReleaseContext(state.context, config);
+  if (state.kind === "preflight" && options.authorization?.role !== "preflight-probe") {
+    throw new Error("Standalone preflight cannot reach a product-signing role.");
+  }
+  const trustedOptions = { ...options, powerShellTool: config.powerShellTool, releaseId: state.context?.releaseId ?? null };
   const target = consumeSigningAuthorization(file, options.authorization, trustedOptions);
   if (options.authorization?.authorityId !== authority.authorityId
       || options.authorization?.authorityDigest !== authority.digest
@@ -1054,8 +1365,8 @@ export function signOne(file, config, options = {}) {
   return signature;
 }
 
-export function preflightSigningProvider(config, options = {}) {
-  assertReleaseSigningConfig(config);
+function preflightSigningProvider(session, options = {}) {
+  const { config } = assertSigningSession(session);
   const runner = options.runner ?? runCommand;
   const expectedCanonical = canonicalizeDistinguishedName(config.expectedSubject, runner, options.env, config.powerShellTool);
   let storeCertificate = null;
@@ -1073,7 +1384,7 @@ export function preflightSigningProvider(config, options = {}) {
     createUnsignedProbeCopy(source, probe);
     const initialSignature = inspectAuthenticode(probe, runner, options.env, config.powerShellTool);
     if (initialSignature.status !== "NotSigned") throw new Error("The disposable signing probe is not unsigned.");
-    const signature = signOne(probe, config, { ...options, skipAudit: true, runner, env: options.env, authorization: exactSigningAuthorization(probe, "preflight-probe", { ...options, config, releaseId: config.releaseId ?? null }) });
+    const signature = signOne(session, probe, { ...options, skipAudit: true, runner, env: options.env, authorization: exactSigningAuthorization(session, probe, "preflight-probe", options) });
     if (signature.canonicalSubject.toUpperCase() !== expectedCanonical) throw new Error("The private-key probe used an unexpected signer subject.");
     return {
       expectedCanonicalSubject: expectedCanonical,
@@ -1099,7 +1410,8 @@ export function planBackendSigning(entries) {
   });
 }
 
-export function signBackendTree(root, config, options = {}) {
+function signBackendTree(session, root, options = {}) {
+  const { config } = assertSigningSession(session, "product");
   const runner = options.runner ?? runCommand;
   const resolvedRoot = resolve(root);
   const entries = listPortableExecutables(resolvedRoot).map((path) => ({ path, relativePath: relative(resolvedRoot, path).replaceAll("\\", "/"), embeddedSignature: hasEmbeddedAuthenticode(readFileSync(path)), beforeSha256: sha256(path), signature: inspectAuthenticode(path, runner, options.env, config.powerShellTool) }));
@@ -1108,7 +1420,7 @@ export function signBackendTree(root, config, options = {}) {
   const records = [];
   for (const entry of plan) {
     if (entry.action === "sign-first-party") {
-      const signature = signOne(entry.path, config, { ...options, runner, env: options.env, authorization: exactSigningAuthorization(entry.path, `backend:${entry.relativePath}`, { ...options, config, releaseId: config.releaseId ?? null }) });
+      const signature = signOne(session, entry.path, { ...options, runner, env: options.env, authorization: exactSigningAuthorization(session, entry.path, `backend:${entry.relativePath}`, options) });
       records.push({ ...entry, signature, afterSha256: sha256(entry.path), classification: "first-party" });
     } else {
       const signature = verifySignature(entry.path, config, { runner, env: options.env });
@@ -1190,7 +1502,7 @@ async function main() {
   const tools = authenticateReleaseTools(authority, { node: process.execPath });
   verifyAuthorizedReleaseCheckout(authority, tools.git, REPOSITORY_ROOT);
   const profile = String(process.env.GLACIAL_RELEASE_PROFILE ?? "");
-  const config = loadSigningConfig(process.env, { authority, tools, profile });
+  const config = loadSigningConfigInternal(process.env, { authority, tools, profile });
   if (command === "verify-one" && argument) { process.stdout.write(`${JSON.stringify(verifySignature(argument, config, { expectFirstParty: true }), null, 2)}\n`); return; }
   if (command === "verify-tree" && argument) { process.stdout.write(`${JSON.stringify(verifyPayloadTree(argument, config, { requiredFirstParty: process.argv.slice(4) }), null, 2)}\n`); return; }
   throw new Error("Usage: windows-signing.mjs dry-run | sign-one <PE> | verify-one <PE> | verify-tree <directory> [required first-party paths...]");
