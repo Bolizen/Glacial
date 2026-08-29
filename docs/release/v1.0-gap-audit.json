@@ -2,8 +2,8 @@
   "schema_version": "1.0.0",
   "product": "Glacial",
   "audited_version": "0.9.12",
-  "audited_commit": "f1275a58849fc9309ffc8c900d98c97a4e964d53",
-  "generated_at_utc": "2026-08-01T14:56:40Z",
+  "audited_commit": "ddb1f864bf5d4701729eb8303ec43315b206f0a0",
+  "generated_at_utc": "2026-08-29T13:02:20Z",
   "overall_verdict": "NOT READY",
   "scope_decision": "Glacial v1 supports only the installed Windows x64 NSIS edition; the retired portable edition does not close any installed lifecycle or release requirement.",
   "stage_decisions": {
@@ -12,7 +12,7 @@
     "public_release_candidate": "BLOCKED",
     "stable_publication": "BLOCKED",
     "release_authorization": "NONE",
-    "next_handoff": "G066 — Glacial Frozen-Baseline Deep Security Scan and Closure"
+    "next_handoff": "G126 — Final-Baseline Deep Security Scan and Closure"
   },
   "classification_changes": [
     {
@@ -193,15 +193,16 @@
       "area": "Product identity and version integrity",
       "status": "PARTIAL",
       "priority": "P1",
-      "summary": "Development and internal-evidence identity are visible and fail closed, but no signed preview, public RC, or stable candidate identity has been read back.",
+      "summary": "Current source identity and fail-closed release-profile plumbing are verified through G124, but no live signed preview, public RC, or stable candidate identity has been read back.",
       "evidence": [
         "docs/windows-release-signing.md",
         "frontend/src/buildIdentityContract.js and runtimeIdentity.js",
         "frontend/src-tauri/build.rs and src/main.rs compiled identity",
         "backend/app/runtime_identity.py authenticated bounded identity",
-        "G053 native 960x640 internal-evidence readback for commit 1d580221a1275aec5f355131028c9911e30c7191"
+        "G053 native 960x640 internal-evidence readback for commit 1d580221a1275aec5f355131028c9911e30c7191",
+        "G123 implementation closure and G124 independent validation of the canonical release/signing context at ddb1f864bf5d4701729eb8303ec43315b206f0a0"
       ],
-      "gap": "No actual signed-preview identity was produced in the unconfigured local signer environment, and no publicly trusted public-RC or stable candidate exists for end-to-end identity readback.",
+      "gap": "No live signed-preview identity or final public-candidate identity exists for end-to-end application, backend, artifact, and generated-metadata readback.",
       "recommended_remediation": "Read back the same identity surface and generated metadata from actual signed-preview, public-RC, and stable candidate bytes when those profiles become available.",
       "closure_evidence": [
         "Runtime and generated metadata readback for development, signed preview, public RC, and stable candidate."
@@ -503,19 +504,20 @@
       "area": "Data integrity and state lifecycle",
       "status": "PARTIAL",
       "priority": "P1",
-      "summary": "Migration/reset rollback, integrity, cleanup, installed process interruption, and malformed-state fail-closed behavior are accepted; physical power-loss and low-level platform faults remain unaccepted.",
+      "summary": "Migration/reset rollback, integrity, cleanup, installed process interruption, malformed-state handling, and G112 legacy-state recovery are accepted; the contract's power-loss class remains unaccepted.",
       "evidence": [
         "backend/tests/test_database_lifecycle.py integrity, rollback, and retry recovery",
         "backend/tests/test_agents.py failure cleanup",
         "frontend/src-tauri/src/backend.rs startup cleanup",
         "docs/release/installed-lifecycle-evidence.md predecessor cleanup and post-upgrade/reset integrity",
         "docs/release/g050-installed-lifecycle-acceptance.md interruption after verified recovery-backup publication with unchanged current state, successful retry, and SQLite integrity",
-        "docs/release/g056-installed-privacy-failure-recovery.md 74 ms interrupted-start cleanup, byte-identical retry, malformed-database fail-closed preservation, exact restoration, and integrity readback"
+        "docs/release/g056-installed-privacy-failure-recovery.md 74 ms interrupted-start cleanup, byte-identical retry, malformed-database fail-closed preservation, exact restoration, and integrity readback",
+        "G112 legacy-state and fail-closed recovery audit with 254 passing backend tests and explicit SQLite integrity/schema/constraint failure handling"
       ],
-      "gap": "Controlled process interruption and source-level disk-full/lock/write faults do not prove recovery after physical OS power loss, kernel/filesystem crash timing, real media failure, or antivirus filter-driver interference.",
-      "recommended_remediation": "Retain the focused interruption evidence and execute the remaining physical/platform fault classes only in an isolated environment where they can be induced without risking user data.",
+      "gap": "The literal requirement includes power loss. Existing installed tests cover forced process termination, incomplete startup, interrupted reset/write-adjacent behavior, integrity, and recovery, but no disposable installed-state hard-power interruption demonstrates conservative recovery and readback after the power-loss class.",
+      "recommended_remediation": "On a disposable VM using the current frozen candidate, force a hard power-off during a state-changing or startup/recovery boundary, then verify SQLite integrity, conservative startup/recovery, and application-state readback. Real media failure and antivirus filter-driver interference are environmental risks, not additional literal acceptance clauses.",
       "closure_evidence": [
-        "Dated OS/filesystem interruption evidence with SQLite integrity and conservative recovery/readback."
+        "Dated disposable installed-state hard-power interruption evidence with SQLite integrity and conservative recovery/readback."
       ],
       "waiver_permitted": false
     },
@@ -924,16 +926,18 @@
       "area": "Security and privacy posture",
       "status": "PARTIAL",
       "priority": "P1",
-      "summary": "Provenance, signing, timestamps, and hashes are designed fail-closed, but no public candidate evidence exists.",
+      "summary": "G123/G124 independently close the in-scope signing-capability bypass and the release architecture is fail closed, but no live public-trust signature or candidate evidence exists.",
       "evidence": [
         "scripts/desktop/Build-SignedWindowsRelease.mjs",
         "scripts/desktop/windows-signing.mjs",
         "scripts/desktop/Signer-Preflight.mjs",
         "scripts/desktop/windows-signing.test.mjs",
         "scripts/desktop/Signer-Preflight.test.mjs",
-        "G053 real local signed-preview/public-RC preflights rejected missing provider configuration without product construction"
+        "G053 real local signed-preview/public-RC preflights rejected missing provider configuration without product construction",
+        "G123 release/signing trust-boundary remediation at ddb1f864bf5d4701729eb8303ec43315b206f0a0",
+        "G124 independent source-to-sink closure validation with 129/129 affected tests and no live production signature"
       ],
-      "gap": "No public signer, signed candidate, timestamps, manifest, hashes, or independent publication evidence exists.",
+      "gap": "No provisioned approved public signer has produced a real production signature; therefore no RFC 3161 timestamp, final artifact readback, manifest/hash set, or independent publication-channel evidence exists.",
       "recommended_remediation": "Close through RC construction and signing verification.",
       "closure_evidence": [
         "Signed candidate verification report.",
@@ -963,20 +967,24 @@
       "area": "Security and privacy posture",
       "status": "PARTIAL",
       "priority": "P1",
-      "summary": "A complete standard whole-repository security scan found three validated issues and all three are remediated and verified, but the permanent repeated-discovery Deep Security Scan gate remains incomplete on the final pre-RC baseline.",
+      "summary": "G066–G124 provide extensive repeated Standard scans, finding remediation, and independent closure, but no completed repository-wide Deep Security Scan exists against the clean final pre-RC repository state.",
       "evidence": [
         "docs/release/v1.0-readiness-contract.md permanent V1-SEC-007 gate",
-        "G060 standard single-pass scan at 8fd11897dfb80b7dc594a36738e3a0716da3a663: 342/342 tracked files accounted for, complete coverage, threat model, 4 candidates, 3 validated findings (1 medium, 2 low), attack paths, canonical report and SARIF",
-        "G061 remediation commit 0e868a391a546250093ffb65e5750023cadedd93 closes all three validated findings",
-        "G062 exact reproductions, 129-test affected backend surface, 55-test affected frontend surface, targeted integration, and production build passed",
-        "G063 complete backend suite: 226 passed, 0 failed, 0 errors, 3 documented platform skips",
-        "G057 failed before discovery and G059 was cancelled before discovery; neither is a Deep Security Scan result"
+        "G081 and G090 Deep Scan attempts failed before discovery-worker completion and produced no canonical security conclusion",
+        "G091 complete Standard scan reconciled 20 candidates into 8 findings with full surface coverage; G092 remediated all eight",
+        "G098, G100, G102, and G104 independent diff validations found residual privacy bypasses; G099, G101, G103, G105–G112 iteratively remediated and adversarially checked them",
+        "G114 fresh repository-wide Standard scan found five findings; G115/G116 remediated and independently reviewed release provenance",
+        "G117 complete 366-file Standard scan found two High release-trust findings; G118 remediated them",
+        "G119 found four additional authority/signing findings; G120 remediated them; G122 independently found a remaining signing-capability bypass; G123 remediated it",
+        "G124 independently validated the G122 release trust-boundary closure at ddb1f864bf5d4701729eb8303ec43315b206f0a0 with 129/129 affected tests",
+        "No valid G068 or G095 numbered handoff folder exists; aborted, incomplete, or unvalidated candidate records are not counted as closure evidence"
       ],
-      "gap": "G060 was explicitly standard and single-pass, not the contract-required Deep Security Scan with repeated independent discovery. It predates the G061 remediation and G063 final test commit, and no post-fix deep-scan canonical closure or hardening portfolio exists for f1275a58849fc9309ffc8c900d98c97a4e964d53.",
-      "recommended_remediation": "Run one fresh no-edit repository-wide Deep Security Scan with repeated independent discovery against the frozen f1275a58849fc9309ffc8c900d98c97a4e964d53 behavioral baseline, then validate and close any new reportable finding before public release-candidate construction.",
+      "gap": "The contract literally requires a completed repository-wide Codex Security Deep Security Scan against the clean final pre-RC source, including repeated independent discovery, a canonical report and coverage ledger, a hardening portfolio when findings exist, and post-fix closure for every reportable finding. The later completed scans are Standard or diff reviews, and no complete Deep result or post-remediation repository-wide Deep closure exists for the clean G125 reconciliation state retaining behavioral baseline ddb1f864bf5d4701729eb8303ec43315b206f0a0.",
+      "recommended_remediation": "Run G126 as one fresh no-edit repository-wide Deep Security Scan against the exact clean G125 reconciliation commit identified by the G125 handoff. Preserve complete canonical artifacts and explicit incomplete coverage; if it reports findings, remediate and independently close them before authorizing candidate construction.",
       "closure_evidence": [
         "Exact clean pre-RC source commit and complete canonical Codex Security Deep Security Scan artifacts.",
         "Explicit deferred/incomplete coverage ledger.",
+        "Hardening portfolio when reportable findings exist.",
         "Post-fix validation and attack-path closure for every reportable finding before release-candidate construction."
       ],
       "waiver_permitted": false
@@ -1025,15 +1033,16 @@
       "area": "Release engineering and supply-chain integrity",
       "status": "PARTIAL",
       "priority": "P1",
-      "summary": "Installed-only NSIS construction produced an exact clean-source internal artifact with installed-payload readback, but no signed public candidate or candidate manifest exists.",
+      "summary": "Earlier installed-only NSIS evidence remains useful for lifecycle behavior and current release construction is strongly provenance-gated, but no post-G124 signed public candidate or immutable candidate inventory exists.",
       "evidence": [
         "NSIS-only Tauri and release scripts",
         "Signed application capture retained as installer evidence",
         "One-artifact manifest, checksum, and release tests",
         "G049 exact unsigned internal v0.9.5/v0.9.6 installer hashes and installed payload readback",
-        "G050 exact clean-source v0.9.7 installer name, size, SHA-256, signing state, source commit, and installed payload hashes"
+        "G050 exact clean-source v0.9.7 installer name, size, SHA-256, signing state, source commit, and installed payload hashes",
+        "G115–G124 release-input provenance, authenticated toolchain, authority, signing-session, and failure-atomic publication controls"
       ],
-      "gap": "The accepted v0.9.7 artifact is unsigned internal evidence, not a public-trust candidate, and has no candidate manifest.",
+      "gap": "The accepted v0.9.7 installer predates the current source and trust-boundary changes. No final candidate has been constructed, inventoried, hashed, signed, or installed for current payload-identity readback.",
       "recommended_remediation": "Construct one bounded public-RC installer after upstream blockers close.",
       "closure_evidence": [
         "Candidate installer inventory.",
@@ -1046,14 +1055,15 @@
       "area": "Release engineering and supply-chain integrity",
       "status": "FAIL",
       "priority": "P1",
-      "summary": "The public-trust gate exists, but no publicly trusted signer is configured.",
+      "summary": "The public-trust architecture and authorization boundary are independently validated, but the required public signer/authority material is not provisioned for a live release-host preflight.",
       "evidence": [
         "docs/windows-release-signing.md states the existing certificate is self-signed",
         "Public-RC script rejects non-public trust before build",
-        "G053 public-RC signer preflight exits non-zero because no signing provider is configured"
+        "G053 public-RC signer preflight exits non-zero because no signing provider is configured",
+        "G120 fixed-anchor authority architecture and G123/G124 private canonical signing-session closure"
       ],
-      "gap": "No approved public signer can produce a passing public v1 candidate.",
-      "recommended_remediation": "Obtain an approved public signing service or certificate without weakening the gate.",
+      "gap": "No approved publicly trusted signer/provider, fixed release-authority key deployment, current signed authorization bundle, and credential access are jointly provisioned on a controlled release host; no live public-chain/RFC 3161 preflight exists.",
+      "recommended_remediation": "Provision the controlled release host and approved public signer/authority material without weakening the fixed-anchor and private-session gates, then run a signer-only no-product preflight before candidate construction.",
       "closure_evidence": [
         "Public-chain preflight.",
         "Per-PE Authenticode and RFC 3161 verification."
@@ -1065,14 +1075,15 @@
       "area": "Release engineering and supply-chain integrity",
       "status": "PARTIAL",
       "priority": "P1",
-      "summary": "Manifest and checksum generation is strong, but there is no candidate metadata to verify.",
+      "summary": "Manifest/checksum generation and publication integrity are strongly gated through G124, but there is no final candidate metadata to recompute independently.",
       "evidence": [
         "Release manifest and SHA256SUMS generation",
         "Post-publication hash verification",
         "Source revalidation tests",
-        "Traceable-build metadata wording"
+        "Traceable-build metadata wording",
+        "G115–G124 authenticated release-input, signing-plan, candidate-integrity, and failure-atomic publication validation"
       ],
-      "gap": "No actual candidate metadata or independent publication channel exists.",
+      "gap": "No actual final-candidate metadata exists, and no independent publication channel has recomputed names, sizes, hashes, source commit, profile, signer, timestamp, or installed payload inventory.",
       "recommended_remediation": "Generate and independently verify RC metadata after artifact construction.",
       "closure_evidence": [
         "Cross-check of names, sizes, hashes, commit, version, profile, signer, and inventory."
@@ -1084,13 +1095,13 @@
       "area": "Release engineering and supply-chain integrity",
       "status": "FAIL",
       "priority": "P1",
-      "summary": "Focused installed lifecycle acceptance is complete, but the final stable-candidate, publication, authorization, and withdrawal procedure is absent.",
+      "summary": "Earlier focused installed lifecycle acceptance remains behaviorally useful, but the current final candidate, publication, owner authorization, and withdrawal procedure have not been executed.",
       "evidence": [
         "Partial release notes and signing verification guidance",
         "G049 predecessor upgrade evidence",
         "G050 clean-state first run, concurrent launch, process cleanup, startup-failure recovery, reset/restore, reinstall, both uninstall variants, and project preservation"
       ],
-      "gap": "No frozen signed final-RC lifecycle acceptance across the declared support matrix, GitHub Release contents procedure, stable authorization checklist, or rollback/withdrawal procedure exists.",
+      "gap": "No frozen signed final-RC has completed clean install, first run, supported upgrade, reset/recovery, uninstall, state-retention/removal, rollback/withdrawal, GitHub Release contents rehearsal, or final owner authorization across the declared support matrix.",
       "recommended_remediation": "Define the installed-edition release playbook and execute it against the final RC.",
       "closure_evidence": [
         "Dated final-candidate lifecycle acceptance.",
@@ -1162,14 +1173,14 @@
       "area": "Documentation, legal, and support readiness",
       "status": "PARTIAL",
       "priority": "P1",
-      "summary": "The conservative installed matrix now includes the accepted 100% scaling and enforced 960x640 minimum; representative final-candidate coverage remains incomplete.",
+      "summary": "Current guidance declares the installed x64 NSIS, WebView2, 100% scaling, and 960x640 boundaries; representative post-G124 final-candidate environment coverage remains incomplete.",
       "evidence": [
         "docs/supported-environments.md",
         "frontend/src-tauri/tauri.conf.json NSIS, currentUser, x64 release, updater, WebView2 default, and 960 x 640 window configuration",
         "docs/release/g050-installed-lifecycle-acceptance.md Windows 11 Pro x64 build 26200 VMware baseline",
         "docs/release/g052-accessibility-window-management.md 100% scaling and minimum-window acceptance"
       ],
-      "gap": "No frozen candidate has completed a representative multi-environment matrix beyond the one accepted Windows 11 Pro VMware configuration.",
+      "gap": "No current frozen candidate has completed dated install/runtime/identity/lifecycle acceptance on every environment proposed for final support beyond the historical Windows 11 Pro VMware baseline.",
       "recommended_remediation": "Repeat the frozen candidate on every environment proposed for final support.",
       "closure_evidence": [
         "Published matrix.",
@@ -1182,7 +1193,7 @@
       "area": "Documentation, legal, and support readiness",
       "status": "PARTIAL",
       "priority": "P1",
-      "summary": "Primary licensing and a locked Windows runtime notice inventory are published, but final artifact notice readback and owner legal sign-off remain.",
+      "summary": "Primary licensing and the current locked Windows runtime notice inventory are published and validated, but final artifact notice/license readback and owner/legal sign-off remain.",
       "evidence": [
         "LICENSE",
         "README.md licensing summary",
@@ -1190,9 +1201,11 @@
         "docs/release/third-party-runtime-inventory.json",
         "scripts/release/generate-third-party-inventory.mjs",
         "third_party/rust/glib-0.18.5-patched provenance and licenses",
-        "G050 PyInstaller and installed payload readback"
+        "G050 PyInstaller and installed payload readback",
+        "G078–G080 reproducible 14-package Python runtime inventory and hash-verified build-input evidence",
+        "Current inventory: 4 frontend, 14 Python, 225 Rust, and 7 bundled native runtime entries"
       ],
-      "gap": "No frozen installer has received notice/license readback, and no maintainer or legal owner has signed off the complete obligation set.",
+      "gap": "No current frozen installer has received notice/license readback against its exact payload inventory, and no maintainer or legal owner has signed off the complete obligation set.",
       "recommended_remediation": "Review the frozen artifact against the generated inventory, include every required notice with the shipped product, and record owner or legal sign-off.",
       "closure_evidence": [
         "Maintainer or legal sign-off.",

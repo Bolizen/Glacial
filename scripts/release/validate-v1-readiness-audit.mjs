@@ -143,10 +143,10 @@ const expectedStageDecisions = {
   public_release_candidate: "BLOCKED",
   stable_publication: "BLOCKED",
   release_authorization: "NONE",
-  next_handoff: "G066 — Glacial Frozen-Baseline Deep Security Scan and Closure",
+  next_handoff: "G126 — Final-Baseline Deep Security Scan and Closure",
 };
 if (JSON.stringify(snapshot.stage_decisions) !== JSON.stringify(expectedStageDecisions)) {
-  fail("G065 stage decisions are missing or incorrect");
+  fail("current stage decisions are missing or incorrect");
 }
 for (const line of [
   "**SOURCE FREEZE: AUTHORIZED.**",
