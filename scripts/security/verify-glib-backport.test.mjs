@@ -5,7 +5,12 @@ import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseTomlData } from "./toml-data.mjs";
-import { canonicalPathsEqual, sameFilesystemObject } from "./path-identity.mjs";
+import {
+  canonicalPathsEqual,
+  captureTrustedCargoExecutable,
+  revalidateTrustedCargoExecutable,
+  sameFilesystemObject,
+} from "./path-identity.mjs";
 
 const REPOSITORY = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const VERIFIER = join(REPOSITORY, "scripts", "security", "verify-glib-backport.mjs");
@@ -32,6 +37,117 @@ function withFixture(run) {
   const root = fixture();
   try { return run(root); } finally { rmSync(root, { recursive: true, force: true }); }
 }
+
+function filesystemMetadata(kind, device, inode) {
+  return {
+    dev: BigInt(device),
+    ino: BigInt(inode),
+    isDirectory: () => kind === "directory",
+    isFile: () => kind === "file",
+    isSymbolicLink: () => kind === "symlink",
+  };
+}
+
+function simulatedCargoTrustLayout() {
+  const cargoHome = resolve(TEST_ROOT, "simulated-cargo-home");
+  const bin = join(cargoHome, "bin");
+  const cargo = join(bin, process.platform === "win32" ? "cargo.exe" : "cargo");
+  const rustup = join(bin, process.platform === "win32" ? "rustup.exe" : "rustup");
+  const state = {
+    binKind: "directory",
+    cargoLinkInode: 3,
+    cargoTargetInode: 4,
+    linkTarget: process.platform === "win32" ? "rustup.exe" : "rustup",
+    rustupTargetInode: 4,
+  };
+  const inspectLink = (path) => {
+    if (path === cargoHome) return filesystemMetadata("directory", 1, 1);
+    if (path === bin) return filesystemMetadata(state.binKind, 1, 2);
+    if (path === cargo) return filesystemMetadata("symlink", 1, state.cargoLinkInode);
+    if (path === rustup) return filesystemMetadata("file", 1, state.rustupTargetInode);
+    throw new Error(`unexpected simulated lstat path: ${path}`);
+  };
+  const inspectTarget = (path) => {
+    if (path === cargo) return filesystemMetadata("file", 1, state.cargoTargetInode);
+    if (path === rustup) return filesystemMetadata("file", 1, state.rustupTargetInode);
+    throw new Error(`unexpected simulated stat path: ${path}`);
+  };
+  const readLink = (path) => {
+    if (path === cargo) return state.linkTarget;
+    throw new Error(`unexpected simulated readlink path: ${path}`);
+  };
+  return { cargoHome, cargo, inspectLink, inspectTarget, readLink, state };
+}
+
+test("trusted rustup Cargo symlink proxy resolves to the authenticated sibling rustup object", () => {
+  const layout = simulatedCargoTrustLayout();
+  const record = captureTrustedCargoExecutable(layout.cargoHome, layout);
+  assert.equal(record.path, layout.cargo);
+  assert.equal(record.kind, "rustup-symlink-proxy");
+  assert.equal(revalidateTrustedCargoExecutable(record, layout.cargoHome, layout), layout.cargo);
+});
+
+test("real Unix rustup Cargo symlink proxy is accepted without allowing parent indirection", { skip: process.platform === "win32" }, () => {
+  mkdirSync(TEST_ROOT, { recursive: true });
+  const cargoHome = mkdtempSync(join(TEST_ROOT, "rustup-home-"));
+  const bin = join(cargoHome, "bin");
+  const rustup = join(bin, "rustup");
+  const cargo = join(bin, "cargo");
+  try {
+    mkdirSync(bin);
+    copyFileSync(process.execPath, rustup);
+    chmodSync(rustup, 0o755);
+    symlinkSync("rustup", cargo, "file");
+    const record = captureTrustedCargoExecutable(cargoHome);
+    assert.equal(record.kind, "rustup-symlink-proxy");
+    assert.equal(record.path, cargo);
+    assert.equal(revalidateTrustedCargoExecutable(record, cargoHome), cargo);
+  } finally {
+    rmSync(cargoHome, { recursive: true, force: true });
+  }
+});
+
+test("Cargo symlink redirected to an arbitrary executable is rejected", () => {
+  const layout = simulatedCargoTrustLayout();
+  layout.state.cargoTargetInode = 99;
+  assert.throws(
+    () => captureTrustedCargoExecutable(layout.cargoHome, layout),
+    /must resolve to the sibling rustup executable object/,
+  );
+});
+
+test("unexpected intermediate symlink in the trusted Cargo path is rejected", () => {
+  const layout = simulatedCargoTrustLayout();
+  layout.state.linkTarget = join("proxy-chain", process.platform === "win32" ? "rustup.exe" : "rustup");
+  assert.throws(
+    () => captureTrustedCargoExecutable(layout.cargoHome, layout),
+    /trusted Cargo symlink proxy must point directly to the sibling rustup executable/,
+  );
+  layout.state.linkTarget = process.platform === "win32" ? "rustup.exe" : "rustup";
+  layout.state.binKind = "symlink";
+  assert.throws(
+    () => captureTrustedCargoExecutable(layout.cargoHome, layout),
+    /trusted Cargo executable parent path must not contain symbolic links/,
+  );
+});
+
+test("trusted Cargo proxy or target replacement after selection is rejected", () => {
+  const layout = simulatedCargoTrustLayout();
+  const record = captureTrustedCargoExecutable(layout.cargoHome, layout);
+  layout.state.rustupTargetInode = 5;
+  layout.state.cargoTargetInode = 5;
+  assert.throws(
+    () => revalidateTrustedCargoExecutable(record, layout.cargoHome, layout),
+    /trusted Cargo executable identity changed after selection/,
+  );
+  layout.state.rustupTargetInode = 4;
+  layout.state.cargoTargetInode = 4;
+  layout.state.cargoLinkInode = 6;
+  assert.throws(
+    () => revalidateTrustedCargoExecutable(record, layout.cargoHome, layout),
+    /trusted Cargo executable identity changed after selection/,
+  );
+});
 
 test("valid semantic Cargo configuration and complete vendored tree pass", () => withFixture((root) => {
   const result = verify(root);

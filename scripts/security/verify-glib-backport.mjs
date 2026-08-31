@@ -5,7 +5,12 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, parse as parsePath, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseTomlData } from "./toml-data.mjs";
-import { canonicalPathsEqual, sameFilesystemObject } from "./path-identity.mjs";
+import {
+  canonicalPathsEqual,
+  captureTrustedCargoExecutable,
+  revalidateTrustedCargoExecutable,
+  sameFilesystemObject,
+} from "./path-identity.mjs";
 import {
   assertAuthenticatedReleaseTool,
   assertCurrentReleaseAuthority,
@@ -143,17 +148,21 @@ function trustedCargoExecutable(cargoHome) {
     assertCurrentReleaseAuthority(authority, { profile: process.env.GLACIAL_RELEASE_PROFILE });
     const tools = authenticateReleaseTools(authority, { node: process.execPath, cargo: process.env.CARGO });
     verifyAuthorizedReleaseCheckout(authority, tools.git, repoRoot);
-    return assertAuthenticatedReleaseTool(tools.cargo);
+    return {
+      path: assertAuthenticatedReleaseTool(tools.cargo),
+      revalidate: () => assertAuthenticatedReleaseTool(tools.cargo),
+    };
   }
-  const parts = [cargoHome, resolve(cargoHome, "bin"), resolve(cargoHome, "bin", process.platform === "win32" ? "cargo.exe" : "cargo")];
-  for (const [index, path] of parts.entries()) {
-    let metadata;
-    try { metadata = lstatSync(path); } catch { fail("the trusted Cargo executable was not found in the trusted Cargo home"); }
-    if (metadata.isSymbolicLink()) fail("the trusted Cargo executable path must not contain symbolic links");
-    const isExecutable = index === parts.length - 1;
-    if (isExecutable ? !metadata.isFile() : !metadata.isDirectory()) fail("the trusted Cargo executable path has an unexpected type");
-  }
-  return parts.at(-1);
+  let record;
+  try { record = captureTrustedCargoExecutable(cargoHome); }
+  catch (error) { fail(error.message); }
+  return {
+    path: record.path,
+    revalidate: () => {
+      try { return revalidateTrustedCargoExecutable(record, cargoHome); }
+      catch (error) { fail(error.message); }
+    },
+  };
 }
 
 function verifyEffectiveCargoResolution(cargoHome) {
@@ -164,7 +173,8 @@ function verifyEffectiveCargoResolution(cargoHome) {
   }
   const cwd = mkdtempSync(join(boundaryRoot, "run-"));
   try {
-    const result = spawnSync(trustedCargoExecutable(cargoHome), [
+    const cargo = trustedCargoExecutable(cargoHome);
+    const result = spawnSync(cargo.revalidate(), [
       "metadata",
       "--manifest-path", resolve(tauriRoot, "Cargo.toml"),
       "--locked",
