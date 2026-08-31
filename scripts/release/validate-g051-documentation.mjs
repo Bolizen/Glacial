@@ -72,6 +72,7 @@ const requiredDocuments = [
   "docs/supported-environments.md",
   "docs/privacy-and-network.md",
   "docs/support.md",
+  "docs/release/security-validation-policy.md",
   "SECURITY.md",
   "THIRD_PARTY_NOTICES.md",
 ];
@@ -119,6 +120,13 @@ const requiredPhrases = new Map([
     "14 calendar days",
     "security",
     "Modified, copied, relocated",
+  ]],
+  ["docs/release/security-validation-policy.md", [
+    "Level 1 — Routine validation",
+    "Level 2 — Security-targeted validation",
+    "Level 3 — Broad / Deep validation",
+    "What concrete risk are we trying to detect?",
+    "Stopping the visible interaction alone is not proof of cancellation",
   ]],
   ["SECURITY.md", [
     "https://github.com/Bolizen/Glacial/security/advisories/new",

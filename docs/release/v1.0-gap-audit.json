@@ -2,8 +2,8 @@
   "schema_version": "1.0.0",
   "product": "Glacial",
   "audited_version": "0.9.12",
-  "audited_commit": "ddb1f864bf5d4701729eb8303ec43315b206f0a0",
-  "generated_at_utc": "2026-08-29T13:02:20Z",
+  "audited_commit": "0fc07765b34e053ed32378cd9ef4685a8cfd0fe5",
+  "generated_at_utc": "2026-08-31T03:47:20Z",
   "overall_verdict": "NOT READY",
   "scope_decision": "Glacial v1 supports only the installed Windows x64 NSIS edition; the retired portable edition does not close any installed lifecycle or release requirement.",
   "stage_decisions": {
@@ -12,7 +12,7 @@
     "public_release_candidate": "BLOCKED",
     "stable_publication": "BLOCKED",
     "release_authorization": "NONE",
-    "next_handoff": "G126 — Final-Baseline Deep Security Scan and Closure"
+    "next_handoff": "G133 — Controlled Release Signer Preflight"
   },
   "classification_changes": [
     {
@@ -113,21 +113,21 @@
     },
     {
       "id": "V1-SEC-007",
-      "from": "FAIL",
-      "to": "PARTIAL",
-      "reason": "G060 produced a complete standard single-pass whole-repository threat model, coverage ledger, validation, attack-path analysis, canonical report, and three validated findings; G061 remediated all three and G062/G063 verified the affected and full backend test contracts. The permanent Deep Security Scan requirement remains incomplete because repeated independent discovery and post-fix deep-scan closure against the final pre-RC baseline have not occurred."
+      "from": "PARTIAL",
+      "to": "PASS",
+      "reason": "G132 replaces the internal tool-specific Deep gate with an evidence-based proportional contract. G091/G114/G117/G119 provide applicable broad Standard evidence; G092–G124 remediate and independently close their findings; and G131 proportionally closes G130's only canonical finding and the only post-G124 security-sensitive source delta at 0fc07765b34e053ed32378cd9ef4685a8cfd0fe5. Failed and partial Deep runs remain explicitly incomplete and are not counted as clean evidence."
     }
   ],
   "status_counts": {
-    "PASS": 51,
-    "PARTIAL": 8,
+    "PASS": 52,
+    "PARTIAL": 7,
     "FAIL": 2,
     "UNKNOWN": 0,
     "NOT_APPLICABLE": 0
   },
   "priority_counts": {
     "P0": 0,
-    "P1": 10,
+    "P1": 9,
     "P2": 0,
     "P3": 0
   },
@@ -965,27 +965,30 @@
     {
       "id": "V1-SEC-007",
       "area": "Security and privacy posture",
-      "status": "PARTIAL",
-      "priority": "P1",
-      "summary": "G066–G124 provide extensive repeated Standard scans, finding remediation, and independent closure, but no completed repository-wide Deep Security Scan exists against the clean final pre-RC repository state.",
+      "status": "PASS",
+      "priority": null,
+      "summary": "The explicit 0fc07765 baseline has defensible broad prior evidence, proportional delta validation, honest coverage accounting, and closure for every reportable finding affecting it.",
       "evidence": [
-        "docs/release/v1.0-readiness-contract.md permanent V1-SEC-007 gate",
-        "G081 and G090 Deep Scan attempts failed before discovery-worker completion and produced no canonical security conclusion",
+        "docs/release/security-validation-policy.md evidence-based Level 1/2/3 contract and documented Deep escalation boundary",
+        "Accepted implementation baseline 0fc07765b34e053ed32378cd9ef4685a8cfd0fe5; only G125 governance documentation and the G131 development-WebView remediation changed after the G124 broad-review baseline",
         "G091 complete Standard scan reconciled 20 candidates into 8 findings with full surface coverage; G092 remediated all eight",
         "G098, G100, G102, and G104 independent diff validations found residual privacy bypasses; G099, G101, G103, G105–G112 iteratively remediated and adversarially checked them",
         "G114 fresh repository-wide Standard scan found five findings; G115/G116 remediated and independently reviewed release provenance",
         "G117 complete 366-file Standard scan found two High release-trust findings; G118 remediated them",
         "G119 found four additional authority/signing findings; G120 remediated them; G122 independently found a remaining signing-capability bypass; G123 remediated it",
         "G124 independently validated the G122 release trust-boundary closure at ddb1f864bf5d4701729eb8303ec43315b206f0a0 with 129/129 affected tests",
-        "No valid G068 or G095 numbered handoff folder exists; aborted, incomplete, or unvalidated candidate records are not counted as closure evidence"
+        "G126 and G129 produced no defensible source coverage; G130 remained canonically failed/partial and preserved one validated finding without converting its partial coverage into clean evidence",
+        "G131 reproduced and closed csf_d9fcf30495c98fe00016b262 with fail-closed configuration, a focused regression, a live hostile-path rerun, a legitimate control, and bounded independent review",
+        "No valid G068 or G095 numbered handoff folder exists; aborted, incomplete, or unvalidated candidate records are not counted as closure evidence",
+        "No repository or external requirement identified by G132 mandates Codex Security Deep mode specifically"
       ],
-      "gap": "The contract literally requires a completed repository-wide Codex Security Deep Security Scan against the clean final pre-RC source, including repeated independent discovery, a canonical report and coverage ledger, a hardening portfolio when findings exist, and post-fix closure for every reportable finding. The later completed scans are Standard or diff reviews, and no complete Deep result or post-remediation repository-wide Deep closure exists for the clean G125 reconciliation state retaining behavioral baseline ddb1f864bf5d4701729eb8303ec43315b206f0a0.",
-      "recommended_remediation": "Run G126 as one fresh no-edit repository-wide Deep Security Scan against the exact clean G125 reconciliation commit identified by the G125 handoff. Preserve complete canonical artifacts and explicit incomplete coverage; if it reports findings, remediate and independently close them before authorizing candidate construction.",
+      "gap": "",
+      "recommended_remediation": "",
       "closure_evidence": [
-        "Exact clean pre-RC source commit and complete canonical Codex Security Deep Security Scan artifacts.",
-        "Explicit deferred/incomplete coverage ledger.",
-        "Hardening portfolio when reportable findings exist.",
-        "Post-fix validation and attack-path closure for every reportable finding before release-candidate construction."
+        "Retain the explicit accepted baseline, applicable broad-evidence rationale, and material-delta ledger.",
+        "Keep failed or partial scans, unreviewed surfaces, unresolved questions, validated findings, and unvalidated candidates distinct.",
+        "Close or legitimately accept every reportable finding affecting the accepted baseline before release-candidate construction.",
+        "Apply Level 1, 2, or 3 validation to future changes and require written justification before broad or Deep rediscovery."
       ],
       "waiver_permitted": false
     },

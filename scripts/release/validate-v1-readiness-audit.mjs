@@ -6,11 +6,13 @@ const contractPath = resolve(root, "docs", "release", "v1.0-readiness-contract.m
 const auditPath = resolve(root, "docs", "release", "v1.0-gap-audit.md");
 const jsonPath = resolve(root, "docs", "release", "v1.0-gap-audit.json");
 const sequencePath = resolve(root, "docs", "release", "v1.0-remediation-sequence.md");
+const securityValidationPolicyPath = resolve(root, "docs", "release", "security-validation-policy.md");
 
 const contract = readFileSync(contractPath, "utf8");
 const audit = readFileSync(auditPath, "utf8");
 const snapshot = JSON.parse(readFileSync(jsonPath, "utf8"));
 const sequence = readFileSync(sequencePath, "utf8");
+const securityValidationPolicy = readFileSync(securityValidationPolicyPath, "utf8");
 
 const idPattern = /^V1-(VER|SCAN|FS|DATA|AGENT|DESKTOP|SEC|REL|DOC|UX)-\d{3}$/;
 const allowedStatuses = new Set(["PASS", "PARTIAL", "FAIL", "UNKNOWN", "NOT_APPLICABLE"]);
@@ -143,7 +145,7 @@ const expectedStageDecisions = {
   public_release_candidate: "BLOCKED",
   stable_publication: "BLOCKED",
   release_authorization: "NONE",
-  next_handoff: "G126 — Final-Baseline Deep Security Scan and Closure",
+  next_handoff: "G133 — Controlled Release Signer Preflight",
 };
 if (JSON.stringify(snapshot.stage_decisions) !== JSON.stringify(expectedStageDecisions)) {
   fail("current stage decisions are missing or incorrect");
@@ -172,7 +174,7 @@ const expectedClassificationChanges = [
   ["V1-REL-001", "PARTIAL", "PASS"],
   ["V1-FS-006", "PARTIAL", "PASS"],
   ["V1-DESKTOP-004", "PARTIAL", "PASS"],
-  ["V1-SEC-007", "FAIL", "PARTIAL"],
+  ["V1-SEC-007", "PARTIAL", "PASS"],
 ];
 const actualClassificationChanges = (snapshot.classification_changes ?? []).map(({ id, from, to }) => [id, from, to]);
 if (JSON.stringify(actualClassificationChanges) !== JSON.stringify(expectedClassificationChanges)) {
@@ -189,6 +191,15 @@ if (commitMatches.length !== 1) fail(`expected one Markdown audited commit, foun
 if (commitMatches[0][1] !== snapshot.audited_commit) fail("Markdown and JSON audited commits differ");
 
 if (!contract.includes(installedOnlyDecision)) fail("readiness contract lacks the permanent installed-only product decision");
+for (const phrase of [
+  "Level 1 — Routine validation",
+  "Level 2 — Security-targeted validation",
+  "Level 3 — Broad / Deep validation",
+  "What concrete risk are we trying to detect?",
+  "G130 demonstrated that interrupting a visible parent turn or waiter",
+]) if (!securityValidationPolicy.includes(phrase)) fail(`security-validation policy lacks ${phrase}`);
+if (!contract.includes("proportional security-validation policy")) fail("V1-SEC-007 does not reference the proportional security-validation policy");
+if (!contract.includes("Failed or zero-coverage scans are never clean evidence")) fail("V1-SEC-007 lacks honest failed-scan semantics");
 const sequenceHeadings = [...sequence.matchAll(/^## (G\d{3}) —/gm)].map((match) => match[1]);
 if (JSON.stringify(sequenceHeadings) !== JSON.stringify(expectedSequenceHeadings)) {
   fail(`remediation heading sequence is ${sequenceHeadings.join(", ")}; expected ${expectedSequenceHeadings.join(", ")}`);

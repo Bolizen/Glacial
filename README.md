@@ -28,6 +28,7 @@ Glacial is an early stage local-first project focused on project scanning, safet
 - [v1.0 readiness contract](docs/release/v1.0-readiness-contract.md)
 - [current v1.0 gap audit](docs/release/v1.0-gap-audit.md)
 - [machine-readable audit snapshot](docs/release/v1.0-gap-audit.json)
+- [proportional security-validation policy](docs/release/security-validation-policy.md)
 - [v1.0 owner decisions](docs/release/v1.0-owner-decisions.md)
 - [Agent Remediation format policy](docs/release/agent-remediation-format-policy.md)
 - [Data privacy and disclosure boundary](docs/release/data-privacy-boundary.md)
