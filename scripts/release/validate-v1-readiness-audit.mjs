@@ -145,7 +145,7 @@ const expectedStageDecisions = {
   public_release_candidate: "BLOCKED",
   stable_publication: "BLOCKED",
   release_authorization: "NONE",
-  next_handoff: "G134 — Controlled Release Host and Signer Provisioning",
+  next_handoff: "G135 — Approved Release-Authority Anchor Delivery",
 };
 if (JSON.stringify(snapshot.stage_decisions) !== JSON.stringify(expectedStageDecisions)) {
   fail("current stage decisions are missing or incorrect");
