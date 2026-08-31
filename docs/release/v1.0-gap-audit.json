@@ -3,7 +3,7 @@
   "product": "Glacial",
   "audited_version": "0.9.12",
   "audited_commit": "0fc07765b34e053ed32378cd9ef4685a8cfd0fe5",
-  "generated_at_utc": "2026-08-31T03:47:20Z",
+  "generated_at_utc": "2026-08-31T14:38:48Z",
   "overall_verdict": "NOT READY",
   "scope_decision": "Glacial v1 supports only the installed Windows x64 NSIS edition; the retired portable edition does not close any installed lifecycle or release requirement.",
   "stage_decisions": {
@@ -12,7 +12,7 @@
     "public_release_candidate": "BLOCKED",
     "stable_publication": "BLOCKED",
     "release_authorization": "NONE",
-    "next_handoff": "G133 — Controlled Release Signer Preflight"
+    "next_handoff": "G134 — Controlled Release Host and Signer Provisioning"
   },
   "classification_changes": [
     {
@@ -1058,15 +1058,16 @@
       "area": "Release engineering and supply-chain integrity",
       "status": "FAIL",
       "priority": "P1",
-      "summary": "The public-trust architecture and authorization boundary are independently validated, but the required public signer/authority material is not provisioned for a live release-host preflight.",
+      "summary": "The public-trust architecture and authorization boundary are independently validated, but G133 confirms that the inspected commit is not on remote main and the required public signer/authority material is not provisioned on this host.",
       "evidence": [
         "docs/windows-release-signing.md states the existing certificate is self-signed",
         "Public-RC script rejects non-public trust before build",
         "G053 public-RC signer preflight exits non-zero because no signing provider is configured",
-        "G120 fixed-anchor authority architecture and G123/G124 private canonical signing-session closure"
+        "G120 fixed-anchor authority architecture and G123/G124 private canonical signing-session closure",
+        "G133 unchanged signing-surface delta, 14/14 focused fail-closed tests, and pre-signing rejection on an unprovisioned host"
       ],
-      "gap": "No approved publicly trusted signer/provider, fixed release-authority key deployment, current signed authorization bundle, and credential access are jointly provisioned on a controlled release host; no live public-chain/RFC 3161 preflight exists.",
-      "recommended_remediation": "Provision the controlled release host and approved public signer/authority material without weakening the fixed-anchor and private-session gates, then run a signer-only no-product preflight before candidate construction.",
+      "gap": "The inspected commit is not synchronized to remote main, and no approved publicly trusted signer/provider, fixed release-authority key deployment, current signed authorization bundle, and credential access are jointly provisioned on a controlled release host; no live public-chain/RFC 3161 preflight exists.",
+      "recommended_remediation": "Synchronize the approved immutable commit, provision the controlled release host and approved public signer/authority material without weakening the fixed-anchor and private-session gates, then run a signer-only no-product preflight before candidate construction.",
       "closure_evidence": [
         "Public-chain preflight.",
         "Per-PE Authenticode and RFC 3161 verification."
